@@ -63,6 +63,72 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ),
         ApiCatalogEntry(
             method="GET",
+            path="/api/v1/agents",
+            authorization="bearer_api_key",
+            summary="List TerraSatch agents in the authenticated organization.",
+        ),
+        ApiCatalogEntry(
+            method="POST",
+            path="/api/v1/agents",
+            authorization="bearer_api_key",
+            summary="Create a site-scoped TerraSatch processing agent.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
+            path="/api/v1/channels",
+            authorization="bearer_api_key",
+            summary="List logical monitored channels.",
+        ),
+        ApiCatalogEntry(
+            method="POST",
+            path="/api/v1/channels",
+            authorization="bearer_api_key",
+            summary="Create a logical monitored channel.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
+            path="/api/v1/callsigns",
+            authorization="bearer_api_key",
+            summary="List configured callsigns and aliases.",
+        ),
+        ApiCatalogEntry(
+            method="POST",
+            path="/api/v1/callsigns",
+            authorization="bearer_api_key",
+            summary="Create a tenant-owned callsign.",
+        ),
+        ApiCatalogEntry(
+            method="POST",
+            path="/api/v1/transmissions",
+            authorization="bearer_api_key",
+            summary="Ingest authorized text representing one radio transmission.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
+            path="/api/v1/transmissions",
+            authorization="bearer_api_key",
+            summary="List preserved source transmissions.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
+            path="/api/v1/transcripts",
+            authorization="bearer_api_key",
+            summary="List preserved transcripts derived from transmissions.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
+            path="/api/v1/events",
+            authorization="bearer_api_key",
+            summary="List structured operational events linked to source records.",
+        ),
+        ApiCatalogEntry(
+            method="WS",
+            path="/ws/v1/events",
+            authorization="bearer_api_key",
+            summary="Tenant-scoped realtime event subscription; token is sent in the first message.",
+        ),
+        ApiCatalogEntry(
+            method="GET",
             path="/api/v1/api-keys",
             authorization="bearer_api_key",
             summary="List non-secret API-key metadata for the organization.",
@@ -144,8 +210,12 @@ async def build_quality_report(settings: Settings) -> QualityReport:
         ),
         ComponentStatus(
             name="intelligence",
-            status="disabled",
-            detail=f"{settings.intelligence_provider} is not activated in the foundation release",
+            status="disabled" if settings.intelligence_provider != "deterministic" else "healthy",
+            detail=(
+                f"{settings.intelligence_provider} is not activated in this release"
+                if settings.intelligence_provider != "deterministic"
+                else "deterministic TerraEngine provider available"
+            ),
         ),
     ]
     is_passing = all(item.status == "healthy" for item in components if item.status != "disabled")
