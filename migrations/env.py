@@ -14,8 +14,9 @@ from terrasatch.auth import models as auth_models
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.identity import models as identity_models
+from terrasatch.radio import models as radio_models
 
-_ = (auth_models, identity_models)
+_ = (auth_models, identity_models, radio_models)
 
 config = context.config
 
