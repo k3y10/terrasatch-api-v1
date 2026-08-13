@@ -14,10 +14,22 @@ from terrasatch.edge.client import EdgeApiClient
 from terrasatch.edge.rtl import RtlCaptureConfig, capture_rtl_fm, probe_rtl_device
 from terrasatch.edge.tools import inspect_edge_tools
 
-edge_app = typer.Typer(help="Operate receive-only field edge tools.", no_args_is_help=True)
-rtl_app = typer.Typer(help="Detect and capture from RTL-SDR compatible receivers.", no_args_is_help=True)
-audio_app = typer.Typer(help="Inspect locally captured receive audio.", no_args_is_help=True)
-api_app = typer.Typer(help="Verify the edge machine can reach the TerraSatch API.", no_args_is_help=True)
+edge_app = typer.Typer(
+    help="Operate receive-only field edge tools.",
+    no_args_is_help=True,
+)
+rtl_app = typer.Typer(
+    help="Detect and capture from RTL-SDR compatible receivers.",
+    no_args_is_help=True,
+)
+audio_app = typer.Typer(
+    help="Inspect locally captured receive audio.",
+    no_args_is_help=True,
+)
+api_app = typer.Typer(
+    help="Verify the edge machine can reach the TerraSatch API.",
+    no_args_is_help=True,
+)
 
 
 def register_edge_cli(root: typer.Typer) -> None:
@@ -41,12 +53,17 @@ def edge_doctor() -> None:
         marker = "OK" if item.available else "MISSING"
         location = item.path or "not found on PATH"
         typer.echo(f"[{marker}] {item.name}: {location} — {item.required_for}")
-    typer.echo("Receive-only boundary: no TerraSatch edge command keys or transmits a radio.")
+    typer.echo(
+        "Receive-only boundary: no TerraSatch edge command keys or transmits a radio."
+    )
 
 
 @rtl_app.command("devices")
 def rtl_devices(
-    device: Annotated[str | None, typer.Option("--device", help="RTL-SDR device index or serial.")] = None,
+    device: Annotated[
+        str | None,
+        typer.Option("--device", help="RTL-SDR device index or serial."),
+    ] = None,
 ) -> None:
     """Run a short bounded rtl_test probe and show receiver startup diagnostics."""
 
@@ -58,25 +75,74 @@ def rtl_devices(
 
 @rtl_app.command("capture")
 def rtl_capture(
-    frequency_hz: Annotated[int, typer.Option("--frequency-hz", min=1, help="Receive frequency in Hz.")],
-    output: Annotated[Path, typer.Option("--output", help="Destination mono WAV path.")],
-    seconds: Annotated[float, typer.Option("--seconds", min=0.5, max=120)] = 10.0,
-    device: Annotated[str | None, typer.Option("--device", help="RTL-SDR device index or serial.")] = None,
-    modulation: Annotated[str, typer.Option("--modulation", help="Receive demodulation: fm, am, or wbfm.")] = "fm",
-    gain_db: Annotated[float | None, typer.Option("--gain-db", help="Optional manual receive gain in dB.")] = None,
-    squelch: Annotated[int | None, typer.Option("--squelch", min=0)] = None,
+    frequency_hz: Annotated[
+        int,
+        typer.Option(
+            "--frequency-hz",
+            min=1,
+            help="Receive frequency in Hz.",
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Destination mono WAV path."),
+    ],
+    seconds: Annotated[
+        float,
+        typer.Option("--seconds", min=0.5, max=120),
+    ] = 10.0,
+    device: Annotated[
+        str | None,
+        typer.Option("--device", help="RTL-SDR device index or serial."),
+    ] = None,
+    modulation: Annotated[
+        str,
+        typer.Option(
+            "--modulation",
+            help="Receive demodulation: fm, am, or wbfm.",
+        ),
+    ] = "fm",
+    gain_db: Annotated[
+        float | None,
+        typer.Option("--gain-db", help="Optional manual receive gain in dB."),
+    ] = None,
+    squelch: Annotated[
+        int | None,
+        typer.Option("--squelch", min=0),
+    ] = None,
+    ppm: Annotated[
+        int | None,
+        typer.Option(
+            "--ppm",
+            min=-250,
+            max=250,
+            help="Optional RTL-SDR oscillator correction in parts per million.",
+        ),
+    ] = None,
     submit_text: Annotated[
         str | None,
         typer.Option(
             "--submit-text",
-            help="Operator-supplied transcript to submit after capture; this is not automatic STT.",
+            help=(
+                "Operator-supplied transcript to submit after capture; "
+                "this is not automatic STT."
+            ),
         ),
     ] = None,
-    site: Annotated[UUID | None, typer.Option("--site", help="Site UUID required with --submit-text.")] = None,
+    site: Annotated[
+        UUID | None,
+        typer.Option(
+            "--site",
+            help="Site UUID required with --submit-text.",
+        ),
+    ] = None,
     callsign: Annotated[str | None, typer.Option("--callsign")] = None,
-    api_base_url: Annotated[str | None, typer.Option("--api-base-url")] = None,
+    api_base_url: Annotated[
+        str | None,
+        typer.Option("--api-base-url"),
+    ] = None,
 ) -> None:
-    """Capture receive-side SDR audio and optionally bridge operator text into the production API."""
+    """Capture SDR audio and optionally bridge reviewed text into production ingest."""
 
     if submit_text and site is None:
         raise typer.BadParameter("--site is required when --submit-text is used")
@@ -87,6 +153,7 @@ def rtl_capture(
         modulation=modulation,
         gain_db=gain_db,
         squelch=squelch,
+        ppm=ppm,
     )
     try:
         captured = capture_rtl_fm(config, output)
@@ -104,14 +171,20 @@ def rtl_capture(
                 source="edge-rtl",
             )
             event_count = len(result.get("events", []))
-            typer.echo(f"Submitted operator transcript through production ingest; events={event_count}")
+            typer.echo(
+                "Submitted operator transcript through production ingest; "
+                f"events={event_count}"
+            )
     except Exception as error:
         _fail(error)
 
 
 @audio_app.command("inspect")
 def audio_inspect(
-    path: Annotated[Path, typer.Argument(help="PCM WAV capture to inspect.")],
+    path: Annotated[
+        Path,
+        typer.Argument(help="PCM WAV capture to inspect."),
+    ],
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Inspect WAV duration, format, RMS, and peak without external audio libraries."""
@@ -151,19 +224,32 @@ def api_check(
         _fail(error)
         return
     scopes = payload.get("scopes", [])
+    scope_text = ", ".join(scopes) if isinstance(scopes, list) else scopes
+    ready = isinstance(scopes, list) and (
+        "edge:ingest" in scopes or "admin" in scopes
+    )
     typer.echo(f"organization_id: {payload.get('organization_id')}")
-    typer.echo(f"scopes: {', '.join(scopes) if isinstance(scopes, list) else scopes}")
-    typer.echo(f"edge:ingest: {'ready' if isinstance(scopes, list) and ('edge:ingest' in scopes or 'admin' in scopes) else 'missing'}")
+    typer.echo(f"scopes: {scope_text}")
+    typer.echo(f"edge:ingest: {'ready' if ready else 'missing'}")
 
 
 @edge_app.command("submit-text")
 def submit_text(
-    site: Annotated[UUID, typer.Option("--site", help="Destination site UUID.")],
-    text: Annotated[str, typer.Option("--text", help="Operator-reviewed transcript text.")],
+    site: Annotated[
+        UUID,
+        typer.Option("--site", help="Destination site UUID."),
+    ],
+    text: Annotated[
+        str,
+        typer.Option("--text", help="Operator-reviewed transcript text."),
+    ],
     callsign: Annotated[str | None, typer.Option("--callsign")] = None,
     agent: Annotated[UUID | None, typer.Option("--agent")] = None,
     channel: Annotated[UUID | None, typer.Option("--channel")] = None,
-    source_message_id: Annotated[str | None, typer.Option("--source-message-id")] = None,
+    source_message_id: Annotated[
+        str | None,
+        typer.Option("--source-message-id"),
+    ] = None,
     base_url: Annotated[str | None, typer.Option("--base-url")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -185,6 +271,11 @@ def submit_text(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         transmission = payload.get("transmission", {})
-        typer.echo(f"transmission_id: {transmission.get('id') if isinstance(transmission, dict) else transmission}")
+        transmission_id = (
+            transmission.get("id")
+            if isinstance(transmission, dict)
+            else transmission
+        )
+        typer.echo(f"transmission_id: {transmission_id}")
         typer.echo(f"events: {len(payload.get('events', []))}")
         typer.echo(f"duplicate: {payload.get('duplicate', False)}")
