@@ -1,39 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
-  <title id="title">TerraSatch</title>
-  <desc id="desc">TerraSatch terrain intelligence badge with sunset, mountains, pines, and signal geometry.</desc>
+  <title id="title">TerraSatch Sassy</title>
+  <desc id="desc">TerraSatch Sasquatch mascot Sassy framed by Wasatch mountains, pine trees, and an orange field-signal sunset.</desc>
   <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f5b62f"/>
-      <stop offset="0.52" stop-color="#f47b20"/>
-      <stop offset="1" stop-color="#d94b18"/>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8b735"/>
+      <stop offset="0.58" stop-color="#f36b16"/>
+      <stop offset="1" stop-color="#d84816"/>
     </linearGradient>
     <linearGradient id="ridge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f7efdc"/>
-      <stop offset="1" stop-color="#d8c7a5"/>
+      <stop offset="0" stop-color="#f4eddb"/>
+      <stop offset="1" stop-color="#cdbd9b"/>
     </linearGradient>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="6" result="blur"/>
+    <filter id="softGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <rect width="256" height="256" rx="54" fill="#0b0d0b"/>
-  <rect x="10" y="10" width="236" height="236" rx="46" fill="none" stroke="#f4eddb" stroke-opacity=".16" stroke-width="2"/>
-  <circle cx="128" cy="94" r="61" fill="url(#sky)" opacity=".98" filter="url(#glow)"/>
-  <path d="M27 164 77 106l26 30 33-48 44 58 22-24 31 42Z" fill="#161a16" stroke="#f4eddb" stroke-opacity=".14" stroke-width="2"/>
-  <path d="M38 164 78 118l24 30 34-48 34 45 11-11 33 30Z" fill="url(#ridge)" opacity=".94"/>
-  <path d="M78 118 91 137 82 134 75 143 66 139Z" fill="#fff" opacity=".8"/>
-  <path d="m136 100 16 22-10-4-7 8-10-5Z" fill="#fff" opacity=".86"/>
-  <path d="M31 173h194" stroke="#f47b20" stroke-width="2" stroke-dasharray="4 7" opacity=".65"/>
-  <g fill="#0b0d0b">
-    <path d="M37 194h22l-11-16h6l-12-18-12 18h6l-11 16h12Z"/>
-    <path d="M62 205h28l-14-19h7l-16-24-16 24h7l-14 19h18Z"/>
-    <path d="M172 205h28l-14-19h7l-16-24-16 24h7l-14 19h18Z"/>
-    <path d="M201 194h22l-11-16h6l-12-18-12 18h6l-11 16h12Z"/>
+  <rect width="256" height="256" rx="52" fill="#090b09"/>
+  <rect x="9" y="9" width="238" height="238" rx="45" fill="none" stroke="#f4eddb" stroke-opacity=".16" stroke-width="2"/>
+  <circle cx="128" cy="88" r="61" fill="url(#sun)" filter="url(#softGlow)" opacity=".98"/>
+  <path d="M18 159 62 115l25 22 38-52 34 42 19-20 60 52Z" fill="#121612"/>
+  <path d="M27 159 63 124l23 22 39-49 34 42 19-19 49 39Z" fill="url(#ridge)" opacity=".92"/>
+  <path d="m125 97 14 17-8-3-7 8-10-5Z" fill="#fff" opacity=".8"/>
+  <path d="M28 166h200" stroke="#f36b16" stroke-width="2" stroke-dasharray="3 7" opacity=".76"/>
+  <g fill="#111511">
+    <path d="M30 205h24l-12-16h7l-15-23-15 23h7l-12 16h16Z"/>
+    <path d="M55 211h30l-15-20h8l-18-27-18 27h8l-15 20h20Z"/>
+    <path d="M184 211h30l-15-20h8l-18-27-18 27h8l-15 20h20Z"/>
+    <path d="M207 204h24l-12-16h7l-15-23-15 23h7l-12 16h16Z"/>
   </g>
-  <g transform="translate(104 169)">
-    <path d="M0 31 24 0v31Z" fill="#f47b20"/>
-    <path d="M48 31 27 4v27Z" fill="#f4eddb" opacity=".92"/>
+  <!-- Sassy: original TerraSatch Sasquatch silhouette -->
+  <g fill="#090b09" stroke="#f4eddb" stroke-opacity=".08" stroke-width="1.2" transform="translate(84 78)">
+    <path d="M45 18c-9 0-16 7-16 16 0 5 2 9 5 12l-8 17-9 5-8 23 11 4 8-17 5 2-4 20-12 27 12 5 17-26 10-24 5 1 7 22 18 23 11-7-14-27-4-25-8-9-8-13c3-3 5-8 5-13 0-9-7-16-16-16Z"/>
+    <path d="M31 32c4-7 9-10 16-10 6 0 11 3 15 9-5-2-9-3-14-3-6 0-11 1-17 4Z" fill="#f36b16" stroke="none" opacity=".9"/>
+    <path d="M24 65 9 54 3 61l14 17Z"/>
+    <path d="m67 63 16-13 6 8-15 18Z"/>
   </g>
-  <text x="128" y="229" text-anchor="middle" fill="#f4eddb" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800" letter-spacing="3">TERRASATCH</text>
-  <text x="128" y="244" text-anchor="middle" fill="#f49a36" font-family="monospace" font-size="7" font-weight="700" letter-spacing="2">TERRAIN INTELLIGENCE</text>
+  <g transform="translate(105 177)" opacity=".95">
+    <path d="M0 25 21 0v25Z" fill="#f36b16"/>
+    <path d="M46 25 24 3v22Z" fill="#f4eddb"/>
+  </g>
+  <text x="128" y="229" text-anchor="middle" fill="#f4eddb" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="900" letter-spacing="2.5">TERRASATCH</text>
+  <text x="128" y="244" text-anchor="middle" fill="#f39a36" font-family="monospace" font-size="7" font-weight="700" letter-spacing="2">SASSY · TERRAIN INTELLIGENCE</text>
 </svg>
