@@ -10,15 +10,23 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
-from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
+from terrasatch.errors import (
+    InvalidConfiguration,
+    ProviderUnavailable,
+    ResourceConflict,
+    ResourceNotFound,
+)
 from terrasatch.identity.models import Site, Team
 from terrasatch.intelligence.core import TerraEngine
 from terrasatch.organizations.service import slugify
 from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, Transcript, Transmission
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
+    AgentUpdateRequest,
     CallsignCreateRequest,
+    CallsignUpdateRequest,
     ChannelCreateRequest,
+    ChannelUpdateRequest,
     TransmissionCreateRequest,
 )
 
@@ -32,8 +40,26 @@ async def _site_for_org(session: AsyncSession, *, organization_id: UUID, site_id
         )
     )
     if site is None:
-        raise InvalidConfiguration("Site was not found in the authenticated organization")
+        raise ResourceNotFound("Site was not found in the authenticated organization")
     return site
+
+
+async def _team_for_org(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    team_id: UUID,
+) -> Team:
+    team = await session.scalar(
+        select(Team).where(
+            Team.id == team_id,
+            Team.organization_id == organization_id,
+            Team.enabled.is_(True),
+        )
+    )
+    if team is None:
+        raise ResourceNotFound("Team was not found in the authenticated organization")
+    return team
 
 
 async def _agent_for_org(
@@ -41,16 +67,17 @@ async def _agent_for_org(
     *,
     organization_id: UUID,
     agent_id: UUID,
+    enabled_only: bool = True,
 ) -> Agent:
-    agent = await session.scalar(
-        select(Agent).where(
-            Agent.id == agent_id,
-            Agent.organization_id == organization_id,
-            Agent.enabled.is_(True),
-        )
+    query = select(Agent).where(
+        Agent.id == agent_id,
+        Agent.organization_id == organization_id,
     )
+    if enabled_only:
+        query = query.where(Agent.enabled.is_(True))
+    agent = await session.scalar(query)
     if agent is None:
-        raise InvalidConfiguration("Agent was not found in the authenticated organization")
+        raise ResourceNotFound("Agent was not found in the authenticated organization")
     return agent
 
 
@@ -59,16 +86,17 @@ async def _channel_for_org(
     *,
     organization_id: UUID,
     channel_id: UUID,
+    enabled_only: bool = True,
 ) -> Channel:
-    channel = await session.scalar(
-        select(Channel).where(
-            Channel.id == channel_id,
-            Channel.organization_id == organization_id,
-            Channel.enabled.is_(True),
-        )
+    query = select(Channel).where(
+        Channel.id == channel_id,
+        Channel.organization_id == organization_id,
     )
+    if enabled_only:
+        query = query.where(Channel.enabled.is_(True))
+    channel = await session.scalar(query)
     if channel is None:
-        raise InvalidConfiguration("Channel was not found in the authenticated organization")
+        raise ResourceNotFound("Channel was not found in the authenticated organization")
     return channel
 
 
@@ -84,7 +112,7 @@ async def create_agent(
         select(Agent).where(Agent.organization_id == organization_id, Agent.slug == slug)
     )
     if existing is not None:
-        raise InvalidConfiguration(f"Agent slug '{slug}' already exists")
+        raise ResourceConflict(f"Agent slug '{slug}' already exists")
     agent = Agent(
         organization_id=organization_id,
         site_id=payload.site_id,
@@ -103,16 +131,66 @@ async def list_agents(
     organization_id: UUID,
     limit: int,
     offset: int,
+    site_id: UUID | None = None,
+    profile: str | None = None,
+    enabled: bool | None = None,
 ) -> list[Agent]:
+    query = select(Agent).where(Agent.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(Agent.site_id == site_id)
+    if profile is not None:
+        query = query.where(Agent.profile == profile)
+    if enabled is not None:
+        query = query.where(Agent.enabled.is_(enabled))
     return list(
         await session.scalars(
-            select(Agent)
-            .where(Agent.organization_id == organization_id)
-            .order_by(Agent.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            query.order_by(Agent.created_at.desc()).limit(limit).offset(offset)
         )
     )
+
+
+async def get_agent(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    agent_id: UUID,
+) -> Agent:
+    return await _agent_for_org(
+        session,
+        organization_id=organization_id,
+        agent_id=agent_id,
+        enabled_only=False,
+    )
+
+
+async def update_agent(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    agent_id: UUID,
+    payload: AgentUpdateRequest,
+) -> Agent:
+    agent = await get_agent(session, organization_id=organization_id, agent_id=agent_id)
+    if payload.name is not None:
+        name = payload.name.strip()
+        slug = slugify(name)
+        existing = await session.scalar(
+            select(Agent).where(
+                Agent.organization_id == organization_id,
+                Agent.slug == slug,
+                Agent.id != agent.id,
+            )
+        )
+        if existing is not None:
+            raise ResourceConflict(f"Agent slug '{slug}' already exists")
+        agent.name = name
+        agent.slug = slug
+    if payload.profile is not None:
+        agent.profile = payload.profile.strip()
+    if payload.enabled is not None:
+        agent.enabled = payload.enabled
+    await session.flush()
+    return agent
 
 
 async def create_channel(
@@ -135,7 +213,7 @@ async def create_channel(
         select(Channel).where(Channel.organization_id == organization_id, Channel.slug == slug)
     )
     if existing is not None:
-        raise InvalidConfiguration(f"Channel slug '{slug}' already exists")
+        raise ResourceConflict(f"Channel slug '{slug}' already exists")
     channel = Channel(
         organization_id=organization_id,
         site_id=payload.site_id,
@@ -155,16 +233,102 @@ async def list_channels(
     organization_id: UUID,
     limit: int,
     offset: int,
+    site_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    profile: str | None = None,
+    enabled: bool | None = None,
 ) -> list[Channel]:
+    query = select(Channel).where(Channel.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(Channel.site_id == site_id)
+    if agent_id is not None:
+        query = query.where(Channel.agent_id == agent_id)
+    if profile is not None:
+        query = query.where(Channel.profile == profile)
+    if enabled is not None:
+        query = query.where(Channel.enabled.is_(enabled))
     return list(
         await session.scalars(
-            select(Channel)
-            .where(Channel.organization_id == organization_id)
-            .order_by(Channel.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            query.order_by(Channel.created_at.desc()).limit(limit).offset(offset)
         )
     )
+
+
+async def get_channel(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    channel_id: UUID,
+) -> Channel:
+    return await _channel_for_org(
+        session,
+        organization_id=organization_id,
+        channel_id=channel_id,
+        enabled_only=False,
+    )
+
+
+async def update_channel(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    channel_id: UUID,
+    payload: ChannelUpdateRequest,
+) -> Channel:
+    channel = await get_channel(
+        session,
+        organization_id=organization_id,
+        channel_id=channel_id,
+    )
+    if payload.name is not None:
+        name = payload.name.strip()
+        slug = slugify(name)
+        existing = await session.scalar(
+            select(Channel).where(
+                Channel.organization_id == organization_id,
+                Channel.slug == slug,
+                Channel.id != channel.id,
+            )
+        )
+        if existing is not None:
+            raise ResourceConflict(f"Channel slug '{slug}' already exists")
+        channel.name = name
+        channel.slug = slug
+    if "agent_id" in payload.model_fields_set:
+        if payload.agent_id is not None:
+            agent = await _agent_for_org(
+                session,
+                organization_id=organization_id,
+                agent_id=payload.agent_id,
+            )
+            if agent.site_id != channel.site_id:
+                raise InvalidConfiguration("Channel and agent must belong to the same site")
+        channel.agent_id = payload.agent_id
+    if payload.profile is not None:
+        channel.profile = payload.profile.strip()
+    if payload.enabled is not None:
+        channel.enabled = payload.enabled
+    await session.flush()
+    return channel
+
+
+async def _validate_callsign_bindings(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID | None,
+    team_id: UUID | None,
+) -> None:
+    if site_id is not None:
+        await _site_for_org(session, organization_id=organization_id, site_id=site_id)
+    if team_id is not None:
+        team = await _team_for_org(
+            session,
+            organization_id=organization_id,
+            team_id=team_id,
+        )
+        if site_id is not None and team.site_id is not None and team.site_id != site_id:
+            raise InvalidConfiguration("Callsign site and team must reference the same site")
 
 
 async def create_callsign(
@@ -173,32 +337,27 @@ async def create_callsign(
     organization_id: UUID,
     payload: CallsignCreateRequest,
 ) -> Callsign:
-    if payload.site_id is not None:
-        await _site_for_org(session, organization_id=organization_id, site_id=payload.site_id)
-    if payload.team_id is not None:
-        team = await session.scalar(
-            select(Team).where(
-                Team.id == payload.team_id,
-                Team.organization_id == organization_id,
-                Team.enabled.is_(True),
-            )
-        )
-        if team is None:
-            raise InvalidConfiguration("Team was not found in the authenticated organization")
+    await _validate_callsign_bindings(
+        session,
+        organization_id=organization_id,
+        site_id=payload.site_id,
+        team_id=payload.team_id,
+    )
+    name = payload.name.strip()
     existing = await session.scalar(
         select(Callsign).where(
             Callsign.organization_id == organization_id,
-            Callsign.name == payload.name.strip(),
+            Callsign.name == name,
         )
     )
     if existing is not None:
-        raise InvalidConfiguration(f"Callsign '{payload.name.strip()}' already exists")
+        raise ResourceConflict(f"Callsign '{name}' already exists")
     aliases = sorted({alias.strip() for alias in payload.aliases if alias.strip()})
     callsign = Callsign(
         organization_id=organization_id,
         site_id=payload.site_id,
         team_id=payload.team_id,
-        name=payload.name.strip(),
+        name=name,
         aliases=aliases,
     )
     session.add(callsign)
@@ -212,16 +371,79 @@ async def list_callsigns(
     organization_id: UUID,
     limit: int,
     offset: int,
+    site_id: UUID | None = None,
+    team_id: UUID | None = None,
+    enabled: bool | None = None,
 ) -> list[Callsign]:
-    return list(
-        await session.scalars(
-            select(Callsign)
-            .where(Callsign.organization_id == organization_id)
-            .order_by(Callsign.name)
-            .limit(limit)
-            .offset(offset)
+    query = select(Callsign).where(Callsign.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(Callsign.site_id == site_id)
+    if team_id is not None:
+        query = query.where(Callsign.team_id == team_id)
+    if enabled is not None:
+        query = query.where(Callsign.enabled.is_(enabled))
+    return list(await session.scalars(query.order_by(Callsign.name).limit(limit).offset(offset)))
+
+
+async def get_callsign(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    callsign_id: UUID,
+) -> Callsign:
+    callsign = await session.scalar(
+        select(Callsign).where(
+            Callsign.id == callsign_id,
+            Callsign.organization_id == organization_id,
         )
     )
+    if callsign is None:
+        raise ResourceNotFound("Callsign was not found in the authenticated organization")
+    return callsign
+
+
+async def update_callsign(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    callsign_id: UUID,
+    payload: CallsignUpdateRequest,
+) -> Callsign:
+    callsign = await get_callsign(
+        session,
+        organization_id=organization_id,
+        callsign_id=callsign_id,
+    )
+    site_id = payload.site_id if "site_id" in payload.model_fields_set else callsign.site_id
+    team_id = payload.team_id if "team_id" in payload.model_fields_set else callsign.team_id
+    await _validate_callsign_bindings(
+        session,
+        organization_id=organization_id,
+        site_id=site_id,
+        team_id=team_id,
+    )
+    if payload.name is not None:
+        name = payload.name.strip()
+        existing = await session.scalar(
+            select(Callsign).where(
+                Callsign.organization_id == organization_id,
+                Callsign.name == name,
+                Callsign.id != callsign.id,
+            )
+        )
+        if existing is not None:
+            raise ResourceConflict(f"Callsign '{name}' already exists")
+        callsign.name = name
+    if "site_id" in payload.model_fields_set:
+        callsign.site_id = payload.site_id
+    if "team_id" in payload.model_fields_set:
+        callsign.team_id = payload.team_id
+    if payload.aliases is not None:
+        callsign.aliases = sorted({alias.strip() for alias in payload.aliases if alias.strip()})
+    if payload.enabled is not None:
+        callsign.enabled = payload.enabled
+    await session.flush()
+    return callsign
 
 
 async def _existing_ingest(
@@ -374,14 +596,23 @@ async def list_transmissions(
     organization_id: UUID,
     limit: int,
     offset: int,
+    site_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    channel_id: UUID | None = None,
+    source: str | None = None,
 ) -> list[Transmission]:
+    query = select(Transmission).where(Transmission.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(Transmission.site_id == site_id)
+    if agent_id is not None:
+        query = query.where(Transmission.agent_id == agent_id)
+    if channel_id is not None:
+        query = query.where(Transmission.channel_id == channel_id)
+    if source is not None:
+        query = query.where(Transmission.source_type == source)
     return list(
         await session.scalars(
-            select(Transmission)
-            .where(Transmission.organization_id == organization_id)
-            .order_by(Transmission.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            query.order_by(Transmission.created_at.desc()).limit(limit).offset(offset)
         )
     )
 
@@ -399,7 +630,7 @@ async def get_transmission(
         )
     )
     if transmission is None:
-        raise InvalidConfiguration("Transmission was not found")
+        raise ResourceNotFound("Transmission was not found")
     return transmission
 
 
@@ -409,14 +640,14 @@ async def list_transcripts(
     organization_id: UUID,
     limit: int,
     offset: int,
+    transmission_id: UUID | None = None,
 ) -> list[Transcript]:
+    query = select(Transcript).where(Transcript.organization_id == organization_id)
+    if transmission_id is not None:
+        query = query.where(Transcript.transmission_id == transmission_id)
     return list(
         await session.scalars(
-            select(Transcript)
-            .where(Transcript.organization_id == organization_id)
-            .order_by(Transcript.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            query.order_by(Transcript.created_at.desc()).limit(limit).offset(offset)
         )
     )
 
@@ -434,7 +665,7 @@ async def get_transcript(
         )
     )
     if transcript is None:
-        raise InvalidConfiguration("Transcript was not found")
+        raise ResourceNotFound("Transcript was not found")
     return transcript
 
 
@@ -444,14 +675,23 @@ async def list_events(
     organization_id: UUID,
     limit: int,
     offset: int,
+    site_id: UUID | None = None,
+    transmission_id: UUID | None = None,
+    event_type: str | None = None,
+    callsign: str | None = None,
 ) -> list[OperationalEvent]:
+    query = select(OperationalEvent).where(OperationalEvent.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(OperationalEvent.site_id == site_id)
+    if transmission_id is not None:
+        query = query.where(OperationalEvent.transmission_id == transmission_id)
+    if event_type is not None:
+        query = query.where(OperationalEvent.event_type == event_type)
+    if callsign is not None:
+        query = query.where(OperationalEvent.callsign == callsign)
     return list(
         await session.scalars(
-            select(OperationalEvent)
-            .where(OperationalEvent.organization_id == organization_id)
-            .order_by(OperationalEvent.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+            query.order_by(OperationalEvent.created_at.desc()).limit(limit).offset(offset)
         )
     )
 
@@ -469,5 +709,5 @@ async def get_event(
         )
     )
     if event is None:
-        raise InvalidConfiguration("Operational event was not found")
+        raise ResourceNotFound("Operational event was not found")
     return event

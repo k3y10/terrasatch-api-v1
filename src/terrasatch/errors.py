@@ -19,6 +19,16 @@ class InvalidConfiguration(TerraSatchError):
     code = "invalid_configuration"
 
 
+class ResourceNotFound(TerraSatchError):
+    code = "not_found"
+    status_code = 404
+
+
+class ResourceConflict(TerraSatchError):
+    code = "resource_conflict"
+    status_code = 409
+
+
 class ProviderUnavailable(TerraSatchError):
     code = "provider_unavailable"
     status_code = 503
