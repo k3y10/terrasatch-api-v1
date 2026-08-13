@@ -27,11 +27,9 @@ async def test_root_serves_branded_terrasatch_status_page() -> None:
     assert response.headers["content-type"].startswith("text/html")
     assert "TerraSatch API" in response.text
     assert 'aria-label="TERRASATCH"' in response.text
-    assert "TerraSatch geometric mountain wordmark" in response.text
-    assert "LISTEN" in response.text
-    assert "WATCH" in response.text
-    assert "LEARN" in response.text
-    assert "ADAPT" in response.text
+    assert "peak-a" in response.text
+    assert "pine-forest" in response.text
+    assert "Minimal geometric pine tree signal line" in response.text
     assert "/health/ready" in response.text
     assert "/openapi.json" in response.text
     assert "/admin" in response.text
