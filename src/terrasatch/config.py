@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     intelligence_provider: str = "deterministic"
     storage_provider: str = "local_filesystem"
     billing_enabled: bool = False
+    edge_api_key: SecretStr | None = None
     admin_email: str | None = None
     admin_password_hash: SecretStr | None = None
     admin_session_secret: SecretStr | None = None
