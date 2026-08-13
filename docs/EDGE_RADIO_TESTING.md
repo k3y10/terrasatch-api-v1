@@ -77,6 +77,20 @@ terrasatch edge rtl capture \
   --output ./bca-test.wav
 ```
 
+Optional receiver tuning controls are available when needed:
+
+```bash
+terrasatch edge rtl capture \
+  --frequency-hz <FREQUENCY_HZ> \
+  --seconds 10 \
+  --gain-db <GAIN_DB> \
+  --squelch <SQUELCH> \
+  --ppm <PPM_CORRECTION> \
+  --output ./bca-test.wav
+```
+
+Start with defaults. Add manual gain, squelch, or PPM correction only when the receiver diagnostics or actual audio indicate they are needed.
+
 While the capture is running, make a short authorized test transmission on the BCA radio. A useful test phrase is:
 
 ```text
