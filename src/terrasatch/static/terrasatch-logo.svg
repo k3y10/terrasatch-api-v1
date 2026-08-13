@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">TerraSatch</title>
+  <desc id="desc">TerraSatch terrain intelligence badge with sunset, mountains, pines, and signal geometry.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5b62f"/>
+      <stop offset="0.52" stop-color="#f47b20"/>
+      <stop offset="1" stop-color="#d94b18"/>
+    </linearGradient>
+    <linearGradient id="ridge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7efdc"/>
+      <stop offset="1" stop-color="#d8c7a5"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="54" fill="#0b0d0b"/>
+  <rect x="10" y="10" width="236" height="236" rx="46" fill="none" stroke="#f4eddb" stroke-opacity=".16" stroke-width="2"/>
+  <circle cx="128" cy="94" r="61" fill="url(#sky)" opacity=".98" filter="url(#glow)"/>
+  <path d="M27 164 77 106l26 30 33-48 44 58 22-24 31 42Z" fill="#161a16" stroke="#f4eddb" stroke-opacity=".14" stroke-width="2"/>
+  <path d="M38 164 78 118l24 30 34-48 34 45 11-11 33 30Z" fill="url(#ridge)" opacity=".94"/>
+  <path d="M78 118 91 137 82 134 75 143 66 139Z" fill="#fff" opacity=".8"/>
+  <path d="m136 100 16 22-10-4-7 8-10-5Z" fill="#fff" opacity=".86"/>
+  <path d="M31 173h194" stroke="#f47b20" stroke-width="2" stroke-dasharray="4 7" opacity=".65"/>
+  <g fill="#0b0d0b">
+    <path d="M37 194h22l-11-16h6l-12-18-12 18h6l-11 16h12Z"/>
+    <path d="M62 205h28l-14-19h7l-16-24-16 24h7l-14 19h18Z"/>
+    <path d="M172 205h28l-14-19h7l-16-24-16 24h7l-14 19h18Z"/>
+    <path d="M201 194h22l-11-16h6l-12-18-12 18h6l-11 16h12Z"/>
+  </g>
+  <g transform="translate(104 169)">
+    <path d="M0 31 24 0v31Z" fill="#f47b20"/>
+    <path d="M48 31 27 4v27Z" fill="#f4eddb" opacity=".92"/>
+  </g>
+  <text x="128" y="229" text-anchor="middle" fill="#f4eddb" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="800" letter-spacing="3">TERRASATCH</text>
+  <text x="128" y="244" text-anchor="middle" fill="#f49a36" font-family="monospace" font-size="7" font-weight="700" letter-spacing="2">TERRAIN INTELLIGENCE</text>
+</svg>
