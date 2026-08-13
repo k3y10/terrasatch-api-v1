@@ -240,8 +240,7 @@ def status(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> 
     """Show the current API and backing-service status."""
 
     settings = _load_settings()
-    report = asyncio.run(check_readiness(settings)
-    )
+    report = asyncio.run(check_readiness(settings))
     if as_json:
         _print(report, as_json=True)
     else:
@@ -315,7 +314,7 @@ def deployment_check(
         str | None,
         typer.Option("--base-url", help="Public API base URL."),
     ] = None,
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Check an externally reachable readiness endpoint without exposing secrets."""
 
@@ -354,7 +353,7 @@ def deployment_check(
 @org_app.command("create")
 def org_create(
     name: str = typer.Argument(..., min=1, help="Organization display name."),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Create a new organization in the bootstrap account."""
 
@@ -396,7 +395,7 @@ def site_create(
         "--organization",
         help="Organization ID, slug, or name.",
     ),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Create a site within the selected organization."""
 
@@ -420,7 +419,7 @@ def site_list(
         "--organization",
         help="Organization ID, slug, or name.",
     ),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """List sites only inside the selected organization."""
 
@@ -454,7 +453,7 @@ def api_key_create(
         "--organization",
         help="Organization ID, slug, or name.",
     ),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Issue a tenant-scoped server credential and reveal its token once."""
 
@@ -489,7 +488,7 @@ def api_key_list(
         "--organization",
         help="Organization ID, slug, or name.",
     ),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON.")),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """List tenant-scoped credential metadata without secret values."""
 
