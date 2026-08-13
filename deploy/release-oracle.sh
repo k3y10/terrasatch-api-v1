@@ -32,7 +32,9 @@ echo "[4/8] Building API and worker images"
 docker compose build api worker
 
 echo "[5/8] Running import and CLI smoke checks"
-docker compose run --rm api python -m compileall -q /app/src
+# The runtime image intentionally runs as a non-root user and /app/src is not writable.
+# Compile source in memory so the smoke check never tries to create __pycache__ beside source files.
+docker compose run --rm api python -c "from pathlib import Path; files=list(Path('/app/src').rglob('*.py')); [compile(path.read_text(encoding='utf-8'), str(path), 'exec') for path in files]; print(f'Python source syntax OK ({len(files)} files)')"
 docker compose run --rm api python -c "import terrasatch.main; print('FastAPI import OK')"
 docker compose run --rm api terrasatch --help >/dev/null
 docker compose run --rm api terrasatch simulate radio --help >/dev/null
