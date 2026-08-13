@@ -44,12 +44,15 @@ class EdgeProfile:
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> EdgeProfile:
         raw_site = payload.get("site_id")
+        raw_device = payload.get("device_id")
         profile = cls(
             mode=str(payload.get("mode") or "demo"),
-            api_base_url=str(payload.get("api_base_url") or _DEFAULT_API_BASE_URL),
+            api_base_url=str(
+                payload.get("api_base_url") or _DEFAULT_API_BASE_URL
+            ),
             site_id=UUID(str(raw_site)) if raw_site else None,
             backend=str(payload.get("backend") or "auto"),
-            device_id=str(payload["device_id"]) if payload.get("device_id") else None,
+            device_id=str(raw_device) if raw_device else None,
         )
         profile.validate()
         return profile
@@ -76,8 +79,17 @@ def save_edge_profile(profile: EdgeProfile, path: str | Path | None = None) -> P
     profile.validate()
     resolved = Path(path).expanduser() if path else edge_profile_path()
     resolved.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        resolved.parent.chmod(0o700)
+    except OSError:
+        pass
     temporary = resolved.with_suffix(".tmp")
-    temporary.write_text(json.dumps(profile.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    content = json.dumps(profile.to_dict(), indent=2, sort_keys=True) + "\n"
+    temporary.write_text(content, encoding="utf-8")
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
     temporary.replace(resolved)
     try:
         resolved.chmod(0o600)
