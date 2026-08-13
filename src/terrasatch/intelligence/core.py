@@ -76,8 +76,11 @@ _LOCATION_RE = re.compile(
     r"\b(?:near|at|on|below|above|toward|towards)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9' -]{2,80})",
     re.I,
 )
+# Bare 4-5 digit values and comma-formatted elevations are accepted because field radio traffic
+# commonly omits the unit ("around 9800"). Short values must explicitly say feet/ft so callsign
+# numbers such as "Patrol 4" or "Unit 12" can never be interpreted as elevation.
 _NUMERIC_ELEVATION_RE = re.compile(
-    r"\b(?:around|roughly|about|approximately)?\s*(\d{1,2}(?:,\d{3})|\d{4,5})\s*(?:feet|ft)?\b",
+    r"\b(?:around|roughly|about|approximately)?\s*(?:(\d{1,2},\d{3}|\d{4,5})\s*(?:feet|ft)?|(\d{1,3})\s*(?:feet|ft))\b",
     re.I,
 )
 
@@ -152,7 +155,9 @@ class DeterministicIntelligenceProvider:
     def _extract_elevation(text: str) -> int | None:
         numeric = _NUMERIC_ELEVATION_RE.search(text)
         if numeric:
-            return int(numeric.group(1).replace(",", ""))
+            value = numeric.group(1) or numeric.group(2)
+            assert value is not None
+            return int(value.replace(",", ""))
 
         word_patterns = {
             r"\bninety[- ]eight hundred\b": 9800,
