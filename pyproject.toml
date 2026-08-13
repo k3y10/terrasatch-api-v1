@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-terrasatch = "terrasatch.cli.main:app"
+terrasatch = "terrasatch.cli.entrypoint:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terrasatch"]

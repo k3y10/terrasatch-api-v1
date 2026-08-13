@@ -79,8 +79,16 @@ async def get_principal(
 def require_scope(scope: str):
     """Require one named scope or the tenant-local admin scope."""
 
+    return require_any_scope(scope)
+
+
+def require_any_scope(*scopes: str):
+    """Require any named scope, while keeping ``admin`` as the tenant-local wildcard."""
+
+    required = frozenset(scopes)
+
     async def check_scope(principal: Annotated[Principal, Security(get_principal)]) -> Principal:
-        if scope not in principal.scopes and "admin" not in principal.scopes:
+        if "admin" not in principal.scopes and principal.scopes.isdisjoint(required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="API key scope is insufficient",

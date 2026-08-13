@@ -14,6 +14,12 @@ class AgentCreateRequest(BaseModel):
     profile: str = Field(default="general", min_length=1, max_length=100)
 
 
+class AgentUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    profile: str | None = Field(default=None, min_length=1, max_length=100)
+    enabled: bool | None = None
+
+
 class AgentResponse(BaseModel):
     id: UUID
     organization_id: UUID
@@ -22,6 +28,8 @@ class AgentResponse(BaseModel):
     slug: str
     profile: str
     enabled: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class ChannelCreateRequest(BaseModel):
@@ -29,6 +37,13 @@ class ChannelCreateRequest(BaseModel):
     site_id: UUID
     agent_id: UUID | None = None
     profile: str = Field(default="general", min_length=1, max_length=100)
+
+
+class ChannelUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    agent_id: UUID | None = None
+    profile: str | None = Field(default=None, min_length=1, max_length=100)
+    enabled: bool | None = None
 
 
 class ChannelResponse(BaseModel):
@@ -40,6 +55,8 @@ class ChannelResponse(BaseModel):
     slug: str
     profile: str
     enabled: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class CallsignCreateRequest(BaseModel):
@@ -47,6 +64,14 @@ class CallsignCreateRequest(BaseModel):
     site_id: UUID | None = None
     team_id: UUID | None = None
     aliases: list[str] = Field(default_factory=list, max_length=32)
+
+
+class CallsignUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    site_id: UUID | None = None
+    team_id: UUID | None = None
+    aliases: list[str] | None = Field(default=None, max_length=32)
+    enabled: bool | None = None
 
 
 class CallsignResponse(BaseModel):
@@ -57,6 +82,8 @@ class CallsignResponse(BaseModel):
     name: str
     aliases: list[str]
     enabled: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class TransmissionCreateRequest(BaseModel):

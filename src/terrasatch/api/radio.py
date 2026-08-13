@@ -1,4 +1,4 @@
-"""Tenant-safe REST resources for the first TerraSatch radio intelligence vertical slice."""
+"""Tenant-safe REST resources for the TerraSatch radio intelligence vertical slice."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import structlog
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.auth.dependencies import Principal, require_scope
+from terrasatch.auth.dependencies import Principal, require_any_scope, require_scope
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.events.bus import publish_event
@@ -18,10 +18,13 @@ from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, 
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
     AgentResponse,
+    AgentUpdateRequest,
     CallsignCreateRequest,
     CallsignResponse,
+    CallsignUpdateRequest,
     ChannelCreateRequest,
     ChannelResponse,
+    ChannelUpdateRequest,
     OperationalEventResponse,
     PaginatedAgents,
     PaginatedCallsigns,
@@ -38,6 +41,9 @@ from terrasatch.radio.service import (
     create_agent,
     create_callsign,
     create_channel,
+    get_agent,
+    get_callsign,
+    get_channel,
     get_event,
     get_transcript,
     get_transmission,
@@ -48,6 +54,9 @@ from terrasatch.radio.service import (
     list_events,
     list_transcripts,
     list_transmissions,
+    update_agent,
+    update_callsign,
+    update_channel,
 )
 
 router = APIRouter(tags=["radio-intelligence"])
@@ -78,6 +87,8 @@ def _agent_response(item: Agent) -> AgentResponse:
         slug=item.slug,
         profile=item.profile,
         enabled=item.enabled,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
     )
 
 
@@ -91,6 +102,8 @@ def _channel_response(item: Channel) -> ChannelResponse:
         slug=item.slug,
         profile=item.profile,
         enabled=item.enabled,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
     )
 
 
@@ -103,6 +116,8 @@ def _callsign_response(item: Callsign) -> CallsignResponse:
         name=item.name,
         aliases=item.aliases,
         enabled=item.enabled,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
     )
 
 
@@ -164,9 +179,15 @@ def _event_response(item: OperationalEvent) -> OperationalEventResponse:
 @router.get("/agents", response_model=PaginatedAgents)
 async def get_agents(
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("read:events"))],
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:agents", "read:events")),
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    site_id: Annotated[UUID | None, Query()] = None,
+    profile: Annotated[str | None, Query(max_length=100)] = None,
+    enabled: Annotated[bool | None, Query()] = None,
 ) -> PaginatedAgents:
     items = await _run_database(
         request.app.state.settings,
@@ -175,6 +196,9 @@ async def get_agents(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            site_id=site_id,
+            profile=profile,
+            enabled=enabled,
         ),
     )
     return PaginatedAgents(items=[_agent_response(item) for item in items], limit=limit, offset=offset)
@@ -197,12 +221,58 @@ async def post_agent(
     return _agent_response(item)
 
 
+@router.get("/agents/{agent_id}", response_model=AgentResponse)
+async def get_agent_by_id(
+    agent_id: UUID,
+    request: Request,
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:agents", "read:events")),
+    ],
+) -> AgentResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: get_agent(
+            session,
+            organization_id=principal.organization_id,
+            agent_id=agent_id,
+        ),
+    )
+    return _agent_response(item)
+
+
+@router.patch("/agents/{agent_id}", response_model=AgentResponse)
+async def patch_agent(
+    agent_id: UUID,
+    payload: AgentUpdateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("write:agents"))],
+) -> AgentResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: update_agent(
+            session,
+            organization_id=principal.organization_id,
+            agent_id=agent_id,
+            payload=payload,
+        ),
+    )
+    return _agent_response(item)
+
+
 @router.get("/channels", response_model=PaginatedChannels)
 async def get_channels(
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("read:events"))],
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:channels", "read:events")),
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    site_id: Annotated[UUID | None, Query()] = None,
+    agent_id: Annotated[UUID | None, Query()] = None,
+    profile: Annotated[str | None, Query(max_length=100)] = None,
+    enabled: Annotated[bool | None, Query()] = None,
 ) -> PaginatedChannels:
     items = await _run_database(
         request.app.state.settings,
@@ -211,6 +281,10 @@ async def get_channels(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            site_id=site_id,
+            agent_id=agent_id,
+            profile=profile,
+            enabled=enabled,
         ),
     )
     return PaginatedChannels(items=[_channel_response(item) for item in items], limit=limit, offset=offset)
@@ -233,12 +307,57 @@ async def post_channel(
     return _channel_response(item)
 
 
+@router.get("/channels/{channel_id}", response_model=ChannelResponse)
+async def get_channel_by_id(
+    channel_id: UUID,
+    request: Request,
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:channels", "read:events")),
+    ],
+) -> ChannelResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: get_channel(
+            session,
+            organization_id=principal.organization_id,
+            channel_id=channel_id,
+        ),
+    )
+    return _channel_response(item)
+
+
+@router.patch("/channels/{channel_id}", response_model=ChannelResponse)
+async def patch_channel(
+    channel_id: UUID,
+    payload: ChannelUpdateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("write:channels"))],
+) -> ChannelResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: update_channel(
+            session,
+            organization_id=principal.organization_id,
+            channel_id=channel_id,
+            payload=payload,
+        ),
+    )
+    return _channel_response(item)
+
+
 @router.get("/callsigns", response_model=PaginatedCallsigns)
 async def get_callsigns(
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("read:events"))],
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:callsigns", "read:events")),
+    ],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    site_id: Annotated[UUID | None, Query()] = None,
+    team_id: Annotated[UUID | None, Query()] = None,
+    enabled: Annotated[bool | None, Query()] = None,
 ) -> PaginatedCallsigns:
     items = await _run_database(
         request.app.state.settings,
@@ -247,6 +366,9 @@ async def get_callsigns(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            site_id=site_id,
+            team_id=team_id,
+            enabled=enabled,
         ),
     )
     return PaginatedCallsigns(
@@ -258,13 +380,58 @@ async def get_callsigns(
 async def post_callsign(
     payload: CallsignCreateRequest,
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("write:agents"))],
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("write:callsigns", "write:agents")),
+    ],
 ) -> CallsignResponse:
     item = await _run_database(
         request.app.state.settings,
         lambda session: create_callsign(
             session,
             organization_id=principal.organization_id,
+            payload=payload,
+        ),
+    )
+    return _callsign_response(item)
+
+
+@router.get("/callsigns/{callsign_id}", response_model=CallsignResponse)
+async def get_callsign_by_id(
+    callsign_id: UUID,
+    request: Request,
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:callsigns", "read:events")),
+    ],
+) -> CallsignResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: get_callsign(
+            session,
+            organization_id=principal.organization_id,
+            callsign_id=callsign_id,
+        ),
+    )
+    return _callsign_response(item)
+
+
+@router.patch("/callsigns/{callsign_id}", response_model=CallsignResponse)
+async def patch_callsign(
+    callsign_id: UUID,
+    payload: CallsignUpdateRequest,
+    request: Request,
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("write:callsigns", "write:agents")),
+    ],
+) -> CallsignResponse:
+    item = await _run_database(
+        request.app.state.settings,
+        lambda session: update_callsign(
+            session,
+            organization_id=principal.organization_id,
+            callsign_id=callsign_id,
             payload=payload,
         ),
     )
@@ -346,6 +513,10 @@ async def get_transmissions(
     principal: Annotated[Principal, Depends(require_scope("read:transmissions"))],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    site_id: Annotated[UUID | None, Query()] = None,
+    agent_id: Annotated[UUID | None, Query()] = None,
+    channel_id: Annotated[UUID | None, Query()] = None,
+    source: Annotated[str | None, Query(max_length=64)] = None,
 ) -> PaginatedTransmissions:
     items = await _run_database(
         request.app.state.settings,
@@ -354,6 +525,10 @@ async def get_transmissions(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            site_id=site_id,
+            agent_id=agent_id,
+            channel_id=channel_id,
+            source=source,
         ),
     )
     return PaginatedTransmissions(
@@ -384,6 +559,7 @@ async def get_transcripts(
     principal: Annotated[Principal, Depends(require_scope("read:transcripts"))],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    transmission_id: Annotated[UUID | None, Query()] = None,
 ) -> PaginatedTranscripts:
     items = await _run_database(
         request.app.state.settings,
@@ -392,6 +568,7 @@ async def get_transcripts(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            transmission_id=transmission_id,
         ),
     )
     return PaginatedTranscripts(
@@ -422,6 +599,10 @@ async def get_operational_events(
     principal: Annotated[Principal, Depends(require_scope("read:events"))],
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    site_id: Annotated[UUID | None, Query()] = None,
+    transmission_id: Annotated[UUID | None, Query()] = None,
+    event_type: Annotated[str | None, Query(max_length=64)] = None,
+    callsign: Annotated[str | None, Query(max_length=255)] = None,
 ) -> PaginatedEvents:
     items = await _run_database(
         request.app.state.settings,
@@ -430,6 +611,10 @@ async def get_operational_events(
             organization_id=principal.organization_id,
             limit=limit,
             offset=offset,
+            site_id=site_id,
+            transmission_id=transmission_id,
+            event_type=event_type,
+            callsign=callsign,
         ),
     )
     return PaginatedEvents(items=[_event_response(item) for item in items], limit=limit, offset=offset)
