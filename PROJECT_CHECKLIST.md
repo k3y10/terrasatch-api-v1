@@ -14,17 +14,17 @@ merely because a model, placeholder, deployment example, or future-facing interf
 | 4. Plugin interfaces | in progress | `IntelligenceProvider` protocol exists and TerraEngine is provider-neutral. InputSource, RadioReceiver, SpeechToTextProvider, StorageProvider, BillingProvider, and a general plugin registry remain. |
 | 5. Agent and radio models | in progress | Agent, Channel, Callsign, Transmission, Transcript, and OperationalEvent models/services/APIs exist with lifecycle control for configuration resources. Dedicated Source, Keyword, Rule, and richer configurable radio-profile models remain. |
 | 6. Simulator | in progress | `terrasatch simulate radio` is implemented and feeds the same ingest → transcript → TerraEngine → event → PostgreSQL → Redis path used by the REST ingest endpoint. Oracle acceptance validation remains before calling the phase complete. |
-| 7. Real audio | not started | WAV, microphone/audio-device sources, buffering, VAD, segmentation, and local/cloud STT abstractions remain. |
-| 8. RTL-SDR / Nooelec | not started | Device discovery, `rtl_test`/`rtl_fm` adapter, radio-profile tuning, demodulation, and signal diagnostics remain. |
-| 9. Edge agent | not started | EdgeDevice/DeviceCredential, outbound authenticated connection, reconnect, durable queue, heartbeat, and store-and-forward remain. A systemd deployment example is not an implementation of the edge process. |
+| 7. Real audio | in progress | Dependency-free PCM WAV inspection now reports duration, format, RMS, peak, and non-zero audio energy for receiver captures. Live microphone/audio-device sources, buffering, VAD/segmentation, and automatic STT remain. |
+| 8. RTL-SDR / Nooelec | in progress | Local `rtl_test` discovery/probe and bounded receive-only `rtl_fm` capture into mono WAV are implemented, with configurable frequency/device/gain/squelch and no transmit path. Physical Nooelec acceptance, profile tuning, signal-quality metrics, and long-running receiver supervision remain. |
+| 9. Edge agent | in progress | A local receive-side edge CLI and authenticated API bridge now exist for device diagnostics, captures, API checks, and operator-reviewed text submission. EdgeDevice/DeviceCredential models, durable queue/store-and-forward, reconnect, heartbeat, managed profiles, and a supervised long-running edge process remain. |
 | 10. TerraEngine | in progress | Provider-neutral TerraEngine, validated Pydantic event output, deterministic offline extraction, provenance, confidence, event classification, callsign/aspect/elevation extraction, and source-linked persistence exist. Model-backed providers, richer context/rules, and industry-specific extraction profiles remain. |
 | 11. Operations intelligence | not started | Incidents, incident threading, shifts, summaries, task/rule actions, and operational context remain. |
 | 12. Official realtime API | in progress | Versioned REST, OpenAPI, auth, sites/teams/API keys, agents/channels/callsigns, transmissions, transcripts, events, filters, detail routes, Redis event publication, and authenticated WebSocket subscriptions exist. Durable outbox delivery and production webhooks remain. |
 | 13. TypeScript SDK | not started | `@terrasatch/client` typed REST/WebSocket client, reconnection, errors, and generated types remain. |
 | 14. Usage and billing | not started | Plans, subscriptions, entitlements, usage records, pilots, plan-aware limits, BillingProvider, and optional Stripe adapter remain. |
 | 15. Security, retention, audit | in progress | API-key hashing, password hashing, tenant authorization, request validation, secret isolation, explicit CORS, secure admin sessions, and TLS deployment exist. Retention jobs, durable audit records, rate limiting, storage cleanup, webhook verification, and full security review remain. |
-| 16. Deployment | in progress | Docker, Compose, Caddy, production configuration examples, and the Oracle deployment at `api.terrasatch.com` exist. Remaining hardening includes reboot/startup verification, backup/restore validation, reserved-IP planning, and repeatable release verification. |
-| 17. Live demo | blocked by physical hardware | The software simulator path is implemented pending Oracle acceptance. Physical BCA → Nooelec → Linux/Edge → API → TerraEngine → Event → WebSocket acceptance remains blocked until hardware/audio phases are implemented. |
+| 16. Deployment | in progress | Docker, Compose, Caddy, production configuration examples, revision-aware release verification, and the Oracle deployment at `api.terrasatch.com` exist. Remaining hardening includes reboot/startup verification, backup/restore validation, and reserved-IP planning. |
+| 17. Live demo | blocked by physical hardware | The software simulator and first receive-side Nooelec/RTL-SDR tooling are implemented. Physical BCA → Nooelec → local edge capture → API → TerraEngine → Event acceptance still requires the actual receiver/radio test; automatic audio-to-STT remains a follow-on layer. |
 
 ## Current production validation
 
@@ -44,8 +44,13 @@ merely because a model, placeholder, deployment example, or future-facing interf
 - [x] Migration `0004_radio_event_pipeline` is present for the radio/event domain.
 - [x] REST contracts for agents, channels, callsigns, transmissions, transcripts, and events exist.
 - [x] Redis-backed tenant-scoped WebSocket event subscriptions exist.
-- [ ] Run the new simulator acceptance workflow on Oracle and verify the same events through REST.
+- [x] Revision-aware Oracle release verification exists.
+- [ ] Run the simulator acceptance workflow on Oracle and verify the same events through REST.
 - [ ] Verify a live WebSocket subscriber receives simulator-created events on Oracle.
+- [ ] Run `terrasatch edge doctor` on the field computer and confirm `rtl_test` / `rtl_fm`.
+- [ ] Probe the physical Nooelec receiver with `terrasatch edge rtl devices`.
+- [ ] Capture and inspect an authorized BCA test transmission as WAV audio.
+- [ ] Submit the operator-reviewed BCA test transcript through the production ingest path and verify the resulting event.
 - [ ] Reboot/startup persistence validated end-to-end on the production VM.
 - [ ] Reserved/static Oracle public IP configured.
 - [ ] Automated PostgreSQL backup/restore procedure validated.
@@ -89,11 +94,30 @@ WS  /ws/v1/events
 Do not create a separate fake demo intelligence path. Simulator, recorded audio, live audio,
 RTL-SDR, and the future Edge Agent must converge on the same production processing pipeline.
 
-## Next engineering sequence after software acceptance
+## Physical receive acceptance workflow
 
-1. Connect one existing partner/demo frontend to the authenticated REST + WebSocket contract.
-2. Add WAV/file audio input and a `SpeechToTextProvider` interface.
-3. Add local microphone/audio-device capture and segmentation/VAD.
-4. Add RTL-SDR/Nooelec receive adapters.
-5. Add the outbound Edge Agent and durable store-and-forward queue.
+The first hardware path runs on the computer physically connected to the Nooelec receiver. Oracle remains the backend:
+
+```text
+Authorized BCA radio transmission
+  → Nooelec / RTL-SDR
+  → rtl_fm receive + demodulation
+  → local PCM WAV capture
+  → operator review (current milestone)
+  → POST /api/v1/transmissions
+  → Transcript
+  → TerraEngine
+  → OperationalEvent
+  → REST / WebSocket
+```
+
+Acceptance commands are documented in `docs/EDGE_RADIO_TESTING.md`. This milestone is explicitly receive-only and contains no PTT/transmit operation.
+
+## Next engineering sequence after receiver acceptance
+
+1. Physically validate the Nooelec capture path and production edge credential.
+2. Add a `SpeechToTextProvider` interface and recorded-WAV STT behind the existing edge boundary.
+3. Add VAD/segmentation and local microphone/audio-device input.
+4. Promote the local edge CLI into a supervised Edge Agent with device identity, heartbeats, reconnect, and durable store-and-forward.
+5. Connect one existing partner/demo frontend to the authenticated REST + WebSocket contract.
 6. Add durable outbox/webhooks, SDK, rate limits, retention/audit, then billing/entitlements.
