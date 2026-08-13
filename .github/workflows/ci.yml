@@ -1,0 +1,71 @@
+name: TerraSatch API CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - agent/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: terrasatch
+          POSTGRES_USER: terrasatch
+          POSTGRES_PASSWORD: terrasatch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U terrasatch -d terrasatch"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      TERRASATCH_ENV: development
+      TERRASATCH_DEPLOYMENT_NAME: github-actions
+      TERRASATCH_API_BASE_URL: http://127.0.0.1:8000
+      TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:terrasatch@127.0.0.1:5432/terrasatch
+      TERRASATCH_REDIS_URL: redis://127.0.0.1:6379/0
+      TERRASATCH_CORS_ORIGINS: http://localhost:3000
+      TERRASATCH_ENABLE_DOCS: "true"
+      TERRASATCH_INTELLIGENCE_PROVIDER: deterministic
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and development tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Validate migrations
+        run: alembic upgrade head
+
+      - name: Ruff
+        run: ruff check src tests migrations
+
+      - name: Test
+        run: pytest
