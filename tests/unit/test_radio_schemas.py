@@ -46,6 +46,13 @@ def test_blank_optional_callsign_normalizes_to_none() -> None:
     assert request.callsign is None
 
 
+def test_transmission_rejects_naive_timestamps() -> None:
+    with pytest.raises(ValidationError):
+        TransmissionCreateRequest.model_validate(
+            _payload(started_at=datetime(2026, 8, 12, 22, 0, 0))
+        )
+
+
 def test_transmission_rejects_end_before_start() -> None:
     started = datetime.now(UTC)
 
