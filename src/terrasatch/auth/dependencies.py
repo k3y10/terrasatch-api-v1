@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from terrasatch.auth.api_keys import hash_api_key
 from terrasatch.auth.models import ApiKey
+from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -25,6 +26,37 @@ class Principal:
     organization_id: UUID
     api_key_id: UUID
     scopes: frozenset[str]
+
+
+async def authenticate_token(settings: Settings, token: str) -> Principal:
+    """Resolve one raw service token for HTTP or realtime transports."""
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer token required",
+        )
+
+    session_factory = create_session_factory(settings)
+    async with session_factory() as session:
+        api_key = await session.scalar(
+            select(ApiKey).where(
+                ApiKey.secret_hash == hash_api_key(token),
+                ApiKey.revoked_at.is_(None),
+            )
+        )
+        if api_key is None or (api_key.expires_at and api_key.expires_at <= datetime.now(UTC)):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired API key",
+            )
+        api_key.last_used_at = datetime.now(UTC)
+        await session.commit()
+        return Principal(
+            organization_id=api_key.organization_id,
+            api_key_id=api_key.id,
+            scopes=frozenset(api_key.scopes),
+        )
 
 
 async def get_principal(
@@ -41,28 +73,7 @@ async def get_principal(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token required",
         )
-
-    settings = request.app.state.settings
-    session_factory = create_session_factory(settings)
-    async with session_factory() as session:
-        api_key = await session.scalar(
-            select(ApiKey).where(
-                ApiKey.secret_hash == hash_api_key(credentials.credentials),
-                ApiKey.revoked_at.is_(None),
-            )
-        )
-        if api_key is None or (api_key.expires_at and api_key.expires_at <= datetime.now(UTC)):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired API key",
-            )
-        api_key.last_used_at = datetime.now(UTC)
-        await session.commit()
-        return Principal(
-            organization_id=api_key.organization_id,
-            api_key_id=api_key.id,
-            scopes=frozenset(api_key.scopes),
-        )
+    return await authenticate_token(request.app.state.settings, credentials.credentials)
 
 
 def require_scope(scope: str):
