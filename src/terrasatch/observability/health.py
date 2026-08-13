@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from terrasatch import __version__
 from terrasatch.api.schemas import ComponentStatus, DependencyStatus, HealthResponse
 from terrasatch.config import Settings
 
@@ -38,17 +39,31 @@ async def _check_redis(settings: Settings) -> DependencyStatus:
     return DependencyStatus(name="redis", status="healthy")
 
 
+def _health_response(
+    settings: Settings,
+    *,
+    status_value: str,
+    dependencies: list[DependencyStatus] | None = None,
+) -> HealthResponse:
+    return HealthResponse(
+        status=status_value,
+        environment=settings.environment.value,
+        deployment=settings.deployment_name,
+        version=__version__,
+        revision=settings.build_sha,
+        timestamp=datetime.now(UTC),
+        dependencies=dependencies or [],
+    )
+
+
 async def check_readiness(settings: Settings) -> HealthResponse:
     """Check required backing services concurrently without leaking connection details."""
 
     dependencies = list(await asyncio.gather(_check_database(settings), _check_redis(settings)))
     is_healthy = all(dependency.status == "healthy" for dependency in dependencies)
-    return HealthResponse(
-        status="healthy" if is_healthy else "unhealthy",
-        environment=settings.environment.value,
-        deployment=settings.deployment_name,
-        version="0.1.0",
-        timestamp=datetime.now(UTC),
+    return _health_response(
+        settings,
+        status_value="healthy" if is_healthy else "unhealthy",
         dependencies=dependencies,
     )
 
@@ -56,13 +71,7 @@ async def check_readiness(settings: Settings) -> HealthResponse:
 def liveness(settings: Settings) -> HealthResponse:
     """Return process liveness without querying external services."""
 
-    return HealthResponse(
-        status="healthy",
-        environment=settings.environment.value,
-        deployment=settings.deployment_name,
-        version="0.1.0",
-        timestamp=datetime.now(UTC),
-    )
+    return _health_response(settings, status_value="healthy")
 
 
 async def check_worker(settings: Settings) -> ComponentStatus:
