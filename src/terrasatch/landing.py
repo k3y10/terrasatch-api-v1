@@ -94,7 +94,7 @@ def build_landing_page(
         <div class="screen">
           <div class="rx-main">
             <div class="rxline"><span><i class="dot"></i><span id="rx-state">RX · CHECKING</span></span><span class="signal"><i></i><i></i><i></i><i></i></span></div>
-            <div class="channel"><small>ACTIVE SERVICE</small><strong>API · RX</strong><em>RADIO → TRANSCRIPT → TERR AENGINE → EVENT</em></div>
+            <div class="channel"><small>ACTIVE SERVICE</small><strong>API · RX</strong><em>RADIO → TRANSCRIPT → TERRAENGINE → EVENT</em></div>
             <div class="wave" aria-hidden="true">__WAVE__</div>
             <div class="metrics"><div class="metric"><span>MODE</span><b>RECEIVE + STRUCTURE</b></div><div class="metric"><span>TX</span><b>DISABLED</b></div><div class="metric"><span>SOCKET</span><b>/ws/v1/events</b></div><div class="metric"><span>INGEST</span><b>/api/v1/transmissions</b></div></div>
           </div>
