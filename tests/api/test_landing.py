@@ -26,10 +26,16 @@ async def test_root_serves_branded_terrasatch_status_page() -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "TerraSatch API" in response.text
-    assert 'aria-label="TERRASATCH"' in response.text
-    assert "peak-a" in response.text
-    assert "pine-forest" in response.text
-    assert "Minimal geometric pine tree signal line" in response.text
+    assert "Terrain Intelligence" in response.text
+    assert "Wasatch Front · Utah" in response.text
+    assert "https://www.terrasatch.com/assets/terrasatch-logo-BEpaywXF.png" in response.text
+    assert "Platform Gateways" in response.text
+    assert "Field Intelligence Stack" in response.text
+    assert "TerraListen Inputs" in response.text
+    assert "Organizations + Sites" in response.text
+    assert "Structured Events" in response.text
+    assert "REST + Realtime" in response.text
+    assert "forest-line" in response.text
     assert "/health/ready" in response.text
     assert "/openapi.json" in response.text
     assert "/admin" in response.text
@@ -48,3 +54,4 @@ async def test_landing_page_does_not_advertise_disabled_swagger() -> None:
     assert response.status_code == 200
     assert 'href="/docs"' not in response.text
     assert "Swagger Off" in response.text
+    assert "Disabled in this environment" in response.text
