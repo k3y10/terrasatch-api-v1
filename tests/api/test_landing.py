@@ -34,6 +34,8 @@ async def test_root_serves_fixed_sasquatch_radio_console() -> None:
     assert "RX · CHECKING" in response.text
     assert "RECEIVE + STRUCTURE" in response.text
     assert "TX</span><b>DISABLED" in response.text
+    assert "RADIO → TRANSCRIPT → TERRAENGINE → EVENT" in response.text
+    assert "TERR AENGINE" not in response.text
     assert "LIVE SYSTEM FEED" in response.text
     assert "F1" in response.text
     assert "F5" in response.text
