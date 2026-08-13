@@ -8,7 +8,8 @@ from uuid import UUID
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.api.schemas import SiteUpdateRequest
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
 from terrasatch.identity.models import Account, Organization, Site
 
 DEFAULT_ACCOUNT_NAME = "TerraSatch Default Account"
@@ -41,7 +42,7 @@ async def create_organization(session: AsyncSession, *, name: str) -> Organizati
         select(Organization).where(Organization.account_id == account.id, Organization.slug == slug)
     )
     if existing is not None:
-        raise InvalidConfiguration(f"Organization slug '{slug}' already exists")
+        raise ResourceConflict(f"Organization slug '{slug}' already exists")
     organization = Organization(account_id=account.id, name=name.strip(), slug=slug)
     session.add(organization)
     await session.flush()
@@ -64,15 +65,12 @@ def _selector_query(selector: str) -> Select[tuple[Organization]]:
 
 
 async def resolve_organization(session: AsyncSession, selector: str | None = None) -> Organization:
-    """Resolve only an explicit selector or the sole enabled organization.
-
-    Commands must not silently pick an organization in a multi-tenant deployment.
-    """
+    """Resolve only an explicit selector or the sole enabled organization."""
 
     if selector:
         organization = await session.scalar(_selector_query(selector))
         if organization is None:
-            raise InvalidConfiguration("Organization was not found or is disabled")
+            raise ResourceNotFound("Organization was not found or is disabled")
         return organization
 
     organizations = list(
@@ -101,7 +99,7 @@ async def create_site(
         select(Site).where(Site.organization_id == organization.id, Site.slug == slug)
     )
     if existing is not None:
-        raise InvalidConfiguration(f"Site slug '{slug}' already exists for this organization")
+        raise ResourceConflict(f"Site slug '{slug}' already exists for this organization")
     site = Site(organization_id=organization.id, name=name.strip(), slug=slug)
     session.add(site)
     await session.flush()
@@ -118,13 +116,55 @@ async def list_sites(
     session: AsyncSession,
     *,
     organization_selector: str | None = None,
+    enabled: bool | None = None,
 ) -> tuple[Organization, list[Site]]:
     """Return only sites belonging to the resolved organization."""
 
     organization = await resolve_organization(session, organization_selector)
-    sites = list(
-        await session.scalars(
-            select(Site).where(Site.organization_id == organization.id).order_by(Site.name)
-        )
-    )
+    query = select(Site).where(Site.organization_id == organization.id)
+    if enabled is not None:
+        query = query.where(Site.enabled.is_(enabled))
+    sites = list(await session.scalars(query.order_by(Site.name)))
     return organization, sites
+
+
+async def get_site(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID,
+) -> Site:
+    site = await session.scalar(
+        select(Site).where(Site.id == site_id, Site.organization_id == organization_id)
+    )
+    if site is None:
+        raise ResourceNotFound("Site was not found in the authenticated organization")
+    return site
+
+
+async def update_site(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID,
+    payload: SiteUpdateRequest,
+) -> Site:
+    site = await get_site(session, organization_id=organization_id, site_id=site_id)
+    if payload.name is not None:
+        name = payload.name.strip()
+        slug = slugify(name)
+        existing = await session.scalar(
+            select(Site).where(
+                Site.organization_id == organization_id,
+                Site.slug == slug,
+                Site.id != site.id,
+            )
+        )
+        if existing is not None:
+            raise ResourceConflict(f"Site slug '{slug}' already exists for this organization")
+        site.name = name
+        site.slug = slug
+    if payload.enabled is not None:
+        site.enabled = payload.enabled
+    await session.flush()
+    return site
