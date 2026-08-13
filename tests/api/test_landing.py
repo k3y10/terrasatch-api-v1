@@ -71,6 +71,21 @@ async def test_landing_is_a_no_document_scroll_viewport_shell() -> None:
 
 
 @pytest.mark.asyncio
+async def test_receiver_waveform_uses_fluid_bar_sizing() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert "gap:clamp(1px,.18vw,3px)" in response.text
+    assert "flex:1 1 0;width:auto;min-width:0" in response.text
+    assert "transform-origin:50% 100%" in response.text
+    assert ".wave i{width:4px;min-width:4px" not in response.text
+    assert ".wave i{width:3px;min-width:3px" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_local_brand_fallback_asset_is_still_served_by_api() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
