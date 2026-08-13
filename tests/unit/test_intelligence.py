@@ -18,6 +18,39 @@ async def test_terraengine_extracts_supported_field_observation_fields() -> None
 
 
 @pytest.mark.asyncio
+async def test_terraengine_does_not_treat_callsign_number_as_elevation() -> None:
+    events = await TerraEngine().process(
+        text="Dispatch, Patrol 4. Wind loading is visible near the ridgeline.",
+    )
+
+    assert len(events) == 1
+    assert events[0].callsign == "Patrol 4"
+    assert events[0].elevation_ft is None
+
+
+@pytest.mark.asyncio
+async def test_short_numeric_elevation_requires_explicit_units() -> None:
+    without_units = await TerraEngine().process(
+        text="Unit 12 heading toward the staging area.",
+    )
+    with_units = await TerraEngine().process(
+        text="Unit 12 reports water crossing the trail at 85 ft.",
+    )
+
+    assert without_units[0].elevation_ft is None
+    assert with_units[0].elevation_ft == 85
+
+
+@pytest.mark.asyncio
+async def test_terraengine_accepts_common_bare_four_digit_elevation() -> None:
+    events = await TerraEngine().process(
+        text="Patrol 4 reports wind loading on the east aspect around 9800.",
+    )
+
+    assert events[0].elevation_ft == 9800
+
+
+@pytest.mark.asyncio
 async def test_terraengine_does_not_fabricate_missing_location_fields() -> None:
     events = await TerraEngine().process(text="Dispatch copy.", callsign_hint="Dispatch")
 
