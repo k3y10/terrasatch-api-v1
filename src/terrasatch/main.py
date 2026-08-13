@@ -20,6 +20,7 @@ from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
+from terrasatch.auth.scopes import SUPPORTED_API_SCOPES
 from terrasatch.config import Settings, get_settings
 from terrasatch.errors import TerraSatchError
 from terrasatch.landing import build_landing_page
@@ -148,14 +149,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "scopes": sorted(principal.scopes),
         }
 
-    @api_v1.get("/reference", tags=["reference"])
-    async def get_api_reference() -> dict[str, object]:
-        """Return a public catalog of endpoints implemented by this release."""
-
+    def reference_payload() -> dict[str, object]:
         return {
             "endpoints": [entry.model_dump() for entry in api_catalog()],
+            "supported_scopes": sorted(SUPPORTED_API_SCOPES),
             "common_errors": [entry.model_dump() for entry in common_errors()],
         }
+
+    @api_v1.get("/reference", tags=["reference"])
+    async def get_api_reference() -> dict[str, object]:
+        """Return the implemented endpoint, scope, and error-code catalog."""
+
+        return reference_payload()
 
     api_v1.include_router(control_plane_router)
     api_v1.include_router(radio_router)
@@ -172,12 +177,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def get_admin_reference(
         _principal: Annotated[Principal, Depends(require_scope("admin"))],
     ) -> dict[str, object]:
-        """Return the current implemented API and error-code catalog."""
+        """Return the current implemented API, scopes, and error-code catalog."""
 
-        return {
-            "endpoints": [entry.model_dump() for entry in api_catalog()],
-            "common_errors": [entry.model_dump() for entry in common_errors()],
-        }
+        return reference_payload()
 
     application.include_router(api_v1)
     application.include_router(realtime_router)
