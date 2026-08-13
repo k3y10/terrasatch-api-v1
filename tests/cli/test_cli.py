@@ -1,8 +1,9 @@
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
-from terrasatch.cli.main import _redact_url, app
+from terrasatch.cli.main import _redact_url, _serialize_dotenv_value, _upsert_environment_file, app
 
 
 def test_cli_help_is_available_without_configuration() -> None:
@@ -32,3 +33,27 @@ def test_deployment_check_rejects_non_http_url_without_network_access() -> None:
 
     assert result.exit_code == 1
     assert "absolute http or https URL" in result.output + result.stderr
+
+
+def test_dotenv_serializer_quotes_compose_interpolation_characters() -> None:
+    assert _serialize_dotenv_value("abc$def$ghi") == "'abc$def$ghi'"
+    assert _serialize_dotenv_value("plain-secret") == "plain-secret"
+
+
+def test_environment_upsert_preserves_scrypt_hash_literal(tmp_path: Path) -> None:
+    destination = tmp_path / ".env"
+    destination.write_text("TERRASATCH_ENV=production\nTERRASATCH_ADMIN_PASSWORD_HASH=old\n")
+    scrypt_hash = "scrypt$ln=14,r=8,p=1$F1T9mE0SXzce2pvNCR9qEQ$XPueOoJ5FI1PKBxonk0yjToMtJtSu3w5234GYOupQTo"
+
+    _upsert_environment_file(
+        {
+            "TERRASATCH_ADMIN_PASSWORD_HASH": scrypt_hash,
+            "TERRASATCH_ADMIN_SESSION_SECRET": "session-secret",
+        },
+        destination=destination,
+    )
+
+    text = destination.read_text()
+    assert f"TERRASATCH_ADMIN_PASSWORD_HASH='{scrypt_hash}'" in text
+    assert "TERRASATCH_ADMIN_SESSION_SECRET=session-secret" in text
+    assert destination.stat().st_mode & 0o777 == 0o600

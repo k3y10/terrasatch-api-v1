@@ -77,6 +77,25 @@ def _redact_url(value: object) -> str:
     )
 
 
+def _serialize_dotenv_value(value: str) -> str:
+    """Serialize a value so dotenv readers and Docker Compose preserve it literally.
+
+    Compose performs interpolation on unquoted and double-quoted values. Admin password
+    hashes intentionally contain ``$`` separators, so values with interpolation-sensitive
+    characters are single-quoted. Both Docker Compose and Pydantic's dotenv loader remove
+    those quotes while preserving the original value.
+    """
+
+    if not value:
+        return "''"
+    if any(character.isspace() for character in value) or any(
+        character in value for character in ("$", "#", "'", '"')
+    ):
+        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
+    return value
+
+
 def _run_database[Result](
     operation: Callable[[AsyncSession, Settings], Awaitable[Result]],
 ) -> Result:
@@ -112,10 +131,10 @@ def _upsert_environment_file(values: dict[str, str], *, destination: Path) -> No
     for line in lines:
         key, separator, _ = line.partition("=")
         if separator and key in remaining:
-            output.append(f"{key}={remaining.pop(key)}")
+            output.append(f"{key}={_serialize_dotenv_value(remaining.pop(key))}")
         else:
             output.append(line)
-    output.extend(f"{key}={value}" for key, value in remaining.items())
+    output.extend(f"{key}={_serialize_dotenv_value(value)}" for key, value in remaining.items())
     destination.write_text("\n".join(output) + "\n")
     destination.chmod(0o600)
 

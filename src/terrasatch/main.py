@@ -9,7 +9,7 @@ from typing import Annotated
 import structlog
 from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from terrasatch import __version__
@@ -19,6 +19,7 @@ from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.config import Settings, get_settings
 from terrasatch.errors import TerraSatchError
+from terrasatch.landing import build_landing_page
 from terrasatch.observability.health import check_readiness, liveness
 from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
@@ -87,6 +88,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         )
         return JSONResponse(status_code=error.status_code, content=response.model_dump(mode="json"))
+
+    @application.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def get_landing_page() -> HTMLResponse:
+        """Render a branded public status page without exposing internal configuration."""
+
+        return HTMLResponse(
+            build_landing_page(
+                environment=configured_settings.environment.value,
+                deployment=configured_settings.deployment_name,
+                version=__version__,
+                docs_enabled=configured_settings.enable_docs,
+            )
+        )
 
     @application.get("/health", response_model=HealthResponse, tags=["health"])
     @application.get("/health/live", response_model=HealthResponse, tags=["health"])
