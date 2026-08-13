@@ -52,7 +52,7 @@ async def test_radio_resources_require_bearer_credentials() -> None:
 
 
 @pytest.mark.asyncio
-async def test_public_reference_matches_detail_and_realtime_routes() -> None:
+async def test_public_reference_matches_routes_scopes_and_errors() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
 
@@ -60,7 +60,8 @@ async def test_public_reference_matches_detail_and_realtime_routes() -> None:
         response = await client.get("/api/v1/reference")
 
     assert response.status_code == 200
-    catalog = {(item["method"], item["path"]) for item in response.json()["endpoints"]}
+    payload = response.json()
+    catalog = {(item["method"], item["path"]) for item in payload["endpoints"]}
     assert ("POST", "/api/v1/transmissions") in catalog
     assert ("GET", "/api/v1/transmissions/{transmission_id}") in catalog
     assert ("GET", "/api/v1/transcripts/{transcript_id}") in catalog
@@ -70,6 +71,9 @@ async def test_public_reference_matches_detail_and_realtime_routes() -> None:
     assert ("PATCH", "/api/v1/callsigns/{callsign_id}") in catalog
     assert ("WS", "/ws/v1/events") in catalog
 
-    errors = {(item["http_status"], item["code"]) for item in response.json()["common_errors"]}
+    scopes = set(payload["supported_scopes"])
+    assert {"admin", "edge:ingest", "read:events", "read:teams", "write:sites"} <= scopes
+
+    errors = {(item["http_status"], item["code"]) for item in payload["common_errors"]}
     assert (404, "not_found") in errors
     assert (409, "resource_conflict") in errors
