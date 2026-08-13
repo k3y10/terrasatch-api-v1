@@ -127,6 +127,12 @@ def build_landing_page(
     .ridge {{ position: absolute; left: 4%; right: 4%; bottom: 3px; height: 45px; pointer-events: none; opacity: .72; }}
     .ridge svg {{ width: 100%; height: 100%; overflow: visible; }}
     .ridge path {{ fill: none; stroke: url(#ridgeGradient); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linecap: square; stroke-linejoin: bevel; stroke-dasharray: 900; stroke-dashoffset: 900; animation: trace 2.2s ease forwards .15s; }}
+    .pine-forest {{ width: min(930px, 88vw); height: 66px; margin: -8px auto -2px; opacity: .72; pointer-events: none; }}
+    .pine-forest svg {{ width: 100%; height: 100%; overflow: visible; }}
+    .pine-dark {{ fill: rgba(229,235,230,.22); }}
+    .pine-mid {{ fill: rgba(229,235,230,.38); }}
+    .pine-signal {{ fill: var(--orange); filter: drop-shadow(0 0 9px rgba(255,116,24,.28)); }}
+    .pine-line {{ stroke: rgba(255,116,24,.22); stroke-width: 1; stroke-dasharray: 4 8; }}
     .split-glyph {{ margin: 7px auto 0; width: min(720px, 78vw); height: 52px; position: relative; display: flex; align-items: center; justify-content: center; gap: 12px; }}
     .tri {{ width: 48px; height: 42px; position: relative; }}
     .tri.left {{ clip-path: polygon(0 100%, 100% 0, 100% 100%); background: var(--orange); }}
@@ -155,6 +161,7 @@ def build_landing_page(
       .nav {{ justify-content: flex-start; }}
       .hero {{ min-height: 570px; }}
       .wordmark {{ gap: 1px; }}
+      .pine-forest {{ height: 52px; width: 94vw; }}
       .principles {{ grid-template-columns: 1fr 1fr; }}
       .principle:nth-child(2) {{ border-right: 0; }}
       .principle:nth-child(-n+2) {{ border-bottom: 1px solid var(--line); }}
@@ -165,6 +172,7 @@ def build_landing_page(
       .eyebrow {{ letter-spacing: .14em; }}
       .letter {{ font-size: clamp(34px, 12.8vw, 58px); }}
       .peak-a {{ width: clamp(30px, 11vw, 48px); height: clamp(36px, 12vw, 55px); }}
+      .pine-forest {{ height: 44px; margin-top: -2px; }}
       .split-glyph {{ gap: 7px; }}
       .tri {{ width: 34px; height: 29px; }}
     }}
@@ -220,6 +228,30 @@ def build_landing_page(
             <path d="M0 65 150 59 236 32 300 52 384 18 456 50 527 10 612 55 698 27 765 53 842 34 1000 65"/>
           </svg>
         </div>
+      </div>
+
+      <div class="pine-forest" role="img" aria-label="Minimal geometric pine tree signal line">
+        <svg viewBox="0 0 1000 72" preserveAspectRatio="xMidYMax meet">
+          <line class="pine-line" x1="40" y1="65" x2="960" y2="65"/>
+          <g class="pine-dark">
+            <path d="M62 64h28L76 45h8L67 24 50 45h8L44 64h18Z"/>
+            <path d="M142 64h22l-11-15h6l-14-18-14 18h6l-11 15h16Z"/>
+            <path d="M214 64h34l-17-23h9l-20-27-20 27h9l-17 23h22Z"/>
+            <path d="M748 64h30l-15-20h8l-18-24-18 24h8l-15 20h20Z"/>
+            <path d="M844 64h22l-11-15h6l-14-18-14 18h6l-11 15h16Z"/>
+            <path d="M920 64h32l-16-22h8l-19-26-19 26h8l-16 22h22Z"/>
+          </g>
+          <g class="pine-mid">
+            <path d="M310 64h24l-12-16h6l-15-21-15 21h6l-12 16h18Z"/>
+            <path d="M668 64h24l-12-16h6l-15-21-15 21h6l-12 16h18Z"/>
+          </g>
+          <g class="pine-signal">
+            <path d="M402 64h28l-14-19h7l-17-24-17 24h7l-14 19h20Z"/>
+            <path d="M570 64h28l-14-19h7l-17-24-17 24h7l-14 19h20Z"/>
+          </g>
+          <path d="M472 64h56L500 28Z" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1.5"/>
+          <path d="M491 64h18V46Z" fill="var(--orange)" opacity=".85"/>
+        </svg>
       </div>
 
       <div class="split-glyph" aria-hidden="true">
