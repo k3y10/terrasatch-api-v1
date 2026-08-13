@@ -20,7 +20,9 @@ class EdgeApiClient:
         key = os.getenv("TERRASATCH_EDGE_API_KEY", "").strip()
         if not key:
             raise RuntimeError("TERRASATCH_EDGE_API_KEY is not set")
-        resolved_url = (base_url or os.getenv("TERRASATCH_API_BASE_URL") or "").strip().rstrip("/")
+        resolved_url = (
+            base_url or os.getenv("TERRASATCH_API_BASE_URL") or ""
+        ).strip().rstrip("/")
         if not resolved_url:
             raise RuntimeError("TERRASATCH_API_BASE_URL is not set")
         return cls(base_url=resolved_url, api_key=key)
@@ -30,7 +32,11 @@ class EdgeApiClient:
         return {"Authorization": f"Bearer {self.api_key}"}
 
     def check(self) -> dict[str, object]:
-        with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=self.timeout_seconds) as client:
+        with httpx.Client(
+            base_url=self.base_url,
+            headers=self.headers,
+            timeout=self.timeout_seconds,
+        ) as client:
             response = client.get("/api/v1/auth/me")
             response.raise_for_status()
             return response.json()
@@ -59,7 +65,11 @@ class EdgeApiClient:
         if channel_id:
             payload["channel_id"] = str(channel_id)
 
-        with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=self.timeout_seconds) as client:
+        with httpx.Client(
+            base_url=self.base_url,
+            headers=self.headers,
+            timeout=self.timeout_seconds,
+        ) as client:
             response = client.post("/api/v1/transmissions", json=payload)
             response.raise_for_status()
             return response.json()
