@@ -67,11 +67,40 @@ class SiteCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class SiteUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    enabled: bool | None = None
+
+
 class SiteResponse(BaseModel):
     id: UUID
     organization_id: UUID
     name: str
     slug: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeamCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    site_id: UUID | None = None
+
+
+class TeamUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    site_id: UUID | None = None
+    enabled: bool | None = None
+
+
+class TeamResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    site_id: UUID | None
+    name: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class ApiKeyCreateRequest(BaseModel):
