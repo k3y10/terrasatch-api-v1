@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from terrasatch import __version__
@@ -28,6 +29,7 @@ from terrasatch.observability.quality import api_catalog, build_quality_report, 
 from terrasatch.observability.request_id import RequestIdMiddleware
 
 logger = structlog.get_logger(__name__)
+_BRAND_LOGO_PATH = Path(__file__).resolve().parent / "static" / "terrasatch-logo.svg"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -90,6 +92,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         )
         return JSONResponse(status_code=error.status_code, content=response.model_dump(mode="json"))
+
+    @application.get("/assets/terrasatch-logo.svg", include_in_schema=False)
+    async def get_brand_logo() -> FileResponse:
+        """Serve the vendored TerraSatch brand mark without an external asset dependency."""
+
+        return FileResponse(
+            _BRAND_LOGO_PATH,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @application.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def get_landing_page() -> HTMLResponse:
