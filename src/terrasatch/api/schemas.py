@@ -32,6 +32,7 @@ class HealthResponse(BaseModel):
     environment: str
     deployment: str
     version: str
+    revision: str = "unknown"
     timestamp: datetime
     dependencies: list[DependencyStatus] = Field(default_factory=list)
 
