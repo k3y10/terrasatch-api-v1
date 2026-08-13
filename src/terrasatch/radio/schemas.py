@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AgentCreateRequest(BaseModel):
@@ -96,6 +97,27 @@ class TransmissionCreateRequest(BaseModel):
     source_message_id: str = Field(min_length=1, max_length=255)
     started_at: datetime | None = None
     ended_at: datetime | None = None
+
+    @field_validator("text", "source", "source_message_id", mode="before")
+    @classmethod
+    def strip_required_text_fields(cls, value: object) -> object:
+        """Normalize surrounding whitespace before Pydantic enforces minimum lengths."""
+
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("callsign", mode="before")
+    @classmethod
+    def normalize_optional_callsign(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_time_window(self) -> Self:
+        if self.started_at is not None and self.ended_at is not None and self.ended_at < self.started_at:
+            raise ValueError("ended_at must be greater than or equal to started_at")
+        return self
 
 
 class TransmissionResponse(BaseModel):
