@@ -1,17 +1,15 @@
 [Unit]
-Description=TerraSatch Edge Agent
+Description=TerraSatch Edge Readiness Check
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=terrasatch
 Group=terrasatch
 WorkingDirectory=/opt/terrasatch-ai-radio-core
-EnvironmentFile=/etc/terrasatch/edge.env
-ExecStart=/opt/terrasatch-ai-radio-core/.venv/bin/terrasatch edge start
-Restart=on-failure
-RestartSec=5
+EnvironmentFile=-/etc/terrasatch/edge.env
+ExecStart=/opt/terrasatch-ai-radio-core/.venv/bin/terrasatch edge doctor --check-api
 NoNewPrivileges=true
 PrivateTmp=true
 
