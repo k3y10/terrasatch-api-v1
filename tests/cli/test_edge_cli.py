@@ -27,5 +27,8 @@ def test_rtl_capture_help_requires_no_connected_device() -> None:
     assert result.exit_code == 0
     assert "--frequency-hz" in result.stdout
     assert "--output" in result.stdout
+    assert "--gain-db" in result.stdout
+    assert "--squelch" in result.stdout
+    assert "--ppm" in result.stdout
     assert "--submit-text" in result.stdout
     assert "automatic STT" in result.stdout
