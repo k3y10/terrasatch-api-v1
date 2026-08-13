@@ -40,6 +40,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("TERRASATCH_ENV", "TERRASATCH_ENVIRONMENT"),
     )
     deployment_name: str = Field(default="local", min_length=1, max_length=64)
+    build_sha: str = Field(default="unknown", min_length=1, max_length=64)
     api_base_url: AnyHttpUrl = "http://localhost:8000"
     database_url: PostgresDsn = "postgresql+asyncpg://terrasatch:terrasatch@localhost:5432/terrasatch"
     redis_url: RedisDsn = "redis://localhost:6379/0"
@@ -67,6 +68,11 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         return value.upper()
+
+    @field_validator("build_sha")
+    @classmethod
+    def normalize_build_sha(cls, value: str) -> str:
+        return value.strip() or "unknown"
 
     @property
     def is_production(self) -> bool:
