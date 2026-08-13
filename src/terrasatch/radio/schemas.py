@@ -115,6 +115,9 @@ class TransmissionCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_time_window(self) -> Self:
+        for field_name, value in (("started_at", self.started_at), ("ended_at", self.ended_at)):
+            if value is not None and value.utcoffset() is None:
+                raise ValueError(f"{field_name} must include a timezone offset")
         if self.started_at is not None and self.ended_at is not None and self.ended_at < self.started_at:
             raise ValueError("ended_at must be greater than or equal to started_at")
         return self
