@@ -15,6 +15,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from terrasatch import __version__
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.api.control_plane import router as control_plane_router
+from terrasatch.api.radio import router as radio_router
+from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.config import Settings, get_settings
@@ -130,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     api_v1.include_router(control_plane_router)
+    api_v1.include_router(radio_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
     async def get_admin_quality(
@@ -151,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     application.include_router(api_v1)
+    application.include_router(realtime_router)
     application.include_router(admin_router)
     return application
 
