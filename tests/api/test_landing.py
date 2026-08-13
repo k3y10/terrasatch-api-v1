@@ -16,7 +16,7 @@ def make_settings(*, docs_enabled: bool = True) -> Settings:
 
 
 @pytest.mark.asyncio
-async def test_root_serves_branded_terrasatch_status_page() -> None:
+async def test_root_serves_branded_terrasatch_radio_console() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
 
@@ -30,15 +30,21 @@ async def test_root_serves_branded_terrasatch_status_page() -> None:
     assert "Wasatch Front · Utah" in response.text
     assert 'src="/assets/terrasatch-logo.svg"' in response.text
     assert "terrasatch-logo-BEpaywXF.png" not in response.text
-    assert "Developer + Operator Gateways" in response.text
-    assert "Field Intelligence Stack" in response.text
-    assert "TerraListen" in response.text
-    assert "Organizations + Sites" in response.text
-    assert "Structured Events" in response.text
-    assert "REST + Realtime" in response.text
-    assert "terrain-strip" in response.text
+    assert "TerraSatch radio console" in response.text
+    assert "TERRALISTEN" in response.text
+    assert "RX · CHECKING" in response.text
+    assert "MODE: RECEIVE + STRUCTURE · TX: DISABLED" in response.text
+    assert "LIVE SYSTEM FEED" in response.text
+    assert "F1" in response.text
+    assert "F5" in response.text
+    assert "Radio → Intelligence → Applications" in response.text
+    assert "LISTEN" in response.text
+    assert "WATCH" in response.text
+    assert "LEARN" in response.text
+    assert "ADAPT" in response.text
     assert "/health/ready" in response.text
     assert "/openapi.json" in response.text
+    assert "/api/v1/reference" in response.text
     assert "/admin" in response.text
     assert "/docs" in response.text
     assert "landing-test" in response.text
@@ -70,4 +76,4 @@ async def test_landing_page_does_not_advertise_disabled_swagger() -> None:
     assert response.status_code == 200
     assert 'href="/docs"' not in response.text
     assert "Swagger Off" in response.text
-    assert "Disabled in this environment" in response.text
+    assert "Disabled" in response.text
