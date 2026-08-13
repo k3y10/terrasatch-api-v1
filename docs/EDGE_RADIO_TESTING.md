@@ -107,16 +107,25 @@ terrasatch edge audio inspect ./bca-test.wav
 
 The report includes duration, sample rate, PCM width, RMS, peak, and whether the file contains non-zero audio energy. This is a capture diagnostic, not a speech-quality score.
 
-## 5. Configure API access on the edge machine
+## 5. Create and configure a dedicated edge API credential
 
-Issue a TerraSatch API key for the intended organization with the `edge:ingest` scope (an `admin` key also has the scope override). Keep the raw key only on the edge machine.
+Create a TerraSatch API key for the intended organization with only the `edge:ingest` scope. On the Oracle host, run the command from the API container so it uses the production database:
+
+```bash
+docker compose exec -T api terrasatch api-key create \
+  --name "field-receiver" \
+  --scope edge:ingest \
+  --organization "<ORGANIZATION>"
+```
+
+The raw token is shown once. Copy it to the edge machine, then store it only in that machine's environment or secret store:
 
 ```bash
 export TERRASATCH_API_BASE_URL=https://api.terrasatch.com
 export TERRASATCH_EDGE_API_KEY='<raw edge key>'
 ```
 
-Do not pass the API key as a command-line flag or commit it to a repository.
+Do not pass the API key as a command-line flag or commit it to a repository. A dedicated `edge:ingest` key is preferred over copying an admin credential to the receiver machine.
 
 Verify the credential:
 
@@ -164,6 +173,7 @@ terrasatch edge rtl capture \
 - [ ] `terrasatch edge rtl devices` identifies/opens the Nooelec receiver.
 - [ ] A short BCA test produces a WAV file.
 - [ ] `edge audio inspect` reports non-zero audio energy.
+- [ ] A dedicated `edge:ingest` API key is issued and stored only on the edge machine.
 - [ ] `edge api check` authenticates and reports `edge:ingest: ready`.
 - [ ] `edge submit-text` creates a transmission and at least one event.
 - [ ] The resulting event is visible through the REST API.
