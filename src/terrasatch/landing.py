@@ -15,32 +15,25 @@ def build_landing_page(
     version: str,
     docs_enabled: bool,
 ) -> str:
-    """Return a dependency-light TerraSatch systems portal without exposing secrets."""
+    """Return a dependency-light TerraSatch radio-console portal without exposing secrets."""
 
-    docs_link = (
-        '<a class="nav-link" href="/docs">Swagger</a>'
+    docs_softkey = (
+        '<a class="softkey" href="/docs"><span>F2</span><strong>SWAGGER</strong><small>Interactive API</small></a>'
         if docs_enabled
-        else (
-            '<span class="nav-link disabled" '
-            'title="Swagger is disabled in this environment">Swagger Off</span>'
-        )
+        else '<div class="softkey disabled"><span>F2</span><strong>SWAGGER</strong><small>Disabled</small></div>'
     )
-    docs_card = (
-        '<a class="gateway" href="/docs"><span class="gateway-index">02</span>'
-        '<strong>Swagger</strong><span>Interactive API explorer</span><b>OPEN ↗</b></a>'
+    docs_nav = (
+        '<a href="/docs">Swagger</a>'
         if docs_enabled
-        else (
-            '<div class="gateway disabled-card"><span class="gateway-index">02</span>'
-            '<strong>Swagger</strong><span>Disabled in this environment</span><b>OFFLINE</b></div>'
-        )
+        else '<span class="disabled-link">Swagger Off</span>'
     )
 
     replacements = {
         "__ENVIRONMENT__": escape(environment),
         "__DEPLOYMENT__": escape(deployment),
         "__VERSION__": escape(version),
-        "__DOCS_LINK__": docs_link,
-        "__DOCS_CARD__": docs_card,
+        "__DOCS_SOFTKEY__": docs_softkey,
+        "__DOCS_NAV__": docs_nav,
         "__BRAND_LOGO__": _BRAND_LOGO_URL,
     }
 
@@ -49,330 +42,95 @@ def build_landing_page(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#090a09">
-  <meta name="description" content="TerraSatch field intelligence API for authorized partner applications and remote operations.">
-  <title>TerraSatch API · Field Intelligence</title>
+  <meta name="theme-color" content="#090b09">
+  <meta name="description" content="TerraSatch field intelligence API radio console for authorized partner applications and remote operations.">
+  <title>TerraSatch API · Radio Console</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #080908;
-      --panel: #101210;
-      --panel-2: #151714;
-      --cream: #f4eddb;
-      --text: #f6f4ed;
-      --muted: #93988f;
-      --faint: #5f665f;
-      --line: rgba(244,237,219,.12);
-      --line-strong: rgba(244,237,219,.22);
-      --orange: #f36b16;
-      --orange-2: #ff9b25;
-      --gold: #f2b52c;
-      --green: #8ddd9d;
+      --bg:#070907; --case:#121512; --case2:#191d19; --screen:#0b120d; --screen2:#101a12;
+      --text:#f5efe1; --cream:#eee3ca; --muted:#8d968d; --faint:#596159;
+      --line:rgba(238,227,202,.12); --line2:rgba(238,227,202,.22);
+      --orange:#f36b16; --amber:#f4a52c; --green:#94e3a3; --green2:#4fbf70;
     }
-    * { box-sizing: border-box; }
-    html { background: var(--bg); }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at 82% 8%, rgba(243,107,22,.14), transparent 28rem),
-        radial-gradient(circle at 12% 35%, rgba(242,181,44,.055), transparent 30rem),
-        linear-gradient(180deg, #0c0d0c 0%, #080908 58%, #060706 100%);
-      overflow-x: hidden;
-    }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: .35;
-      background-image:
-        linear-gradient(rgba(244,237,219,.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(244,237,219,.025) 1px, transparent 1px);
-      background-size: 42px 42px;
-      mask-image: linear-gradient(to bottom, #000 0%, transparent 78%);
-    }
-    a { color: inherit; }
-    .shell { width: min(1280px, calc(100% - 34px)); margin: 0 auto; position: relative; z-index: 1; }
-    .micro {
-      font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      letter-spacing: .19em;
-      text-transform: uppercase;
-    }
-    header {
-      min-height: 94px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      border-bottom: 1px solid var(--line);
-    }
-    .brand-lockup { display: flex; align-items: center; gap: 13px; text-decoration: none; min-width: 0; }
-    .brand-logo {
-      width: 58px;
-      height: 58px;
-      object-fit: contain;
-      filter: drop-shadow(0 8px 20px rgba(0,0,0,.36));
-    }
-    .brand-copy { display: grid; gap: 3px; }
-    .brand-copy strong { font-size: 16px; letter-spacing: .08em; font-weight: 900; }
-    .brand-copy span { color: var(--muted); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
-    .nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
-    .nav-link {
-      color: #c9cdc6;
-      text-decoration: none;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .04em;
-      padding: 9px 11px;
-      border: 1px solid transparent;
-      transition: .18s ease;
-    }
-    a.nav-link:hover { color: white; border-color: var(--line); background: rgba(255,255,255,.025); }
-    .nav-link.primary { border-color: rgba(243,107,22,.45); color: #ffd7bc; background: rgba(243,107,22,.07); }
-    .nav-link.disabled { color: #5c615c; }
-
-    .hero {
-      min-height: 650px;
-      padding: 88px 0 62px;
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(330px, .65fr);
-      gap: 72px;
-      align-items: center;
-      position: relative;
-    }
-    .hero::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(243,107,22,.7), rgba(242,181,44,.35), transparent);
-    }
-    .kicker { color: var(--orange-2); margin-bottom: 22px; }
-    h1 {
-      margin: 0;
-      max-width: 820px;
-      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-      font-size: clamp(62px, 9.2vw, 142px);
-      line-height: .77;
-      letter-spacing: -.045em;
-      text-transform: uppercase;
-      font-weight: 900;
-    }
-    h1 span { display: block; }
-    h1 .accent { color: var(--orange); text-shadow: 0 0 36px rgba(243,107,22,.12); }
-    .hero-copy {
-      max-width: 700px;
-      margin: 29px 0 0;
-      color: #aeb3aa;
-      font-size: clamp(15px, 1.6vw, 18px);
-      line-height: 1.7;
-    }
-    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 28px; }
-    .chip {
-      border: 1px solid var(--line);
-      color: #d6d9d2;
-      background: rgba(255,255,255,.018);
-      padding: 9px 11px;
-      font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      letter-spacing: .11em;
-      text-transform: uppercase;
-    }
-
-    .system-card {
-      position: relative;
-      border: 1px solid var(--line-strong);
-      background:
-        linear-gradient(155deg, rgba(255,255,255,.032), transparent 38%),
-        rgba(13,15,13,.86);
-      box-shadow: 0 30px 90px rgba(0,0,0,.34);
-      overflow: hidden;
-    }
-    .system-card::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--orange), var(--gold), transparent 72%);
-    }
-    .system-head {
-      padding: 19px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--line);
-    }
-    .online { display: inline-flex; align-items: center; gap: 8px; color: #dff7e4; }
-    .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(141,221,157,.07), 0 0 20px rgba(141,221,157,.45); }
-    .system-body { padding: 22px 20px 18px; }
-    .system-title { margin: 0 0 17px; font-size: 24px; font-weight: 850; letter-spacing: -.02em; }
-    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); }
-    .metric { padding: 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-width: 0; }
-    .metric:nth-child(even) { border-right: 0; }
-    .metric:nth-last-child(-n+2) { border-bottom: 0; }
-    .metric small { display: block; color: var(--faint); font: 650 9px/1.2 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
-    .metric strong { display: block; font: 700 12px/1.3 ui-monospace, monospace; color: #e8e8e0; overflow-wrap: anywhere; }
-    .terminal { margin-top: 15px; border-top: 1px solid var(--line); padding: 15px 20px; font: 600 10px/1.6 ui-monospace, monospace; color: #7c827b; background: rgba(0,0,0,.16); }
-    .terminal .prompt { color: var(--orange-2); }
-    .terminal .ok { color: var(--green); }
-
-    section.block { padding: 58px 0; border-bottom: 1px solid var(--line); }
-    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 25px; }
-    .section-head h2 { margin: 7px 0 0; font-size: clamp(28px, 4vw, 52px); letter-spacing: -.035em; }
-    .section-head p { max-width: 550px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-    .gateways { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); }
-    .gateway {
-      position: relative;
-      min-height: 190px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      text-decoration: none;
-      border-right: 1px solid var(--line);
-      background: rgba(255,255,255,.012);
-      transition: .2s ease;
-    }
-    .gateway:last-child { border-right: 0; }
-    a.gateway:hover { background: rgba(243,107,22,.045); transform: translateY(-2px); }
-    .gateway-index { color: var(--orange-2); font: 700 9px/1 monospace; letter-spacing: .16em; }
-    .gateway strong { margin-top: auto; font-size: 21px; }
-    .gateway span:not(.gateway-index) { color: var(--muted); margin-top: 4px; font-size: 11px; }
-    .gateway b { margin-top: 16px; color: #d6d9d2; font: 700 9px/1 monospace; letter-spacing: .12em; }
-    .disabled-card { opacity: .43; }
-
-    .stack { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
-    .stack-card { position: relative; min-height: 230px; padding: 19px; border: 1px solid var(--line); background: rgba(255,255,255,.012); overflow: hidden; }
-    .stack-card::before { content: attr(data-stage); position: absolute; right: 13px; top: 8px; color: rgba(244,237,219,.035); font: 900 72px/1 Impact, sans-serif; }
-    .stack-card .tag { color: var(--orange-2); }
-    .stack-card h3 { margin: 55px 0 8px; font-size: 19px; }
-    .stack-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
-    .stack-card code { display: block; margin-top: 15px; color: #777f78; font: 600 9px/1.5 ui-monospace, monospace; white-space: normal; }
-
-    .terrain-strip { height: 96px; position: relative; overflow: hidden; opacity: .8; }
-    .terrain-strip svg { width: 100%; height: 100%; }
-    footer { min-height: 110px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #686e68; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-    .footer-principles { display: flex; gap: 14px; flex-wrap: wrap; color: #a8ada6; }
-    .footer-principles b { color: var(--orange-2); }
-
-    @media (max-width: 1000px) {
-      .hero { grid-template-columns: 1fr; gap: 38px; padding-top: 68px; }
-      .system-card { max-width: 620px; }
-      .gateways, .stack { grid-template-columns: 1fr 1fr; }
-      .gateway:nth-child(2) { border-right: 0; }
-      .gateway:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
-    }
-    @media (max-width: 680px) {
-      .shell { width: min(100% - 22px, 1280px); }
-      header { align-items: flex-start; flex-direction: column; padding: 17px 0; }
-      .brand-logo { width: 50px; height: 50px; }
-      .nav { justify-content: flex-start; }
-      .hero { min-height: auto; padding: 64px 0 48px; }
-      h1 { font-size: clamp(52px, 20vw, 90px); }
-      .section-head { align-items: flex-start; flex-direction: column; }
-      .gateways, .stack { grid-template-columns: 1fr; }
-      .gateway { border-right: 0; border-bottom: 1px solid var(--line); min-height: 150px; }
-      .gateway:last-child { border-bottom: 0; }
-      .stack-card { min-height: 200px; }
-      footer { align-items: flex-start; flex-direction: column; padding: 28px 0; }
-    }
-    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    *{box-sizing:border-box} html{background:var(--bg)} body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 50% 0,rgba(243,107,22,.12),transparent 34rem),linear-gradient(180deg,#0b0d0b,#070907 70%);overflow-x:hidden}
+    body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.25;background-image:linear-gradient(rgba(238,227,202,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(238,227,202,.025) 1px,transparent 1px);background-size:32px 32px;mask-image:linear-gradient(#000,transparent 85%)}
+    a{color:inherit}.shell{width:min(1280px,calc(100% - 30px));margin:auto;position:relative;z-index:1}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}.micro{font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;letter-spacing:.17em;text-transform:uppercase}
+    header{min-height:84px;display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px;text-decoration:none}.brand img{width:50px;height:50px}.brand-copy{display:grid;gap:2px}.brand-copy strong{font-size:15px;letter-spacing:.09em}.brand-copy span{color:var(--muted);font-size:9px;letter-spacing:.16em;text-transform:uppercase}.topnav{display:flex;gap:16px;flex-wrap:wrap;justify-content:flex-end}.topnav a,.topnav span{font:700 10px/1 ui-monospace,monospace;text-decoration:none;color:#aeb6ad;text-transform:uppercase;letter-spacing:.09em}.topnav a:hover{color:var(--orange)}.disabled-link{opacity:.4}
+    .hero{padding:42px 0 28px}.eyebrow{display:flex;align-items:center;gap:9px;color:var(--orange);margin-bottom:14px}.eyebrow:before{content:"";width:24px;height:1px;background:var(--orange)}h1{margin:0;font-size:clamp(38px,6.8vw,88px);line-height:.9;letter-spacing:-.045em;text-transform:uppercase;font-weight:900}h1 .accent{color:var(--orange)}.sub{max-width:760px;margin:18px 0 0;color:#a8afa7;line-height:1.65;font-size:15px}
+    .radio{margin:34px 0 24px;border:1px solid #272d27;border-radius:24px;background:linear-gradient(145deg,#1a1e1a,#0f120f 65%);box-shadow:0 38px 100px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.035);padding:18px;position:relative}.radio:before,.radio:after{content:"";position:absolute;top:12px;width:7px;height:7px;border-radius:50%;background:#060706;border:1px solid #343a34;box-shadow:inset 0 1px 2px #000}.radio:before{left:13px}.radio:after{right:13px}.radio-top{display:grid;grid-template-columns:150px 1fr 180px;gap:14px;align-items:center;padding:12px 14px 17px}.radio-id{display:flex;align-items:center;gap:10px}.radio-id img{width:42px;height:42px}.radio-id strong{display:block;font-size:12px;letter-spacing:.08em}.radio-id small{color:var(--muted);font:700 8px/1.4 ui-monospace,monospace;letter-spacing:.12em}.statusline{text-align:center;color:#6d756d;font:700 9px/1.4 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase}.statusline b{color:var(--green)}.knobs{display:flex;justify-content:flex-end;gap:12px}.knob{width:48px;height:48px;border-radius:50%;background:radial-gradient(circle at 40% 34%,#2d332d 0 17%,#151915 19% 48%,#070907 50% 60%,#252b25 62% 100%);border:1px solid #303630;box-shadow:0 7px 14px rgba(0,0,0,.45);position:relative}.knob:after{content:"";position:absolute;width:2px;height:12px;background:var(--orange);left:23px;top:5px;transform:rotate(28deg);transform-origin:bottom}
+    .screen{border:1px solid #334036;background:linear-gradient(180deg,#0b130d,#081009);box-shadow:inset 0 0 35px rgba(79,191,112,.045),0 0 0 5px #0a0c0a,0 0 0 6px #282d28;border-radius:10px;padding:20px;min-height:400px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:22px;position:relative;overflow:hidden}.screen:before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.18;background:repeating-linear-gradient(180deg,transparent 0 3px,rgba(148,227,163,.04) 4px)}.screen-main,.screen-side{position:relative;z-index:1}.rx-line{display:flex;align-items:center;justify-content:space-between;gap:15px;border-bottom:1px solid rgba(148,227,163,.12);padding-bottom:13px}.rx{display:flex;align-items:center;gap:8px;color:var(--green)}.rx-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 14px rgba(148,227,163,.75)}.bars{display:flex;align-items:end;gap:3px;height:20px}.bars i{display:block;width:5px;background:var(--green2);opacity:.9}.bars i:nth-child(1){height:5px}.bars i:nth-child(2){height:8px}.bars i:nth-child(3){height:11px}.bars i:nth-child(4){height:14px}.bars i:nth-child(5){height:18px}.channel{padding:22px 0 12px}.channel small{color:#71917a;font:700 9px/1 ui-monospace,monospace;letter-spacing:.15em}.channel strong{display:block;margin-top:7px;color:#c9ffd2;font:900 clamp(31px,5vw,62px)/.95 ui-monospace,monospace;letter-spacing:-.06em}.channel em{display:block;margin-top:8px;color:#6d8d73;font:700 10px/1.3 ui-monospace,monospace;font-style:normal;letter-spacing:.09em}.wave{height:86px;display:flex;align-items:center;gap:4px;border-top:1px solid rgba(148,227,163,.1);border-bottom:1px solid rgba(148,227,163,.1);overflow:hidden}.wave i{width:4px;min-width:4px;border-radius:2px;background:linear-gradient(var(--green),#2d7e42);height:var(--h);animation:pulsewave 1.7s ease-in-out infinite alternate;animation-delay:var(--d);opacity:.82}.screen-copy{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:14px;background:rgba(148,227,163,.1);border:1px solid rgba(148,227,163,.1)}.screen-metric{padding:12px;background:#0a110b}.screen-metric small{display:block;color:#5f7964;font:700 8px/1.2 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase}.screen-metric strong{display:block;margin-top:5px;color:#aee9b8;font:700 10px/1.3 ui-monospace,monospace;overflow-wrap:anywhere}.event-head{display:flex;justify-content:space-between;color:#75947b;padding-bottom:10px;border-bottom:1px solid rgba(148,227,163,.12)}.feed{display:grid;gap:8px;margin-top:11px}.feed-row{display:grid;grid-template-columns:48px 1fr;gap:9px;padding:9px;border-left:2px solid #31543a;background:rgba(148,227,163,.025)}.feed-row b{color:#5f8a68;font:700 8px/1.3 ui-monospace,monospace}.feed-row span{color:#92af97;font:600 9px/1.45 ui-monospace,monospace}.feed-row.live{border-color:var(--orange)}.feed-row.live b{color:var(--orange)}.feed-row.live span{color:#c7d9c9}.screen-footer{margin-top:15px;color:#63806a;font:700 8px/1.4 ui-monospace,monospace;letter-spacing:.1em}
+    .softkeys{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:18px}.softkey{min-height:76px;text-decoration:none;border:1px solid #2b302b;background:linear-gradient(#1a1e1a,#111411);border-radius:9px;padding:11px 12px;box-shadow:inset 0 1px rgba(255,255,255,.035),0 4px 9px rgba(0,0,0,.25);transition:.16s ease}.softkey:hover{transform:translateY(-2px);border-color:rgba(243,107,22,.55)}.softkey span{display:block;color:var(--orange);font:700 8px/1 ui-monospace,monospace}.softkey strong{display:block;margin-top:8px;font:850 12px/1.1 ui-monospace,monospace;letter-spacing:.06em}.softkey small{display:block;margin-top:4px;color:#686f68;font-size:9px}.softkey.disabled{opacity:.42}
+    .lower{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:24px 0 0}.panel{border:1px solid var(--line);background:rgba(255,255,255,.012);padding:20px}.panel h2{margin:6px 0 14px;font-size:20px}.panel p{margin:0;color:var(--muted);font-size:12px;line-height:1.65}.route-list{display:grid;gap:7px;margin-top:16px}.route{display:flex;justify-content:space-between;gap:15px;border-top:1px solid var(--line);padding-top:7px;font:650 9px/1.4 ui-monospace,monospace}.route code{color:#b9c0b8}.route span{color:#697068}.principles{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.principles b{padding:7px 8px;border:1px solid var(--line);font:750 8px/1 ui-monospace,monospace;letter-spacing:.1em}.principles b:first-child{color:var(--orange);border-color:rgba(243,107,22,.35)}
+    .terrain{height:76px;margin-top:10px;opacity:.7}.terrain svg{width:100%;height:100%}footer{min-height:86px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:18px;color:#5d645d;font:700 9px/1.4 ui-monospace,monospace;letter-spacing:.09em;text-transform:uppercase}
+    @keyframes pulsewave{from{transform:scaleY(.35);opacity:.45}to{transform:scaleY(1);opacity:.95}}
+    @media(max-width:900px){.radio-top{grid-template-columns:1fr auto}.statusline{display:none}.screen{grid-template-columns:1fr}.softkeys{grid-template-columns:repeat(3,1fr)}.lower{grid-template-columns:1fr}}@media(max-width:600px){.shell{width:min(100% - 18px,1280px)}header{align-items:flex-start;flex-direction:column;padding:14px 0}.topnav{justify-content:flex-start}.hero{padding-top:34px}.radio{border-radius:15px;padding:10px}.radio-top{padding:10px 6px}.knobs{display:none}.screen{padding:13px;min-height:0}.screen-copy{grid-template-columns:1fr 1fr}.softkeys{grid-template-columns:1fr 1fr}.softkey:last-child{grid-column:1/-1}footer{align-items:flex-start;flex-direction:column;padding:22px 0}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   </style>
 </head>
 <body>
   <main class="shell">
     <header>
-      <a class="brand-lockup" href="https://www.terrasatch.com" aria-label="TerraSatch home">
-        <img class="brand-logo" src="__BRAND_LOGO__" alt="TerraSatch logo">
-        <span class="brand-copy"><strong>TERRASATCH</strong><span>Terrain Intelligence · API</span></span>
-      </a>
-      <nav class="nav" aria-label="API resources">
-        <a class="nav-link" href="/health/ready">Health</a>
-        __DOCS_LINK__
-        <a class="nav-link" href="/openapi.json">OpenAPI</a>
-        <a class="nav-link" href="/api/v1/reference">Reference</a>
-        <a class="nav-link primary" href="/admin">Admin</a>
-      </nav>
+      <a class="brand" href="https://www.terrasatch.com" aria-label="TerraSatch home"><img src="__BRAND_LOGO__" alt="TerraSatch logo"><span class="brand-copy"><strong>TERRASATCH</strong><span>Terrain Intelligence · Radio API</span></span></a>
+      <nav class="topnav" aria-label="API resources"><a href="/health/ready">Health</a>__DOCS_NAV__<a href="/openapi.json">OpenAPI</a><a href="/api/v1/reference">Reference</a><a href="/admin">Admin</a></nav>
     </header>
 
     <section class="hero">
-      <div>
-        <div class="kicker micro">Wasatch Front · Utah · Official backend</div>
-        <h1><span>Terrain</span><span>Intelligence</span><span class="accent">API.</span></h1>
-        <p class="hero-copy">The shared TerraSatch backend for authorized field data, TerraListen radio intelligence, partner applications, and operational decision support across backcountry and remote environments.</p>
-        <div class="chips" aria-label="Platform characteristics">
-          <span class="chip">AI-Powered</span><span class="chip">Field-Grade</span><span class="chip">Decision Support</span><span class="chip">Partner Ready</span>
+      <div class="eyebrow micro">Wasatch Front · Utah · TerraListen Core</div>
+      <h1>Field Radio.<br><span class="accent">Structured Intelligence.</span></h1>
+      <p class="sub">The live TerraSatch backend presented like the tool it is becoming: a shared receive-side radio intelligence console for authorized field traffic, structured events, partner applications, and operational decision support.</p>
+
+      <div class="radio" aria-label="TerraSatch radio console">
+        <div class="radio-top">
+          <div class="radio-id"><img src="__BRAND_LOGO__" alt=""><div><strong>TERRASATCH</strong><small>RX INTELLIGENCE</small></div></div>
+          <div class="statusline">SECURE LINK · <b id="header-state">QUERYING</b> · HTTPS/WSS</div>
+          <div class="knobs" aria-hidden="true"><i class="knob"></i><i class="knob"></i></div>
+        </div>
+
+        <div class="screen">
+          <section class="screen-main">
+            <div class="rx-line"><div class="rx micro"><i class="rx-dot"></i><span id="rx-state">RX · CHECKING</span></div><div class="bars" aria-label="Signal strength"><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="channel"><small>CH 01 · TERRASATCH CORE</small><strong>TERRALISTEN</strong><em>MODE: RECEIVE + STRUCTURE · TX: DISABLED</em></div>
+            <div class="wave" aria-label="Animated receive waveform">
+              <i style="--h:18%;--d:-.2s"></i><i style="--h:34%;--d:-.7s"></i><i style="--h:58%;--d:-1.2s"></i><i style="--h:82%;--d:-.4s"></i><i style="--h:44%;--d:-1.4s"></i><i style="--h:68%;--d:-.9s"></i><i style="--h:28%;--d:-.1s"></i><i style="--h:74%;--d:-1.6s"></i><i style="--h:92%;--d:-.6s"></i><i style="--h:48%;--d:-1.1s"></i><i style="--h:22%;--d:-.3s"></i><i style="--h:64%;--d:-1.3s"></i><i style="--h:87%;--d:-.8s"></i><i style="--h:35%;--d:-.5s"></i><i style="--h:70%;--d:-1.7s"></i><i style="--h:26%;--d:-.2s"></i><i style="--h:51%;--d:-1s"></i><i style="--h:78%;--d:-.6s"></i><i style="--h:39%;--d:-1.5s"></i><i style="--h:63%;--d:-.4s"></i><i style="--h:19%;--d:-1.1s"></i><i style="--h:83%;--d:-.7s"></i><i style="--h:54%;--d:-1.3s"></i><i style="--h:31%;--d:-.3s"></i><i style="--h:72%;--d:-.9s"></i><i style="--h:46%;--d:-1.6s"></i><i style="--h:90%;--d:-.5s"></i><i style="--h:37%;--d:-1.2s"></i><i style="--h:61%;--d:-.8s"></i><i style="--h:25%;--d:-1.4s"></i>
+            </div>
+            <div class="screen-copy"><div class="screen-metric"><small>Environment</small><strong>__ENVIRONMENT__</strong></div><div class="screen-metric"><small>Deployment</small><strong>__DEPLOYMENT__</strong></div><div class="screen-metric"><small>Version</small><strong>__VERSION__</strong></div><div class="screen-metric"><small>Readiness</small><strong id="ready-value">QUERYING</strong></div></div>
+          </section>
+
+          <aside class="screen-side">
+            <div class="event-head micro"><span>LIVE SYSTEM FEED</span><span>UTC / RX</span></div>
+            <div class="feed">
+              <div class="feed-row live"><b>CORE</b><span id="feed-health">Polling /health/ready…</span></div>
+              <div class="feed-row"><b>AUTH</b><span>Tenant-scoped bearer API keys ready</span></div>
+              <div class="feed-row"><b>RADIO</b><span>Agents · channels · callsigns · transmissions</span></div>
+              <div class="feed-row"><b>ENGINE</b><span>Source-linked transcripts + structured events</span></div>
+              <div class="feed-row"><b>LINK</b><span>REST + realtime WSS event delivery</span></div>
+            </div>
+            <div class="screen-footer">40.7608° N · 111.8910° W<br>WASATCH FRONT · UTAH<br>LISTEN · WATCH · LEARN · ADAPT</div>
+          </aside>
+        </div>
+
+        <div class="softkeys" aria-label="Radio soft keys">
+          <a class="softkey" href="/health/ready"><span>F1</span><strong>HEALTH</strong><small>Readiness check</small></a>
+          __DOCS_SOFTKEY__
+          <a class="softkey" href="/openapi.json"><span>F3</span><strong>OPENAPI</strong><small>Machine contract</small></a>
+          <a class="softkey" href="/api/v1/reference"><span>F4</span><strong>REFERENCE</strong><small>Route catalog</small></a>
+          <a class="softkey" href="/admin"><span>F5</span><strong>ADMIN</strong><small>Control plane</small></a>
         </div>
       </div>
 
-      <aside class="system-card" aria-label="TerraSatch API system status">
-        <div class="system-head"><span class="micro">TerraSatch Core</span><span class="online micro"><i class="pulse"></i><span id="status-text">Checking</span></span></div>
-        <div class="system-body">
-          <h2 class="system-title">Field Intelligence Backend</h2>
-          <div class="metric-grid">
-            <div class="metric"><small>Environment</small><strong>__ENVIRONMENT__</strong></div>
-            <div class="metric"><small>Deployment</small><strong>__DEPLOYMENT__</strong></div>
-            <div class="metric"><small>Version</small><strong>__VERSION__</strong></div>
-            <div class="metric"><small>Signal</small><strong id="signal-value">QUERYING</strong></div>
-          </div>
-        </div>
-        <div class="terminal"><span class="prompt">$</span> terrasatch deployment check<br><span class="ok" id="terminal-state">● querying /health/ready</span><br>40.7608° N · 111.8910° W · WASATCH<br>UTM 12T · ELEV 4,226 FT · HTTPS/WSS</div>
-      </aside>
-    </section>
-
-    <section class="block" id="gateways">
-      <div class="section-head"><div><span class="micro" style="color:var(--orange-2)">Platform access</span><h2>Developer + Operator Gateways</h2></div><p>Everything needed to validate the live backend, inspect its contract, administer integrations, and connect independent TerraSatch applications.</p></div>
-      <div class="gateways">
-        <a class="gateway" href="/health/ready"><span class="gateway-index">01</span><strong>Health</strong><span>Database + Redis readiness</span><b>CHECK ↗</b></a>
-        __DOCS_CARD__
-        <a class="gateway" href="/openapi.json"><span class="gateway-index">03</span><strong>OpenAPI</strong><span>Machine-readable contract</span><b>OPEN ↗</b></a>
-        <a class="gateway" href="/admin"><span class="gateway-index">04</span><strong>Admin</strong><span>Organizations, sites, and keys</span><b>LOGIN ↗</b></a>
+      <div class="lower">
+        <section class="panel"><span class="micro" style="color:var(--orange)">RX PIPELINE</span><h2>Radio → Intelligence → Applications</h2><p>Authorized field traffic is preserved as source transmissions and transcripts before TerraEngine produces structured operational events for downstream demos and partner tools.</p><div class="route-list"><div class="route"><code>POST /api/v1/transmissions</code><span>INGEST</span></div><div class="route"><code>GET /api/v1/transcripts</code><span>SOURCE</span></div><div class="route"><code>GET /api/v1/events</code><span>INTEL</span></div><div class="route"><code>WSS /ws/v1/events</code><span>LIVE</span></div></div></section>
+        <section class="panel"><span class="micro" style="color:var(--orange)">FIELD OPERATIONS</span><h2>One Core. Focused Channels.</h2><p>Organizations and sites isolate partner contexts while the same backend can support avalanche, road, park, patrol, wildfire, SAR, utility, and other remote-field workflows.</p><div class="principles"><b>LISTEN</b><b>WATCH</b><b>LEARN</b><b>ADAPT</b></div></section>
       </div>
+
+      <div class="terrain" aria-hidden="true"><svg viewBox="0 0 1280 80" preserveAspectRatio="none"><defs><linearGradient id="ridge" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f36b16" stop-opacity="0"/><stop offset=".25" stop-color="#f36b16"/><stop offset=".55" stop-color="#f4a52c"/><stop offset="1" stop-color="#f36b16" stop-opacity="0"/></linearGradient></defs><path d="M0 68 120 64 190 48 245 62 318 35 380 61 454 24 526 63 600 41 670 61 746 30 814 60 887 42 955 61 1030 32 1110 57 1180 46 1280 68" fill="none" stroke="url(#ridge)" stroke-width="2"/><g fill="#eee3ca" opacity=".14"><path d="M125 70h24l-12-16h6l-14-20-14 20h6l-12 16h16Z"/><path d="M1090 70h24l-12-16h6l-14-20-14 20h6l-12 16h16Z"/></g></svg></div>
     </section>
 
-    <section class="block" id="stack">
-      <div class="section-head"><div><span class="micro" style="color:var(--orange-2)">Field intelligence stack</span><h2>One Backend. Multiple Operations.</h2></div><p>The API is structured so focused demos, pilots, and partner applications can share one secure system without duplicating operational logic.</p></div>
-      <div class="stack">
-        <article class="stack-card" data-stage="01"><span class="tag micro">Control plane</span><h3>Organizations + Sites</h3><p>Tenant-scoped organizations, operating locations, service credentials, and access boundaries.</p><code>/api/v1/sites · /api/v1/api-keys</code></article>
-        <article class="stack-card" data-stage="02"><span class="tag micro">TerraListen</span><h3>Radio Intelligence Inputs</h3><p>Agents, channels, callsigns, authorized transmissions, and preserved source transcripts.</p><code>/agents · /channels · /callsigns · /transmissions</code></article>
-        <article class="stack-card" data-stage="03"><span class="tag micro">TerraEngine</span><h3>Structured Events</h3><p>Source-linked operational intelligence designed for mapping, timelines, reporting, and focused workflows.</p><code>/transcripts · /events</code></article>
-        <article class="stack-card" data-stage="04"><span class="tag micro">Applications</span><h3>REST + Realtime</h3><p>Stable interfaces for UAC-style demos, partner pilots, field tools, and future edge integrations.</p><code>HTTPS REST · WSS /ws/v1/events</code></article>
-      </div>
-    </section>
-
-    <div class="terrain-strip" aria-hidden="true">
-      <svg viewBox="0 0 1280 100" preserveAspectRatio="none">
-        <defs><linearGradient id="terrainLine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f36b16" stop-opacity="0"/><stop offset=".18" stop-color="#f36b16"/><stop offset=".52" stop-color="#f2b52c"/><stop offset=".84" stop-color="#f36b16"/><stop offset="1" stop-color="#f36b16" stop-opacity="0"/></linearGradient></defs>
-        <path d="M0 87 105 82 172 63 226 78 298 42 355 73 430 29 505 75 565 50 628 77 697 33 760 72 827 46 902 76 981 34 1042 66 1118 49 1280 87" fill="none" stroke="url(#terrainLine)" stroke-width="2"/>
-        <g fill="#f4eddb" opacity=".16"><path d="M118 88h20l-10-14h5l-12-17-12 17h5l-10 14h14Z"/><path d="M247 88h28l-14-19h7l-16-23-16 23h7l-14 19h18Z"/><path d="M1020 88h28l-14-19h7l-16-23-16 23h7l-14 19h18Z"/><path d="M1152 88h20l-10-14h5l-12-17-12 17h5l-10 14h14Z"/></g>
-      </svg>
-    </div>
-
-    <footer><span>TerraSatch · Backcountry + Remote Field Operations</span><span class="footer-principles"><span><b>LISTEN</b></span><span>WATCH</span><span>LEARN</span><span>ADAPT</span></span><span>Receive · Structure · Contextualize · Serve</span></footer>
+    <footer><span>TerraSatch · Terrain Intelligence</span><span>Receive-only decision support · No autonomous radio transmission</span><span>api.terrasatch.com</span></footer>
   </main>
-
   <script>
-    (async () => {
-      const statusText = document.getElementById('status-text');
-      const signal = document.getElementById('signal-value');
-      const terminal = document.getElementById('terminal-state');
-      try {
-        const response = await fetch('/health/ready', { cache: 'no-store' });
-        const payload = await response.json();
-        if (response.ok && payload.status === 'healthy') {
-          statusText.textContent = 'SYSTEMS ONLINE'; signal.textContent = 'HEALTHY'; terminal.textContent = '● HEALTHY · database + redis ready';
-        } else {
-          statusText.textContent = 'DEGRADED'; signal.textContent = 'DEGRADED'; terminal.textContent = '● DEGRADED · inspect readiness';
-        }
-      } catch (_error) {
-        statusText.textContent = 'UNAVAILABLE'; signal.textContent = 'UNKNOWN'; terminal.textContent = '● status request failed';
-      }
-    })();
+    (async()=>{const header=document.getElementById('header-state'),rx=document.getElementById('rx-state'),ready=document.getElementById('ready-value'),feed=document.getElementById('feed-health');try{const r=await fetch('/health/ready',{cache:'no-store'}),p=await r.json();if(r.ok&&p.status==='healthy'){header.textContent='SYSTEMS ONLINE';rx.textContent='RX · ONLINE';ready.textContent='HEALTHY';feed.textContent='API + database + Redis ready'}else{header.textContent='DEGRADED';rx.textContent='RX · DEGRADED';ready.textContent='DEGRADED';feed.textContent='Readiness degraded · inspect health'}}catch(_e){header.textContent='UNAVAILABLE';rx.textContent='RX · UNKNOWN';ready.textContent='UNKNOWN';feed.textContent='Readiness request failed'}})();
   </script>
 </body>
 </html>"""
