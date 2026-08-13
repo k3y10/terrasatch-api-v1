@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 import typer
 
-from terrasatch.cli.edge import edge_app
+from terrasatch.cli.edge import edge_app, rtl_capture
 from terrasatch.edge.client import EdgeApiClient
-from terrasatch.edge.devices import discover_receivers
+from terrasatch.edge.devices import discover_receivers, select_receiver
 from terrasatch.edge.profile import EdgeProfile, load_edge_profile, save_edge_profile
 
 
@@ -78,6 +79,86 @@ def detect() -> None:
         typer.echo(
             f"{device.name}: backend={device.backend} capture_ready={device.capture_ready} — {device.detail}"
         )
+
+
+@edge_app.command("capture")
+def capture(
+    frequency_hz: Annotated[int, typer.Option("--frequency-hz", min=1)],
+    output: Annotated[Path, typer.Option("--output")] = Path("terrasatch-rx.wav"),
+    seconds: Annotated[float, typer.Option("--seconds", min=0.5, max=120)] = 10.0,
+    device: Annotated[str | None, typer.Option("--device")] = None,
+    modulation: Annotated[str, typer.Option("--modulation")] = "fm",
+    gain_db: Annotated[float | None, typer.Option("--gain-db")] = None,
+    squelch: Annotated[int | None, typer.Option("--squelch", min=0)] = None,
+    ppm: Annotated[int | None, typer.Option("--ppm", min=-250, max=250)] = None,
+) -> None:
+    """Use the configured/auto receiver and capture a short receive-only WAV."""
+
+    profile = load_edge_profile()
+    try:
+        selected = select_receiver(discover_receivers(), backend=profile.backend)
+    except Exception as error:
+        typer.echo(f"Receiver selection failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if selected.backend != "rtl":
+        typer.echo(
+            f"{selected.name} is recognized, but its TerraListen audio adapter is not enabled yet.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    rtl_capture(
+        frequency_hz=frequency_hz,
+        output=output,
+        seconds=seconds,
+        device=device or profile.device_id,
+        modulation=modulation,
+        gain_db=gain_db,
+        squelch=squelch,
+        ppm=ppm,
+        submit_text=None,
+        site=None,
+        callsign=None,
+        api_base_url=None,
+    )
+
+
+@edge_app.command("demo")
+def demo(
+    frequency_hz: Annotated[int, typer.Option("--frequency-hz", min=1)],
+    output: Annotated[Path, typer.Option("--output")] = Path("terrasatch-demo.wav"),
+    seconds: Annotated[float, typer.Option("--seconds", min=0.5, max=120)] = 10.0,
+    text: Annotated[
+        str | None,
+        typer.Option("--text", help="Optional operator-reviewed transcript; not automatic STT."),
+    ] = None,
+    site: Annotated[UUID | None, typer.Option("--site")] = None,
+    callsign: Annotated[str | None, typer.Option("--callsign")] = None,
+) -> None:
+    """Plug in, capture locally, and optionally submit a connected demo without choosing an org."""
+
+    capture(frequency_hz=frequency_hz, output=output, seconds=seconds)
+    if text is None:
+        typer.echo("demo: local capture complete; API submission skipped")
+        return
+    profile = load_edge_profile()
+    destination = site or profile.site_id
+    if destination is None or not os.getenv("TERRASATCH_EDGE_API_KEY", "").strip():
+        typer.echo(
+            "demo: local capture complete; API submission skipped because no demo site/API key is configured"
+        )
+        return
+    try:
+        payload = EdgeApiClient.from_environment(base_url=profile.api_base_url).submit_text(
+            site_id=destination,
+            text=text,
+            callsign=callsign,
+            source="edge-demo",
+        )
+    except Exception as error:
+        typer.echo(f"Demo submission failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(f"demo: API submission complete; events={len(payload.get('events', []))}")
+    typer.echo("organization: derived from API credential")
 
 
 @edge_app.command("demo-submit")
