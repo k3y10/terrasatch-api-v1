@@ -24,6 +24,7 @@ class RtlCaptureConfig:
     output_rate_hz: int = 16_000
     gain_db: float | None = None
     squelch: int | None = None
+    ppm: int | None = None
 
     def validate(self) -> None:
         if self.frequency_hz <= 0:
@@ -38,6 +39,8 @@ class RtlCaptureConfig:
             raise ValueError("output_rate_hz is outside the supported audio range")
         if self.squelch is not None and self.squelch < 0:
             raise ValueError("squelch must be non-negative")
+        if self.ppm is not None and not -250 <= self.ppm <= 250:
+            raise ValueError("ppm must be between -250 and 250")
 
 
 def build_rtl_fm_command(config: RtlCaptureConfig, executable: str = "rtl_fm") -> list[str]:
@@ -61,6 +64,8 @@ def build_rtl_fm_command(config: RtlCaptureConfig, executable: str = "rtl_fm") -
         command.extend(["-g", str(config.gain_db)])
     if config.squelch is not None:
         command.extend(["-l", str(config.squelch)])
+    if config.ppm is not None:
+        command.extend(["-p", str(config.ppm)])
     command.append("-")
     return command
 
@@ -94,6 +99,18 @@ def probe_rtl_device(*, device: str | None = None, timeout_seconds: float = 2.0)
     return output or "rtl_test completed without diagnostic output"
 
 
+def _wait_for_capture(process: subprocess.Popen[bytes], duration_seconds: float) -> bool:
+    """Wait for the requested duration and report whether rtl_fm exited unexpectedly early."""
+
+    deadline = time.monotonic() + duration_seconds
+    while process.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.1, remaining))
+    return True
+
+
 def capture_rtl_fm(config: RtlCaptureConfig, output: str | Path) -> Path:
     """Capture bounded demodulated receive audio from rtl_fm into a mono 16-bit WAV file."""
 
@@ -107,15 +124,20 @@ def capture_rtl_fm(config: RtlCaptureConfig, output: str | Path) -> Path:
     raw_path: Path | None = None
 
     try:
-        with tempfile.NamedTemporaryFile(prefix="terrasatch-rtl-", suffix=".pcm", delete=False) as raw:
+        with tempfile.NamedTemporaryFile(
+            prefix="terrasatch-rtl-",
+            suffix=".pcm",
+            delete=False,
+        ) as raw:
             raw_path = Path(raw.name)
             process = subprocess.Popen(
                 build_rtl_fm_command(config, executable=executable),
                 stdout=raw,
                 stderr=subprocess.PIPE,
             )
-            time.sleep(config.duration_seconds)
-            process.terminate()
+            exited_early = _wait_for_capture(process, config.duration_seconds)
+            if not exited_early:
+                process.terminate()
             try:
                 _, stderr = process.communicate(timeout=3)
             except subprocess.TimeoutExpired:
@@ -123,8 +145,12 @@ def capture_rtl_fm(config: RtlCaptureConfig, output: str | Path) -> Path:
                 _, stderr = process.communicate()
 
         payload = raw_path.read_bytes()
+        detail = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
+        if exited_early and process.returncode not in (0, None):
+            raise RuntimeError(
+                f"rtl_fm exited before the capture duration (code {process.returncode}). {detail}".strip()
+            )
         if not payload:
-            detail = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
             raise RuntimeError(f"rtl_fm produced no audio samples. {detail}".strip())
 
         with wave.open(str(destination), "wb") as recording:
