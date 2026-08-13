@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import wave
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -65,7 +66,7 @@ def edge_doctor(
             )
             payload["api_health_status"] = response.status_code
             payload["api_health"] = response.json().get("status", "unknown")
-        except Exception as error:  # bounded diagnostic: return a status instead of a traceback
+        except Exception as error:
             payload["api_health"] = "unavailable"
             payload["api_health_error"] = type(error).__name__
     _emit(payload, json_output=json_output)
@@ -143,7 +144,7 @@ def edge_inspect_wav(
 
     try:
         payload = inspect_wav(path)
-    except (OSError, wave.Error) as error:  # type: ignore[name-defined]
+    except (OSError, wave.Error) as error:
         typer.echo(f"Unable to inspect WAV: {error}", err=True)
         raise typer.Exit(code=2) from error
     _emit(payload, json_output=json_output)
