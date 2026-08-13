@@ -1,6 +1,8 @@
 # Brand-only API landing deployment
 
-This branch changes only the public landing page, landing-page tests, and brand-alignment documentation. It does not add a database migration.
+The public `https://www.terrasatch.com` site is the visual source of truth for the API root. This change aligns the API landing page to the current TerraSatch field-intelligence identity while keeping the API host lightweight and operator/developer focused.
+
+This branch changes the public landing page, landing-page tests, brand-asset coverage, and this deployment note. It does not add a database migration.
 
 After merge to `main`, update Oracle with:
 
