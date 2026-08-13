@@ -1,0 +1,19 @@
+[Unit]
+Description=TerraSatch Edge Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=terrasatch
+Group=terrasatch
+WorkingDirectory=/opt/terrasatch-ai-radio-core
+EnvironmentFile=/etc/terrasatch/edge.env
+ExecStart=/opt/terrasatch-ai-radio-core/.venv/bin/terrasatch edge start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

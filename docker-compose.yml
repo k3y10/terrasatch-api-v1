@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: terrasatch
+      POSTGRES_USER: terrasatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-terrasatch}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terrasatch -d terrasatch"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TERRASATCH_ENV: ${TERRASATCH_ENV:-local}
+      TERRASATCH_DEPLOYMENT_NAME: ${TERRASATCH_DEPLOYMENT_NAME:-docker-compose}
+      TERRASATCH_API_BASE_URL: ${TERRASATCH_API_BASE_URL:-http://${TERRASATCH_LAN_HOST:-localhost}:8000}
+      TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:-terrasatch}@postgres:5432/terrasatch
+      TERRASATCH_REDIS_URL: redis://redis:6379/0
+      TERRASATCH_CORS_ORIGINS: ${TERRASATCH_CORS_ORIGINS:-http://${TERRASATCH_LAN_HOST:-localhost}:3000,http://${TERRASATCH_LAN_HOST:-localhost}:4173,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${TERRASATCH_API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+
+  worker:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    command: ["terrasatch", "worker"]
+    environment:
+      TERRASATCH_ENV: ${TERRASATCH_ENV:-local}
+      TERRASATCH_DEPLOYMENT_NAME: ${TERRASATCH_DEPLOYMENT_NAME:-docker-compose}
+      TERRASATCH_API_BASE_URL: http://localhost:8000
+      TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:-terrasatch}@postgres:5432/terrasatch
+      TERRASATCH_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["public-tunnel"]
+    command:
+      ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
