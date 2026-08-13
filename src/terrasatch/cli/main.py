@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import generate_session_secret, hash_admin_password
 from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
+from terrasatch.cli.radio import register_radio_cli
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
@@ -45,6 +46,7 @@ app.add_typer(site_app, name="site")
 app.add_typer(api_key_app, name="api-key")
 app.add_typer(admin_app, name="admin")
 app.add_typer(deployment_app, name="deployment")
+register_radio_cli(app)
 
 
 def _load_settings() -> Settings:
