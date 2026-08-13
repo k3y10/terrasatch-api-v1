@@ -16,13 +16,14 @@ def make_settings() -> Settings:
     return Settings(
         environment="local",
         deployment_name="test",
+        build_sha="test-revision",
         api_base_url="http://testserver",
         cors_origins=["https://client.example"],
     )
 
 
 @pytest.mark.asyncio
-async def test_liveness_includes_request_id_and_configured_cors() -> None:
+async def test_liveness_includes_request_id_cors_and_revision() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
 
@@ -34,6 +35,7 @@ async def test_liveness_includes_request_id_and_configured_cors() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+    assert response.json()["revision"] == "test-revision"
     assert response.headers["x-request-id"] == "test-request"
     assert response.headers["access-control-allow-origin"] == "https://client.example"
 
@@ -48,6 +50,7 @@ async def test_readiness_returns_503_when_dependency_report_is_unhealthy(monkeyp
             environment="local",
             deployment="test",
             version="0.1.0",
+            revision="test-revision",
             timestamp=datetime.now(UTC),
             dependencies=[DependencyStatus(name="database", status="unhealthy")],
         )
@@ -59,6 +62,7 @@ async def test_readiness_returns_503_when_dependency_report_is_unhealthy(monkeyp
         response = await client.get("/api/v1/health")
 
     assert response.status_code == 503
+    assert response.json()["revision"] == "test-revision"
     assert response.json()["dependencies"][0]["name"] == "database"
 
 
