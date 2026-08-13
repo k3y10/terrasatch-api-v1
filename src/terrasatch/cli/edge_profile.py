@@ -23,9 +23,15 @@ def setup(
         UUID | None,
         typer.Option("--site", help="Optional site UUID; required for organization mode."),
     ] = None,
-    backend: Annotated[str, typer.Option("--backend", help="auto, rtl, or hackrf")] = "auto",
+    backend: Annotated[
+        str,
+        typer.Option("--backend", help="auto, rtl, or hackrf"),
+    ] = "auto",
     device: Annotated[str | None, typer.Option("--device")] = None,
-    api_base_url: Annotated[str, typer.Option("--api-base-url")] = "https://api.terrasatch.com",
+    api_base_url: Annotated[
+        str,
+        typer.Option("--api-base-url"),
+    ] = "https://api.terrasatch.com",
 ) -> None:
     """Save non-secret edge preferences; demo mode needs no organization or credential."""
 
@@ -58,12 +64,13 @@ def status() -> None:
     except Exception as error:
         typer.echo(f"Unable to load edge profile: {error}", err=True)
         raise typer.Exit(code=1) from error
+    has_key = bool(os.getenv("TERRASATCH_EDGE_API_KEY", "").strip())
     typer.echo(f"mode: {profile.mode}")
     typer.echo(f"backend: {profile.backend}")
     typer.echo(f"device: {profile.device_id or 'auto'}")
     typer.echo(f"site_id: {profile.site_id or 'not configured'}")
     typer.echo(f"api_base_url: {profile.api_base_url}")
-    typer.echo(f"api_key_configured: {bool(os.getenv('TERRASATCH_EDGE_API_KEY', '').strip())}")
+    typer.echo(f"api_key_configured: {has_key}")
     typer.echo("organization: derived from the API credential when connected")
 
 
@@ -77,7 +84,8 @@ def detect() -> None:
         return
     for device in devices:
         typer.echo(
-            f"{device.name}: backend={device.backend} capture_ready={device.capture_ready} — {device.detail}"
+            f"{device.name}: backend={device.backend} "
+            f"capture_ready={device.capture_ready} — {device.detail}"
         )
 
 
@@ -85,12 +93,18 @@ def detect() -> None:
 def capture(
     frequency_hz: Annotated[int, typer.Option("--frequency-hz", min=1)],
     output: Annotated[Path, typer.Option("--output")] = Path("terrasatch-rx.wav"),
-    seconds: Annotated[float, typer.Option("--seconds", min=0.5, max=120)] = 10.0,
+    seconds: Annotated[
+        float,
+        typer.Option("--seconds", min=0.5, max=120),
+    ] = 10.0,
     device: Annotated[str | None, typer.Option("--device")] = None,
     modulation: Annotated[str, typer.Option("--modulation")] = "fm",
     gain_db: Annotated[float | None, typer.Option("--gain-db")] = None,
     squelch: Annotated[int | None, typer.Option("--squelch", min=0)] = None,
-    ppm: Annotated[int | None, typer.Option("--ppm", min=-250, max=250)] = None,
+    ppm: Annotated[
+        int | None,
+        typer.Option("--ppm", min=-250, max=250),
+    ] = None,
 ) -> None:
     """Use the configured/auto receiver and capture a short receive-only WAV."""
 
@@ -102,7 +116,8 @@ def capture(
         raise typer.Exit(code=1) from error
     if selected.backend != "rtl":
         typer.echo(
-            f"{selected.name} is recognized, but its TerraListen audio adapter is not enabled yet.",
+            f"{selected.name} is recognized, but its TerraListen audio adapter "
+            "is not enabled yet.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -126,15 +141,21 @@ def capture(
 def demo(
     frequency_hz: Annotated[int, typer.Option("--frequency-hz", min=1)],
     output: Annotated[Path, typer.Option("--output")] = Path("terrasatch-demo.wav"),
-    seconds: Annotated[float, typer.Option("--seconds", min=0.5, max=120)] = 10.0,
+    seconds: Annotated[
+        float,
+        typer.Option("--seconds", min=0.5, max=120),
+    ] = 10.0,
     text: Annotated[
         str | None,
-        typer.Option("--text", help="Optional operator-reviewed transcript; not automatic STT."),
+        typer.Option(
+            "--text",
+            help="Optional operator-reviewed transcript; not automatic STT.",
+        ),
     ] = None,
     site: Annotated[UUID | None, typer.Option("--site")] = None,
     callsign: Annotated[str | None, typer.Option("--callsign")] = None,
 ) -> None:
-    """Plug in, capture locally, and optionally submit a connected demo without choosing an org."""
+    """Capture locally and optionally submit a connected demo without choosing an org."""
 
     capture(frequency_hz=frequency_hz, output=output, seconds=seconds)
     if text is None:
@@ -142,13 +163,17 @@ def demo(
         return
     profile = load_edge_profile()
     destination = site or profile.site_id
-    if destination is None or not os.getenv("TERRASATCH_EDGE_API_KEY", "").strip():
+    has_key = bool(os.getenv("TERRASATCH_EDGE_API_KEY", "").strip())
+    if destination is None or not has_key:
         typer.echo(
-            "demo: local capture complete; API submission skipped because no demo site/API key is configured"
+            "demo: local capture complete; API submission skipped because no "
+            "demo site/API key is configured"
         )
         return
     try:
-        payload = EdgeApiClient.from_environment(base_url=profile.api_base_url).submit_text(
+        payload = EdgeApiClient.from_environment(
+            base_url=profile.api_base_url
+        ).submit_text(
             site_id=destination,
             text=text,
             callsign=callsign,
@@ -157,13 +182,18 @@ def demo(
     except Exception as error:
         typer.echo(f"Demo submission failed: {error}", err=True)
         raise typer.Exit(code=1) from error
-    typer.echo(f"demo: API submission complete; events={len(payload.get('events', []))}")
+    typer.echo(
+        f"demo: API submission complete; events={len(payload.get('events', []))}"
+    )
     typer.echo("organization: derived from API credential")
 
 
 @edge_app.command("demo-submit")
 def demo_submit(
-    text: Annotated[str, typer.Option("--text", help="Operator-reviewed transcript text.")],
+    text: Annotated[
+        str,
+        typer.Option("--text", help="Operator-reviewed transcript text."),
+    ],
     site: Annotated[UUID | None, typer.Option("--site")] = None,
     callsign: Annotated[str | None, typer.Option("--callsign")] = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
@@ -173,9 +203,13 @@ def demo_submit(
     profile = load_edge_profile()
     destination = site or profile.site_id
     if destination is None:
-        raise typer.BadParameter("Configure a demo site once with edge setup or provide --site")
+        raise typer.BadParameter(
+            "Configure a demo site once with edge setup or provide --site"
+        )
     try:
-        payload = EdgeApiClient.from_environment(base_url=profile.api_base_url).submit_text(
+        payload = EdgeApiClient.from_environment(
+            base_url=profile.api_base_url
+        ).submit_text(
             site_id=destination,
             text=text,
             callsign=callsign,
