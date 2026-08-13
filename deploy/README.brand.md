@@ -1,1 +1,0 @@
-The public TerraSatch website (`https://www.terrasatch.com`) is the visual source of truth for the API landing page. The API root should remain recognizably part of the same product family while staying lightweight and operator/developer oriented.
