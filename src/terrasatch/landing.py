@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 
 
-_BRAND_LOGO_URL = "https://www.terrasatch.com/assets/terrasatch-logo-BEpaywXF.png"
+_BRAND_LOGO_URL = "/assets/terrasatch-logo.svg"
 
 
 def build_landing_page(
@@ -218,90 +218,68 @@ def build_landing_page(
     .metric:nth-last-child(-n+2) { border-bottom: 0; }
     .metric small { display: block; color: var(--faint); font: 650 9px/1.2 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
     .metric strong { display: block; font: 700 12px/1.3 ui-monospace, monospace; color: #e8e8e0; overflow-wrap: anywhere; }
-    .coordinates { margin-top: 16px; color: #676e66; font: 650 9px/1.6 ui-monospace, monospace; letter-spacing: .07em; }
-    .terminal {
-      margin-top: 16px;
-      border: 1px solid var(--line);
-      padding: 12px 13px;
-      font: 650 10px/1.55 ui-monospace, monospace;
-      color: #8e958c;
-      background: #090a09;
-    }
+    .terminal { margin-top: 15px; border-top: 1px solid var(--line); padding: 15px 20px; font: 600 10px/1.6 ui-monospace, monospace; color: #7c827b; background: rgba(0,0,0,.16); }
     .terminal .prompt { color: var(--orange-2); }
     .terminal .ok { color: var(--green); }
 
-    .section { padding: 68px 0; }
-    .section-heading { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: end; margin-bottom: 28px; }
-    .section-heading .label { color: var(--orange-2); margin-bottom: 10px; }
-    .section-heading h2 { margin: 0; font-size: clamp(30px, 4.4vw, 58px); line-height: .95; letter-spacing: -.04em; text-transform: uppercase; }
-    .section-heading p { max-width: 480px; color: var(--muted); margin: 0; font-size: 13px; line-height: 1.65; text-align: right; }
-
+    section.block { padding: 58px 0; border-bottom: 1px solid var(--line); }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 25px; }
+    .section-head h2 { margin: 7px 0 0; font-size: clamp(28px, 4vw, 52px); letter-spacing: -.035em; }
+    .section-head p { max-width: 550px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
     .gateways { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); }
     .gateway {
+      position: relative;
       min-height: 190px;
-      padding: 19px;
-      text-decoration: none;
+      padding: 20px;
       display: flex;
       flex-direction: column;
+      text-decoration: none;
       border-right: 1px solid var(--line);
       background: rgba(255,255,255,.012);
-      transition: .18s ease;
+      transition: .2s ease;
     }
     .gateway:last-child { border-right: 0; }
-    a.gateway:hover { background: rgba(243,107,22,.055); transform: translateY(-2px); }
-    .gateway-index { color: var(--orange); font: 800 10px/1 ui-monospace, monospace; letter-spacing: .15em; }
-    .gateway strong { margin-top: 39px; font-size: 18px; }
-    .gateway span:not(.gateway-index) { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.45; }
-    .gateway b { margin-top: auto; color: #727970; font: 700 9px/1 ui-monospace, monospace; letter-spacing: .15em; }
-    .disabled-card { opacity: .45; }
+    a.gateway:hover { background: rgba(243,107,22,.045); transform: translateY(-2px); }
+    .gateway-index { color: var(--orange-2); font: 700 9px/1 monospace; letter-spacing: .16em; }
+    .gateway strong { margin-top: auto; font-size: 21px; }
+    .gateway span:not(.gateway-index) { color: var(--muted); margin-top: 4px; font-size: 11px; }
+    .gateway b { margin-top: 16px; color: #d6d9d2; font: 700 9px/1 monospace; letter-spacing: .12em; }
+    .disabled-card { opacity: .43; }
 
-    .stack-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    .stack-card { min-height: 220px; border: 1px solid var(--line); background: rgba(255,255,255,.015); padding: 19px; position: relative; }
-    .stack-card::after { content: ""; position: absolute; left: 19px; right: 19px; top: 52px; height: 1px; background: var(--line); }
-    .stack-card .number { color: var(--orange); }
-    .stack-card h3 { margin: 42px 0 10px; font-size: 17px; }
-    .stack-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-    .stack-card ul { list-style: none; padding: 0; margin: 19px 0 0; display: grid; gap: 7px; }
-    .stack-card li { color: #c3c7c0; font: 650 10px/1.4 ui-monospace, monospace; }
-    .stack-card li::before { content: "↳ "; color: var(--orange); }
+    .stack { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+    .stack-card { position: relative; min-height: 230px; padding: 19px; border: 1px solid var(--line); background: rgba(255,255,255,.012); overflow: hidden; }
+    .stack-card::before { content: attr(data-stage); position: absolute; right: 13px; top: 8px; color: rgba(244,237,219,.035); font: 900 72px/1 Impact, sans-serif; }
+    .stack-card .tag { color: var(--orange-2); }
+    .stack-card h3 { margin: 55px 0 8px; font-size: 19px; }
+    .stack-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .stack-card code { display: block; margin-top: 15px; color: #777f78; font: 600 9px/1.5 ui-monospace, monospace; white-space: normal; }
 
-    .forest-line { height: 82px; margin-top: 22px; opacity: .5; }
-    .forest-line svg { width: 100%; height: 100%; }
-    .forest-line path { fill: rgba(244,237,219,.14); }
-    .forest-line .signal { fill: var(--orange); }
+    .terrain-strip { height: 96px; position: relative; overflow: hidden; opacity: .8; }
+    .terrain-strip svg { width: 100%; height: 100%; }
+    footer { min-height: 110px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #686e68; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .footer-principles { display: flex; gap: 14px; flex-wrap: wrap; color: #a8ada6; }
+    .footer-principles b { color: var(--orange-2); }
 
-    footer {
-      padding: 28px 0 38px;
-      border-top: 1px solid var(--line);
-      display: flex;
-      justify-content: space-between;
-      gap: 20px;
-      color: #656b64;
-      font-size: 10px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
-
-    @media (max-width: 980px) {
-      .hero { grid-template-columns: 1fr; gap: 45px; padding-top: 62px; }
-      .hero-copy { max-width: 760px; }
-      .system-card { max-width: 650px; }
-      .gateways, .stack-grid { grid-template-columns: 1fr 1fr; }
+    @media (max-width: 1000px) {
+      .hero { grid-template-columns: 1fr; gap: 38px; padding-top: 68px; }
+      .system-card { max-width: 620px; }
+      .gateways, .stack { grid-template-columns: 1fr 1fr; }
       .gateway:nth-child(2) { border-right: 0; }
       .gateway:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
-    @media (max-width: 700px) {
-      header { align-items: flex-start; padding: 17px 0; flex-direction: column; }
+    @media (max-width: 680px) {
+      .shell { width: min(100% - 22px, 1280px); }
+      header { align-items: flex-start; flex-direction: column; padding: 17px 0; }
+      .brand-logo { width: 50px; height: 50px; }
       .nav { justify-content: flex-start; }
-      .hero { min-height: 0; padding: 56px 0; }
-      h1 { font-size: clamp(58px, 21vw, 96px); }
-      .section-heading { grid-template-columns: 1fr; }
-      .section-heading p { text-align: left; }
-      .gateways, .stack-grid { grid-template-columns: 1fr; }
-      .gateway { border-right: 0; border-bottom: 1px solid var(--line); min-height: 155px; }
+      .hero { min-height: auto; padding: 64px 0 48px; }
+      h1 { font-size: clamp(52px, 20vw, 90px); }
+      .section-head { align-items: flex-start; flex-direction: column; }
+      .gateways, .stack { grid-template-columns: 1fr; }
+      .gateway { border-right: 0; border-bottom: 1px solid var(--line); min-height: 150px; }
       .gateway:last-child { border-bottom: 0; }
-      .stack-card { min-height: 190px; }
-      footer { flex-direction: column; }
+      .stack-card { min-height: 200px; }
+      footer { align-items: flex-start; flex-direction: column; padding: 28px 0; }
     }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   </style>
@@ -309,112 +287,96 @@ def build_landing_page(
 <body>
   <main class="shell">
     <header>
-      <a class="brand-lockup" href="https://www.terrasatch.com" aria-label="TerraSatch main website">
+      <a class="brand-lockup" href="https://www.terrasatch.com" aria-label="TerraSatch home">
         <img class="brand-logo" src="__BRAND_LOGO__" alt="TerraSatch logo">
         <span class="brand-copy"><strong>TERRASATCH</strong><span>Terrain Intelligence · API</span></span>
       </a>
       <nav class="nav" aria-label="API resources">
-        <a class="nav-link" href="https://www.terrasatch.com">Main Site</a>
         <a class="nav-link" href="/health/ready">Health</a>
         __DOCS_LINK__
         <a class="nav-link" href="/openapi.json">OpenAPI</a>
-        <a class="nav-link primary" href="/admin">Admin Console</a>
+        <a class="nav-link" href="/api/v1/reference">Reference</a>
+        <a class="nav-link primary" href="/admin">Admin</a>
       </nav>
     </header>
 
     <section class="hero">
       <div>
-        <div class="kicker micro">Wasatch Front · Utah · Official Backend</div>
+        <div class="kicker micro">Wasatch Front · Utah · Official backend</div>
         <h1><span>Terrain</span><span>Intelligence</span><span class="accent">API.</span></h1>
-        <p class="hero-copy">The integration layer behind TerraSatch field intelligence. Authorized partner applications, operational data, TerraListen radio workflows, and structured events share one secure backend.</p>
-        <div class="chips">
-          <span class="chip">AI-Powered</span>
-          <span class="chip">Field-Grade</span>
-          <span class="chip">Decision Support</span>
-          <span class="chip">Partner Ready</span>
+        <p class="hero-copy">The shared TerraSatch backend for authorized field data, TerraListen radio intelligence, partner applications, and operational decision support across backcountry and remote environments.</p>
+        <div class="chips" aria-label="Platform characteristics">
+          <span class="chip">AI-Powered</span><span class="chip">Field-Grade</span><span class="chip">Decision Support</span><span class="chip">Partner Ready</span>
         </div>
       </div>
 
       <aside class="system-card" aria-label="TerraSatch API system status">
-        <div class="system-head">
-          <span class="micro">System Status</span>
-          <span class="online micro" id="api-status"><i class="pulse"></i><span id="status-text">Checking</span></span>
-        </div>
+        <div class="system-head"><span class="micro">TerraSatch Core</span><span class="online micro"><i class="pulse"></i><span id="status-text">Checking</span></span></div>
         <div class="system-body">
-          <h2 class="system-title">TerraSatch Core</h2>
+          <h2 class="system-title">Field Intelligence Backend</h2>
           <div class="metric-grid">
             <div class="metric"><small>Environment</small><strong>__ENVIRONMENT__</strong></div>
             <div class="metric"><small>Deployment</small><strong>__DEPLOYMENT__</strong></div>
-            <div class="metric"><small>Release</small><strong>v__VERSION__</strong></div>
-            <div class="metric"><small>Transport</small><strong>HTTPS · WSS</strong></div>
+            <div class="metric"><small>Version</small><strong>__VERSION__</strong></div>
+            <div class="metric"><small>Signal</small><strong id="signal-value">QUERYING</strong></div>
           </div>
-          <div class="coordinates">40.7608° N &nbsp;|&nbsp; 111.8910° W &nbsp;|&nbsp; ELV 4,226 FT &nbsp;|&nbsp; GRID UTM 12T</div>
-          <div class="terminal"><span class="prompt">$</span> terrasatch deployment check<br><span class="ok" id="terminal-state">● querying /health/ready</span></div>
         </div>
+        <div class="terminal"><span class="prompt">$</span> terrasatch deployment check<br><span class="ok" id="terminal-state">● querying /health/ready</span><br>40.7608° N · 111.8910° W · WASATCH<br>UTM 12T · ELEV 4,226 FT · HTTPS/WSS</div>
       </aside>
     </section>
 
-    <section class="section">
-      <div class="section-heading">
-        <div><div class="label micro">Developer Access</div><h2>Platform Gateways</h2></div>
-        <p>Direct entry points for system health, interactive testing, machine-readable contracts, and operator administration.</p>
-      </div>
+    <section class="block" id="gateways">
+      <div class="section-head"><div><span class="micro" style="color:var(--orange-2)">Platform access</span><h2>Developer + Operator Gateways</h2></div><p>Everything needed to validate the live backend, inspect its contract, administer integrations, and connect independent TerraSatch applications.</p></div>
       <div class="gateways">
         <a class="gateway" href="/health/ready"><span class="gateway-index">01</span><strong>Health</strong><span>Database + Redis readiness</span><b>CHECK ↗</b></a>
         __DOCS_CARD__
-        <a class="gateway" href="/openapi.json"><span class="gateway-index">03</span><strong>OpenAPI</strong><span>Machine-readable API contract</span><b>VIEW JSON ↗</b></a>
-        <a class="gateway" href="/admin"><span class="gateway-index">04</span><strong>Admin</strong><span>Organizations, sites + API access</span><b>SECURE ENTRY ↗</b></a>
+        <a class="gateway" href="/openapi.json"><span class="gateway-index">03</span><strong>OpenAPI</strong><span>Machine-readable contract</span><b>OPEN ↗</b></a>
+        <a class="gateway" href="/admin"><span class="gateway-index">04</span><strong>Admin</strong><span>Organizations, sites, and keys</span><b>LOGIN ↗</b></a>
       </div>
     </section>
 
-    <section class="section">
-      <div class="section-heading">
-        <div><div class="label micro">Modular Architecture</div><h2>Field Intelligence Stack</h2></div>
-        <p>The API mirrors TerraSatch's broader architecture: secure inputs are structured, contextualized, persisted, and served back to operational tools.</p>
-      </div>
-      <div class="stack-grid">
-        <article class="stack-card"><span class="number micro">01 · Control</span><h3>Organizations + Sites</h3><p>Tenant-aware configuration for partner pilots, operational areas, and separate field deployments.</p><ul><li>API keys</li><li>Scopes</li><li>Site isolation</li></ul></article>
-        <article class="stack-card"><span class="number micro">02 · Signal</span><h3>TerraListen Inputs</h3><p>Authorized transmissions enter a common ingestion path designed for future radio, audio, edge, and SDR sources.</p><ul><li>Transmissions</li><li>Channels</li><li>Callsigns</li></ul></article>
-        <article class="stack-card"><span class="number micro">03 · Intelligence</span><h3>Structured Events</h3><p>Source-preserving transcripts are transformed into normalized operational events with provenance and context.</p><ul><li>Transcripts</li><li>TerraEngine</li><li>Event records</li></ul></article>
-        <article class="stack-card"><span class="number micro">04 · Serve</span><h3>REST + Realtime</h3><p>Partner demos consume one stable interface rather than maintaining separate mock intelligence pipelines.</p><ul><li>REST API</li><li>OpenAPI</li><li>WebSocket</li></ul></article>
-      </div>
-
-      <div class="forest-line" aria-hidden="true">
-        <svg viewBox="0 0 1200 90" preserveAspectRatio="none">
-          <path d="M0 82 56 82 78 55 89 68 106 40 123 68 136 52 155 82 222 82 249 48 260 65 281 27 305 64 319 47 342 82 410 82 434 58 447 71 465 45 486 70 499 57 520 82 681 82 706 50 718 66 740 33 762 66 778 49 798 82 866 82 891 57 904 70 924 41 948 69 961 55 983 82 1055 82 1082 52 1096 68 1117 31 1140 68 1155 48 1180 82Z"/>
-          <path class="signal" d="M565 82 588 52 599 67 617 40 636 67 649 54 670 82Z"/>
-        </svg>
+    <section class="block" id="stack">
+      <div class="section-head"><div><span class="micro" style="color:var(--orange-2)">Field intelligence stack</span><h2>One Backend. Multiple Operations.</h2></div><p>The API is structured so focused demos, pilots, and partner applications can share one secure system without duplicating operational logic.</p></div>
+      <div class="stack">
+        <article class="stack-card" data-stage="01"><span class="tag micro">Control plane</span><h3>Organizations + Sites</h3><p>Tenant-scoped organizations, operating locations, service credentials, and access boundaries.</p><code>/api/v1/sites · /api/v1/api-keys</code></article>
+        <article class="stack-card" data-stage="02"><span class="tag micro">TerraListen</span><h3>Radio Intelligence Inputs</h3><p>Agents, channels, callsigns, authorized transmissions, and preserved source transcripts.</p><code>/agents · /channels · /callsigns · /transmissions</code></article>
+        <article class="stack-card" data-stage="03"><span class="tag micro">TerraEngine</span><h3>Structured Events</h3><p>Source-linked operational intelligence designed for mapping, timelines, reporting, and focused workflows.</p><code>/transcripts · /events</code></article>
+        <article class="stack-card" data-stage="04"><span class="tag micro">Applications</span><h3>REST + Realtime</h3><p>Stable interfaces for UAC-style demos, partner pilots, field tools, and future edge integrations.</p><code>HTTPS REST · WSS /ws/v1/events</code></article>
       </div>
     </section>
 
-    <footer><span>TerraSatch · Terrain Intelligence · Salt Lake City, UT</span><span>Listen · Watch · Learn · Adapt</span></footer>
+    <div class="terrain-strip" aria-hidden="true">
+      <svg viewBox="0 0 1280 100" preserveAspectRatio="none">
+        <defs><linearGradient id="terrainLine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f36b16" stop-opacity="0"/><stop offset=".18" stop-color="#f36b16"/><stop offset=".52" stop-color="#f2b52c"/><stop offset=".84" stop-color="#f36b16"/><stop offset="1" stop-color="#f36b16" stop-opacity="0"/></linearGradient></defs>
+        <path d="M0 87 105 82 172 63 226 78 298 42 355 73 430 29 505 75 565 50 628 77 697 33 760 72 827 46 902 76 981 34 1042 66 1118 49 1280 87" fill="none" stroke="url(#terrainLine)" stroke-width="2"/>
+        <g fill="#f4eddb" opacity=".16"><path d="M118 88h20l-10-14h5l-12-17-12 17h5l-10 14h14Z"/><path d="M247 88h28l-14-19h7l-16-23-16 23h7l-14 19h18Z"/><path d="M1020 88h28l-14-19h7l-16-23-16 23h7l-14 19h18Z"/><path d="M1152 88h20l-10-14h5l-12-17-12 17h5l-10 14h14Z"/></g>
+      </svg>
+    </div>
+
+    <footer><span>TerraSatch · Backcountry + Remote Field Operations</span><span class="footer-principles"><span><b>LISTEN</b></span><span>WATCH</span><span>LEARN</span><span>ADAPT</span></span><span>Receive · Structure · Contextualize · Serve</span></footer>
   </main>
 
   <script>
     (async () => {
-      const status = document.getElementById('status-text');
+      const statusText = document.getElementById('status-text');
+      const signal = document.getElementById('signal-value');
       const terminal = document.getElementById('terminal-state');
       try {
         const response = await fetch('/health/ready', { cache: 'no-store' });
         const payload = await response.json();
         if (response.ok && payload.status === 'healthy') {
-          status.textContent = 'ONLINE';
-          terminal.textContent = '● HEALTHY · database + redis ready';
+          statusText.textContent = 'SYSTEMS ONLINE'; signal.textContent = 'HEALTHY'; terminal.textContent = '● HEALTHY · database + redis ready';
         } else {
-          status.textContent = 'DEGRADED';
-          terminal.textContent = '● DEGRADED · inspect readiness';
-          document.querySelector('.pulse').style.background = 'var(--orange)';
+          statusText.textContent = 'DEGRADED'; signal.textContent = 'DEGRADED'; terminal.textContent = '● DEGRADED · inspect readiness';
         }
       } catch (_error) {
-        status.textContent = 'UNKNOWN';
-        terminal.textContent = '● status request failed';
-        document.querySelector('.pulse').style.background = 'var(--orange)';
+        statusText.textContent = 'UNAVAILABLE'; signal.textContent = 'UNKNOWN'; terminal.textContent = '● status request failed';
       }
     })();
   </script>
 </body>
 </html>"""
 
-    for placeholder, value in replacements.items():
-        html = html.replace(placeholder, value)
+    for marker, value in replacements.items():
+        html = html.replace(marker, value)
     return html
