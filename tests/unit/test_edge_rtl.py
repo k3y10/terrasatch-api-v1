@@ -17,6 +17,7 @@ def test_rtl_fm_command_is_receive_only_argument_vector() -> None:
             device="0",
             gain_db=28.0,
             squelch=18,
+            ppm=12,
         )
     )
 
@@ -24,6 +25,7 @@ def test_rtl_fm_command_is_receive_only_argument_vector() -> None:
     assert command[command.index("-f") + 1] == "462575000"
     assert command[command.index("-M") + 1] == "fm"
     assert command[command.index("-d") + 1] == "0"
+    assert command[command.index("-p") + 1] == "12"
     assert "rtl_tx" not in command
     assert "ptt" not in " ".join(command).lower()
 
@@ -34,9 +36,12 @@ def test_rtl_fm_command_is_receive_only_argument_vector() -> None:
         RtlCaptureConfig(frequency_hz=0),
         RtlCaptureConfig(frequency_hz=462_575_000, duration_seconds=0.1),
         RtlCaptureConfig(frequency_hz=462_575_000, modulation="invalid"),
+        RtlCaptureConfig(frequency_hz=462_575_000, ppm=251),
     ],
 )
-def test_rtl_capture_config_rejects_invalid_values(config: RtlCaptureConfig) -> None:
+def test_rtl_capture_config_rejects_invalid_values(
+    config: RtlCaptureConfig,
+) -> None:
     with pytest.raises(ValueError):
         config.validate()
 
@@ -61,7 +66,11 @@ def test_wav_inspection_reports_pcm_energy(tmp_path) -> None:
 
 
 def test_edge_tool_discovery_does_not_launch_commands(monkeypatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "rtl_test" else None)
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name == "rtl_test" else None,
+    )
 
     status = {item.name: item for item in inspect_edge_tools()}
 
