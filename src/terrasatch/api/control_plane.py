@@ -1,4 +1,4 @@
-"""Tenant-safe, JSON control-plane endpoints for sites and API keys."""
+"""Tenant-safe JSON control-plane endpoints for sites, teams, and API keys."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.api.schemas import (
@@ -15,14 +15,19 @@ from terrasatch.api.schemas import (
     IssuedApiKeyResponse,
     SiteCreateRequest,
     SiteResponse,
+    SiteUpdateRequest,
+    TeamCreateRequest,
+    TeamResponse,
+    TeamUpdateRequest,
 )
 from terrasatch.auth.dependencies import Principal, require_scope
 from terrasatch.auth.models import ApiKey
 from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
-from terrasatch.identity.models import Site
-from terrasatch.organizations.service import create_site, list_sites
+from terrasatch.identity.models import Site, Team
+from terrasatch.identity.service import create_team, get_team, list_teams, update_team
+from terrasatch.organizations.service import create_site, get_site, list_sites, update_site
 
 router = APIRouter(tags=["control-plane"])
 
@@ -50,6 +55,21 @@ def _site_response(site: Site) -> SiteResponse:
         organization_id=site.organization_id,
         name=site.name,
         slug=site.slug,
+        enabled=site.enabled,
+        created_at=site.created_at,
+        updated_at=site.updated_at,
+    )
+
+
+def _team_response(team: Team) -> TeamResponse:
+    return TeamResponse(
+        id=team.id,
+        organization_id=team.organization_id,
+        site_id=team.site_id,
+        name=team.name,
+        enabled=team.enabled,
+        created_at=team.created_at,
+        updated_at=team.updated_at,
     )
 
 
@@ -67,13 +87,18 @@ def _api_key_response(api_key: ApiKey) -> ApiKeyResponse:
 @router.get("/sites", response_model=list[SiteResponse])
 async def get_sites(
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("admin"))],
+    principal: Annotated[Principal, Depends(require_scope("read:sites"))],
+    enabled: Annotated[bool | None, Query()] = None,
 ) -> list[SiteResponse]:
     """List sites only for the API key's server-derived organization."""
 
     _organization, sites = await _run_database(
         request.app.state.settings,
-        lambda session: list_sites(session, organization_selector=str(principal.organization_id)),
+        lambda session: list_sites(
+            session,
+            organization_selector=str(principal.organization_id),
+            enabled=enabled,
+        ),
     )
     return [_site_response(site) for site in sites]
 
@@ -82,7 +107,7 @@ async def get_sites(
 async def post_site(
     payload: SiteCreateRequest,
     request: Request,
-    principal: Annotated[Principal, Depends(require_scope("admin"))],
+    principal: Annotated[Principal, Depends(require_scope("write:sites"))],
 ) -> SiteResponse:
     """Create a site in the authenticated key's organization."""
 
@@ -95,6 +120,114 @@ async def post_site(
         ),
     )
     return _site_response(site)
+
+
+@router.get("/sites/{site_id}", response_model=SiteResponse)
+async def get_site_by_id(
+    site_id: UUID,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("read:sites"))],
+) -> SiteResponse:
+    site = await _run_database(
+        request.app.state.settings,
+        lambda session: get_site(
+            session,
+            organization_id=principal.organization_id,
+            site_id=site_id,
+        ),
+    )
+    return _site_response(site)
+
+
+@router.patch("/sites/{site_id}", response_model=SiteResponse)
+async def patch_site(
+    site_id: UUID,
+    payload: SiteUpdateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("write:sites"))],
+) -> SiteResponse:
+    site = await _run_database(
+        request.app.state.settings,
+        lambda session: update_site(
+            session,
+            organization_id=principal.organization_id,
+            site_id=site_id,
+            payload=payload,
+        ),
+    )
+    return _site_response(site)
+
+
+@router.get("/teams", response_model=list[TeamResponse])
+async def get_teams(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("read:teams"))],
+    site_id: Annotated[UUID | None, Query()] = None,
+    enabled: Annotated[bool | None, Query()] = None,
+) -> list[TeamResponse]:
+    teams = await _run_database(
+        request.app.state.settings,
+        lambda session: list_teams(
+            session,
+            organization_id=principal.organization_id,
+            site_id=site_id,
+            enabled=enabled,
+        ),
+    )
+    return [_team_response(team) for team in teams]
+
+
+@router.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
+async def post_team(
+    payload: TeamCreateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("write:teams"))],
+) -> TeamResponse:
+    team = await _run_database(
+        request.app.state.settings,
+        lambda session: create_team(
+            session,
+            organization_id=principal.organization_id,
+            payload=payload,
+        ),
+    )
+    return _team_response(team)
+
+
+@router.get("/teams/{team_id}", response_model=TeamResponse)
+async def get_team_by_id(
+    team_id: UUID,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("read:teams"))],
+) -> TeamResponse:
+    team = await _run_database(
+        request.app.state.settings,
+        lambda session: get_team(
+            session,
+            organization_id=principal.organization_id,
+            team_id=team_id,
+        ),
+    )
+    return _team_response(team)
+
+
+@router.patch("/teams/{team_id}", response_model=TeamResponse)
+async def patch_team(
+    team_id: UUID,
+    payload: TeamUpdateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("write:teams"))],
+) -> TeamResponse:
+    team = await _run_database(
+        request.app.state.settings,
+        lambda session: update_team(
+            session,
+            organization_id=principal.organization_id,
+            team_id=team_id,
+            payload=payload,
+        ),
+    )
+    return _team_response(team)
 
 
 @router.get("/api-keys", response_model=list[ApiKeyResponse])
