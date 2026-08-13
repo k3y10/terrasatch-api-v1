@@ -7,7 +7,18 @@ def test_edge_help_exposes_simple_demo_workflow() -> None:
     result = CliRunner().invoke(app, ["edge", "--help"])
 
     assert result.exit_code == 0
-    for command in ("setup", "status", "detect", "capture", "demo", "demo-submit", "rtl", "audio", "api"):
+    expected_commands = (
+        "setup",
+        "status",
+        "detect",
+        "capture",
+        "demo",
+        "demo-submit",
+        "rtl",
+        "audio",
+        "api",
+    )
+    for command in expected_commands:
         assert command in result.stdout
 
 
