@@ -36,7 +36,7 @@ async def start_pairing(session: AsyncSession, payload: PairingStartRequest) -> 
     return pairing, device_code
 
 
-async def approve_pairing(session: AsyncSession, *, user_code: str, organization_id: UUID, api_key_id: UUID, site_id: UUID) -> EdgePairing:
+async def approve_pairing(session: AsyncSession, *, user_code: str, organization_id: UUID, api_key_id: UUID | None, site_id: UUID) -> EdgePairing:
     pairing = await session.scalar(select(EdgePairing).where(EdgePairing.user_code == normalize_user_code(user_code)))
     if pairing is None:
         raise ResourceNotFound("Edge pairing code was not found")
