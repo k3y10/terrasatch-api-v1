@@ -1,4 +1,5 @@
 """Operational quality reporting for API clients and the administrator console."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -33,6 +34,14 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("POST", "/api/v1/teams", "bearer_api_key", "Create a tenant-owned operating team."),
         ("GET", "/api/v1/teams/{team_id}", "bearer_api_key", "Read one tenant-owned operating team."),
         ("PATCH", "/api/v1/teams/{team_id}", "bearer_api_key", "Update or disable a tenant-owned operating team."),
+        ("POST", "/api/v1/edge/pairings", "public", "Start a short-lived Edge device pairing flow."),
+        ("POST", "/api/v1/edge/pairings/token", "public", "Poll an Edge pairing and claim its device credential once approved."),
+        ("POST", "/api/v1/edge/pairings/{user_code}/approve", "bearer_api_key", "Approve an Edge pairing for a tenant site."),
+        ("GET", "/api/v1/edge/devices", "bearer_api_key", "List registered Edge devices for the tenant."),
+        ("PATCH", "/api/v1/edge/devices/{device_id}", "bearer_api_key", "Update Edge site, status, name, or remote configuration."),
+        ("GET", "/api/v1/edge/me", "bearer_api_key", "Return the Edge device bound to the presented device credential."),
+        ("POST", "/api/v1/edge/heartbeat", "bearer_api_key", "Update Edge liveness, hardware inventory, and capabilities."),
+        ("GET", "/api/v1/edge/config", "bearer_api_key", "Return remote configuration for the authenticated Edge device."),
         ("GET", "/api/v1/agents", "bearer_api_key", "List TerraSatch agents with site/profile/enabled filters."),
         ("POST", "/api/v1/agents", "bearer_api_key", "Create a site-scoped TerraSatch processing agent."),
         ("GET", "/api/v1/agents/{agent_id}", "bearer_api_key", "Read one TerraSatch processing agent."),
@@ -59,6 +68,8 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("GET", "/api/v1/admin/quality", "bearer_api_key", "Admin-scoped operational quality report."),
         ("GET", "/api/v1/admin/reference", "bearer_api_key", "Admin-scoped API and error catalog."),
         ("GET", "/admin", "admin_session", "Browser operator console with controlled create operations."),
+        ("GET", "/admin/edge/pair", "admin_session", "Browser flow for selecting a tenant site for an Edge pairing."),
+        ("POST", "/admin/edge/pair", "admin_session", "Approve an Edge pairing from the browser admin console."),
     ]
     return [
         ApiCatalogEntry(method=method, path=path, authorization=authorization, summary=summary)
@@ -70,41 +81,13 @@ def common_errors() -> list[ErrorCodeReference]:
     """Return the stable error reference applicable to current API routes."""
 
     return [
-        ErrorCodeReference(
-            http_status=400,
-            code="invalid_configuration",
-            meaning="Configuration or a requested resource relationship is invalid.",
-        ),
-        ErrorCodeReference(
-            http_status=401,
-            code="authentication_required",
-            meaning="A bearer API key is absent, invalid, expired, or revoked.",
-        ),
-        ErrorCodeReference(
-            http_status=403,
-            code="insufficient_scope",
-            meaning="The API key lacks the required scope for this operation.",
-        ),
-        ErrorCodeReference(
-            http_status=404,
-            code="not_found",
-            meaning="The requested tenant-owned resource does not exist or is not visible to this tenant.",
-        ),
-        ErrorCodeReference(
-            http_status=409,
-            code="resource_conflict",
-            meaning="A resource with the requested unique name or slug already exists.",
-        ),
-        ErrorCodeReference(
-            http_status=422,
-            code="validation_error",
-            meaning="The request shape or value does not meet the API contract.",
-        ),
-        ErrorCodeReference(
-            http_status=503,
-            code="service_unavailable",
-            meaning="A required dependency or configured provider is not ready.",
-        ),
+        ErrorCodeReference(http_status=400, code="invalid_configuration", meaning="Configuration or a requested resource relationship is invalid."),
+        ErrorCodeReference(http_status=401, code="authentication_required", meaning="A bearer API key is absent, invalid, expired, or revoked."),
+        ErrorCodeReference(http_status=403, code="insufficient_scope", meaning="The API key lacks the required scope for this operation."),
+        ErrorCodeReference(http_status=404, code="not_found", meaning="The requested tenant-owned resource does not exist or is not visible to this tenant."),
+        ErrorCodeReference(http_status=409, code="resource_conflict", meaning="A resource with the requested unique name or slug already exists."),
+        ErrorCodeReference(http_status=422, code="validation_error", meaning="The request shape or value does not meet the API contract."),
+        ErrorCodeReference(http_status=503, code="service_unavailable", meaning="A required dependency or configured provider is not ready."),
     ]
 
 

@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.service import issue_api_key
 from terrasatch.config import Settings
-from terrasatch.edge.codes import generate_device_code, generate_user_code, hash_device_code, normalize_user_code
+from terrasatch.edge.codes import (
+    generate_device_code,
+    generate_user_code,
+    hash_device_code,
+    normalize_user_code,
+)
 from terrasatch.edge.models import EdgeDevice, EdgePairing
 from terrasatch.edge.schemas import EdgeDeviceUpdateRequest, EdgeHeartbeatRequest, PairingStartRequest
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
@@ -19,7 +24,10 @@ PAIRING_TTL_MINUTES = 10
 DEVICE_SCOPES = ("edge:connect", "edge:ingest", "read:sites")
 
 
-async def start_pairing(session: AsyncSession, payload: PairingStartRequest) -> tuple[EdgePairing, str]:
+async def start_pairing(
+    session: AsyncSession,
+    payload: PairingStartRequest,
+) -> tuple[EdgePairing, str]:
     device_code = generate_device_code()
     pairing = EdgePairing(
         device_code_hash=hash_device_code(device_code),
@@ -36,8 +44,19 @@ async def start_pairing(session: AsyncSession, payload: PairingStartRequest) -> 
     return pairing, device_code
 
 
-async def approve_pairing(session: AsyncSession, *, user_code: str, organization_id: UUID, api_key_id: UUID | None, site_id: UUID) -> EdgePairing:
-    pairing = await session.scalar(select(EdgePairing).where(EdgePairing.user_code == normalize_user_code(user_code)))
+async def approve_pairing(
+    session: AsyncSession,
+    *,
+    user_code: str,
+    organization_id: UUID,
+    api_key_id: UUID | None,
+    site_id: UUID,
+) -> EdgePairing:
+    pairing = await session.scalar(
+        select(EdgePairing)
+        .where(EdgePairing.user_code == normalize_user_code(user_code))
+        .with_for_update()
+    )
     if pairing is None:
         raise ResourceNotFound("Edge pairing code was not found")
     now = datetime.now(UTC)
@@ -45,6 +64,8 @@ async def approve_pairing(session: AsyncSession, *, user_code: str, organization
         raise InvalidConfiguration("Edge pairing code has expired")
     if pairing.claimed_at is not None:
         raise InvalidConfiguration("Edge pairing code has already been claimed")
+    if pairing.approved_at is not None:
+        raise InvalidConfiguration("Edge pairing code has already been approved")
     await get_site(session, organization_id=organization_id, site_id=site_id)
     pairing.organization_id = organization_id
     pairing.site_id = site_id
@@ -54,8 +75,17 @@ async def approve_pairing(session: AsyncSession, *, user_code: str, organization
     return pairing
 
 
-async def claim_pairing(session: AsyncSession, *, settings: Settings, device_code: str) -> tuple[str, EdgeDevice | None, str | None]:
-    pairing = await session.scalar(select(EdgePairing).where(EdgePairing.device_code_hash == hash_device_code(device_code)))
+async def claim_pairing(
+    session: AsyncSession,
+    *,
+    settings: Settings,
+    device_code: str,
+) -> tuple[str, EdgeDevice | None, str | None]:
+    pairing = await session.scalar(
+        select(EdgePairing)
+        .where(EdgePairing.device_code_hash == hash_device_code(device_code))
+        .with_for_update()
+    )
     if pairing is None:
         return "expired", None, None
     now = datetime.now(UTC)
@@ -65,6 +95,7 @@ async def claim_pairing(session: AsyncSession, *, settings: Settings, device_cod
         return "claimed", None, None
     if pairing.approved_at is None or pairing.organization_id is None or pairing.site_id is None:
         return "pending", None, None
+
     api_key, generated = await issue_api_key(
         session,
         settings=settings,
@@ -88,26 +119,66 @@ async def claim_pairing(session: AsyncSession, *, settings: Settings, device_cod
     return "approved", device, generated.token
 
 
-async def list_devices(session: AsyncSession, *, organization_id: UUID) -> list[EdgeDevice]:
-    return list(await session.scalars(select(EdgeDevice).where(EdgeDevice.organization_id == organization_id).order_by(EdgeDevice.created_at.desc())))
+async def list_devices(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+) -> list[EdgeDevice]:
+    return list(
+        await session.scalars(
+            select(EdgeDevice)
+            .where(EdgeDevice.organization_id == organization_id)
+            .order_by(EdgeDevice.created_at.desc())
+        )
+    )
 
 
-async def get_device(session: AsyncSession, *, organization_id: UUID, device_id: UUID) -> EdgeDevice:
-    device = await session.scalar(select(EdgeDevice).where(EdgeDevice.id == device_id, EdgeDevice.organization_id == organization_id))
+async def get_device(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    device_id: UUID,
+) -> EdgeDevice:
+    device = await session.scalar(
+        select(EdgeDevice).where(
+            EdgeDevice.id == device_id,
+            EdgeDevice.organization_id == organization_id,
+        )
+    )
     if device is None:
         raise ResourceNotFound("Edge device was not found")
     return device
 
 
-async def get_device_for_api_key(session: AsyncSession, *, organization_id: UUID, api_key_id: UUID) -> EdgeDevice:
-    device = await session.scalar(select(EdgeDevice).where(EdgeDevice.organization_id == organization_id, EdgeDevice.api_key_id == api_key_id))
+async def get_device_for_api_key(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    api_key_id: UUID,
+) -> EdgeDevice:
+    device = await session.scalar(
+        select(EdgeDevice).where(
+            EdgeDevice.organization_id == organization_id,
+            EdgeDevice.api_key_id == api_key_id,
+        )
+    )
     if device is None or not device.enabled:
         raise ResourceNotFound("Edge device was not found for this credential")
     return device
 
 
-async def heartbeat_device(session: AsyncSession, *, organization_id: UUID, api_key_id: UUID, payload: EdgeHeartbeatRequest) -> EdgeDevice:
-    device = await get_device_for_api_key(session, organization_id=organization_id, api_key_id=api_key_id)
+async def heartbeat_device(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    api_key_id: UUID,
+    payload: EdgeHeartbeatRequest,
+) -> EdgeDevice:
+    device = await get_device_for_api_key(
+        session,
+        organization_id=organization_id,
+        api_key_id=api_key_id,
+    )
     device.last_seen_at = datetime.now(UTC)
     if payload.agent_version:
         device.agent_version = payload.agent_version
@@ -117,10 +188,24 @@ async def heartbeat_device(session: AsyncSession, *, organization_id: UUID, api_
     return device
 
 
-async def update_device(session: AsyncSession, *, organization_id: UUID, device_id: UUID, payload: EdgeDeviceUpdateRequest) -> EdgeDevice:
-    device = await get_device(session, organization_id=organization_id, device_id=device_id)
+async def update_device(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    device_id: UUID,
+    payload: EdgeDeviceUpdateRequest,
+) -> EdgeDevice:
+    device = await get_device(
+        session,
+        organization_id=organization_id,
+        device_id=device_id,
+    )
     if payload.site_id is not None:
-        await get_site(session, organization_id=organization_id, site_id=payload.site_id)
+        await get_site(
+            session,
+            organization_id=organization_id,
+            site_id=payload.site_id,
+        )
         device.site_id = payload.site_id
     if payload.name is not None:
         device.name = payload.name.strip()
