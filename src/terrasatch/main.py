@@ -22,6 +22,7 @@ from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.auth.scopes import SUPPORTED_API_SCOPES
 from terrasatch.config import Settings, get_settings
+from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
 from terrasatch.landing import build_landing_page
 from terrasatch.observability.health import check_readiness, liveness
@@ -163,6 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return reference_payload()
 
     api_v1.include_router(control_plane_router)
+    api_v1.include_router(edge_router)
     api_v1.include_router(radio_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
