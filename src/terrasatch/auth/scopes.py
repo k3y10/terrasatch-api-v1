@@ -5,7 +5,10 @@ from __future__ import annotations
 SUPPORTED_API_SCOPES = frozenset(
     {
         "admin",
+        "edge:connect",
         "edge:ingest",
+        "read:edge",
+        "write:edge",
         "read:sites",
         "write:sites",
         "read:teams",
