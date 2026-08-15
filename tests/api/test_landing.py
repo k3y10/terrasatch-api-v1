@@ -28,8 +28,11 @@ async def test_root_serves_clean_terralisten_operations_console() -> None:
         "TerraSatch · TerraListen Radio Console",
         "TerraSatch Sasquatch",
         "/assets/terralisten-sasquatch.webp",
-        'rel="icon" type="image/webp"',
-        'property="og:image" content="https://api.terrasatch.com/assets/terralisten-sasquatch.webp"',
+        'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
+        (
+            'property="og:image" content="'
+            "https://api.terrasatch.com/assets/terralisten-sasquatch.png\""
+        ),
         'name="twitter:card" content="summary"',
         "TERRALISTEN",
         "TerraListen Receiver",
@@ -101,6 +104,20 @@ async def test_local_sasquatch_asset_is_served_by_api() -> None:
     assert response.content.startswith(b"RIFF")
     assert b"WEBP" in response.content[:16]
     assert len(response.content) > 10_000
+    assert "max-age=86400" in response.headers["cache-control"]
+
+
+@pytest.mark.asyncio
+async def test_local_sasquatch_preview_asset_is_served_by_api() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/assets/terralisten-sasquatch.png")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(response.content) > 8_000
     assert "max-age=86400" in response.headers["cache-control"]
 
 
