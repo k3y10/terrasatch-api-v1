@@ -1,5 +1,8 @@
-from terrasatch.landing import _BRAND_LOGO_URL
+from terrasatch.brand import SASQUATCH_ASSET_PUBLIC_URL, SASQUATCH_ASSET_URL
 
 
-def test_landing_uses_local_terrasatch_brand_asset() -> None:
-    assert _BRAND_LOGO_URL == "/assets/terrasatch-logo.svg"
+def test_public_brand_uses_local_sasquatch_asset() -> None:
+    assert SASQUATCH_ASSET_URL == "/assets/terralisten-sasquatch.webp"
+    assert SASQUATCH_ASSET_PUBLIC_URL == (
+        "https://api.terrasatch.com/assets/terralisten-sasquatch.webp"
+    )
