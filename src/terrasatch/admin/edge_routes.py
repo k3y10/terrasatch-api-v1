@@ -45,7 +45,12 @@ def _require_admin(request: Request, settings: Settings) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin login required")
 
 
-@router.get("/admin/edge/pair", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/admin/edge/pair",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    response_model=None,
+)
 async def edge_pair_form(request: Request) -> HTMLResponse | RedirectResponse:
     settings: Settings = request.app.state.settings
     if not settings.admin_is_configured:
