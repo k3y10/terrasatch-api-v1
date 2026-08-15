@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from terrasatch.auth import models as auth_models
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
+from terrasatch.edge import models as edge_models
 from terrasatch.identity import models as identity_models
 from terrasatch.radio import models as radio_models
 
-_ = (auth_models, identity_models, radio_models)
+_ = (auth_models, edge_models, identity_models, radio_models)
 
 config = context.config
 
