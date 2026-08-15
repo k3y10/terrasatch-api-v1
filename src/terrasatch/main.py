@@ -21,7 +21,7 @@ from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.auth.scopes import SUPPORTED_API_SCOPES
-from terrasatch.brand import SASQUATCH_ASSET_PATH, apply_public_branding
+from terrasatch.brand import SASQUATCH_ASSET_PATH, SASQUATCH_PREVIEW_PATH, apply_public_branding
 from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
@@ -108,11 +108,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terralisten-sasquatch.webp", include_in_schema=False)
     async def get_sasquatch_brand_asset() -> FileResponse:
-        """Serve Sassy locally for the console, favicon, and social previews."""
+        """Serve Sassy locally for the TerraListen console UI."""
 
         return FileResponse(
             SASQUATCH_ASSET_PATH,
             media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @application.get("/assets/terralisten-sasquatch.png", include_in_schema=False)
+    async def get_sasquatch_preview_asset() -> FileResponse:
+        """Serve the PNG Sassy asset for favicons and social link previews."""
+
+        return FileResponse(
+            SASQUATCH_PREVIEW_PATH,
+            media_type="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
