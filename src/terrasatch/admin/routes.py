@@ -13,8 +13,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
-from terrasatch.auth.service import issue_api_key
 from terrasatch.admin.ui import render_dashboard, render_login, render_one_time_key
+from terrasatch.auth.service import issue_api_key
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
