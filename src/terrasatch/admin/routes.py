@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from html import escape
 from typing import Annotated
 from urllib.parse import quote
 
@@ -14,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
+from terrasatch.admin.ui import render_dashboard, render_login, render_one_time_key
 from terrasatch.auth.service import issue_api_key
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
@@ -106,7 +106,7 @@ async def admin_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
             error_message = "Site data is unavailable for the selected organization."
     csrf_token = issue_csrf_token(request.session)
     return HTMLResponse(
-        _dashboard_html(
+        render_dashboard(
             report_status=report.status,
             components=report.components,
             endpoints=report.endpoints,
@@ -132,7 +132,7 @@ async def admin_login_form(request: Request) -> HTMLResponse | RedirectResponse:
     _enabled(settings)
     if _is_authenticated(request):
         return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
-    return HTMLResponse(_login_html(issue_csrf_token(request.session), failed=False))
+    return HTMLResponse(render_login(issue_csrf_token(request.session), failed=False))
 
 
 @router.post("/admin/login", include_in_schema=False, response_model=None)
@@ -151,7 +151,7 @@ async def admin_login(
         or expected_hash is None
         or not verify_admin_password(password, expected_hash.get_secret_value())
     ):
-        return HTMLResponse(_login_html(issue_csrf_token(request.session), failed=True), status_code=401)
+        return HTMLResponse(render_login(issue_csrf_token(request.session), failed=True), status_code=401)
     request.session.clear()
     request.session["admin_authenticated"] = True
     issue_csrf_token(request.session)
@@ -243,83 +243,4 @@ async def admin_create_api_key(
             f"/admin?organization={organization}&error={quote(error.message)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    return HTMLResponse(_one_time_key_html(generated.token, organization))
-
-
-def _login_html(csrf_token: str, *, failed: bool) -> str:
-    error = "<p class=error>Invalid credentials.</p>" if failed else ""
-    return f"""<!doctype html>
-<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>TerraSatch API Administration</title>{_styles()}</head>
-<body class=login><main><p class=eyebrow>TerraSatch API</p><h1>Administration</h1>
-{error}<form method=post action=/admin/login><input type=hidden name=csrf_token value="{escape(csrf_token)}">
-<label>Email<input required type=email name=email autocomplete=username></label>
-<label>Password<input required type=password name=password autocomplete=current-password></label>
-<button type=submit>Sign in</button></form></main></body></html>"""
-
-
-def _dashboard_html(
-    *,
-    report_status: str,
-    components: list[object],
-    endpoints: list[object],
-    errors: list[object],
-    organizations: list[object],
-    selected_organization: str,
-    selected_name: str,
-    sites: list[object],
-    csrf_token: str,
-    error_message: str | None,
-) -> str:
-    component_rows = "".join(
-        f"<tr><td>{escape(component.name)}</td><td class={escape(component.status)}>{escape(component.status)}</td><td>{escape(component.detail or '')}</td></tr>"
-        for component in components
-    )
-    endpoint_rows = "".join(
-        f"<tr><td>{escape(endpoint.method)}</td><td><code>{escape(endpoint.path)}</code></td><td>{escape(endpoint.authorization)}</td><td>{escape(endpoint.summary or '')}</td></tr>"
-        for endpoint in endpoints
-    )
-    error_rows = "".join(
-        f"<tr><td>{error.http_status}</td><td><code>{escape(error.code)}</code></td><td>{escape(error.meaning)}</td></tr>"
-        for error in errors
-    )
-    organization_options = "".join(
-        f"<option value='{escape(str(organization.id))}'{' selected' if str(organization.id) == selected_organization else ''}>{escape(organization.name)}</option>"
-        for organization in organizations
-    )
-    site_rows = "".join(f"<li>{escape(site.name)}</li>" for site in sites) or "<li>None</li>"
-    error_box = f"<section class=error>{escape(error_message)}</section>" if error_message else ""
-    return f"""<!doctype html>
-<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>TerraSatch API Administration</title>{_styles()}</head><body>
-<header><div><p class=eyebrow>TerraSatch API</p><h1>Operations Console</h1></div>
-<form method=post action=/admin/logout><input type=hidden name=csrf_token value="{escape(csrf_token)}"><button class=quiet type=submit>Sign out</button></form></header>
-<main><section class=overview><div><p class=label>Quality check</p><p class="result {escape(report_status)}">{escape(report_status.upper())}</p></div>
-<p>Live API, database, Redis, and worker state. Hardware and provider checks appear only after their integrations are configured.</p></section>
-{error_box}
-<section><h2>Live Components</h2><table><thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead><tbody>{component_rows}</tbody></table></section>
-<section class=columns><div><h2>Create Organization</h2><form method=post action=/admin/organizations><input type=hidden name=csrf_token value="{escape(csrf_token)}"><label>Name<input required name=name></label><button type=submit>Create</button></form></div>
-<div><h2>Tenant Context</h2><form method=get action=/admin><label>Organization<select name=organization onchange="this.form.submit()"><option value="">Select organization</option>{organization_options}</select></label></form><p>{escape(selected_name)}</p><h3>Sites</h3><ul>{site_rows}</ul></div></section>
-<section class=columns><div><h2>Create Site</h2><form method=post action=/admin/sites><input type=hidden name=csrf_token value="{escape(csrf_token)}"><input type=hidden name=organization value="{escape(selected_organization)}"><label>Name<input required name=name {'disabled' if not selected_organization else ''}></label><button type=submit {'disabled' if not selected_organization else ''}>Create</button></form></div>
-<div><h2>Issue Server API Key</h2><form method=post action=/admin/api-keys><input type=hidden name=csrf_token value="{escape(csrf_token)}"><input type=hidden name=organization value="{escape(selected_organization)}"><label>Label<input required name=name {'disabled' if not selected_organization else ''}></label><label>Scopes<input name=scope value="read:events" {'disabled' if not selected_organization else ''}></label><button type=submit {'disabled' if not selected_organization else ''}>Issue key</button></form></div></section>
-<section><h2>Implemented API Reference</h2><table><thead><tr><th>Method</th><th>Path</th><th>Authorization</th><th>Purpose</th></tr></thead><tbody>{endpoint_rows}</tbody></table></section>
-<section><h2>Common Responses</h2><table><thead><tr><th>HTTP</th><th>Code</th><th>Meaning</th></tr></thead><tbody>{error_rows}</tbody></table></section>
-</main></body></html>"""
-
-
-def _one_time_key_html(token: str, organization: str) -> str:
-    """Render a one-time credential outside session storage so it cannot enter a signed cookie."""
-
-    return f"""<!doctype html>
-<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>TerraSatch API Key</title>{_styles()}</head><body class=login><main>
-<p class=eyebrow>TerraSatch API</p><h1>New Server API Key</h1><section class=token>
-<p>This token is shown only in this response. Store it in a server-side secret manager.</p>
-<code>{escape(token)}</code></section><p><a href="/admin?organization={escape(organization)}">Return to operations console</a></p>
-</main></body></html>"""
-
-
-def _styles() -> str:
-    return """<style>
-    :root{--ink:#17222d;--canvas:#eef3f0;--paper:#fff;--line:#c9d4ce;--blue:#075985;--green:#166534;--red:#b42318;--muted:#5b6670}*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--ink);font:16px Georgia,serif}header,main{max-width:1120px;margin:auto;padding:22px 28px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}h1,h2,h3,p{margin-top:0}h1{font-size:29px;font-weight:500}h2{font-size:19px;font-weight:600}h3{font-size:15px}.eyebrow,.label{font:700 12px ui-monospace,monospace;color:var(--blue);letter-spacing:0}.overview{display:flex;gap:38px;align-items:center;border-bottom:2px solid var(--ink);padding:22px 0;margin-bottom:20px}.overview p:last-child{max-width:650px;color:var(--muted);margin:0}.result{font:700 30px ui-monospace,monospace;margin:0}.healthy,.pass{color:var(--green)}.unhealthy,.degraded,.error{color:var(--red)}section{background:var(--paper);border:1px solid var(--line);padding:20px;margin:18px 0}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px;background:none;border:0;padding:0}.columns>div{background:var(--paper);border:1px solid var(--line);padding:20px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:10px;border-top:1px solid var(--line);vertical-align:top}th{font:700 12px ui-monospace,monospace;color:var(--muted)}label{display:block;font:700 12px ui-monospace,monospace;margin:12px 0 5px}input,select{display:block;width:100%;padding:9px;border:1px solid #8da399;background:#fff;font:16px Georgia,serif}button{margin-top:12px;border:1px solid var(--blue);background:var(--blue);color:#fff;padding:9px 15px;font:700 13px ui-monospace,monospace;cursor:pointer}.quiet{background:transparent;color:var(--blue)}.login{display:grid;place-items:center;min-height:100vh}.login main{width:min(440px,100%);background:var(--paper);border:1px solid var(--line);padding:36px}.token{background:#fffbeb;border-color:#eab308}.token code{display:block;overflow-wrap:anywhere;margin-top:10px}@media(max-width:700px){header,.overview{display:block}.columns{grid-template-columns:1fr}header,main{padding:18px}table{display:block;overflow-x:auto}}
-    </style>"""
+    return HTMLResponse(render_one_time_key(generated.token, organization))
