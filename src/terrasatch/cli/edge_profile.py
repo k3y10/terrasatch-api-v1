@@ -149,7 +149,7 @@ def demo(
         str | None,
         typer.Option(
             "--text",
-            help="Optional operator-reviewed transcript; not automatic STT.",
+            help="No automatic STT. Operator-reviewed transcript only.",
         ),
     ] = None,
     site: Annotated[UUID | None, typer.Option("--site")] = None,
