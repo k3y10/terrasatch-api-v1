@@ -21,6 +21,7 @@ from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.auth.scopes import SUPPORTED_API_SCOPES
+from terrasatch.brand import SASQUATCH_ASSET_PATH, SASQUATCH_PREVIEW_PATH, apply_public_branding
 from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
@@ -105,18 +106,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
+    @application.get("/assets/terralisten-sasquatch.webp", include_in_schema=False)
+    async def get_sasquatch_brand_asset() -> FileResponse:
+        """Serve Sassy locally for the TerraListen console UI."""
+
+        return FileResponse(
+            SASQUATCH_ASSET_PATH,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @application.get("/assets/terralisten-sasquatch.png", include_in_schema=False)
+    async def get_sasquatch_preview_asset() -> FileResponse:
+        """Serve the PNG Sassy asset for favicons and social link previews."""
+
+        return FileResponse(
+            SASQUATCH_PREVIEW_PATH,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @application.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def get_landing_page() -> HTMLResponse:
         """Render a branded public status page without exposing internal configuration."""
 
-        return HTMLResponse(
-            build_landing_page(
-                environment=configured_settings.environment.value,
-                deployment=configured_settings.deployment_name,
-                version=__version__,
-                docs_enabled=configured_settings.enable_docs,
-            )
+        html = build_landing_page(
+            environment=configured_settings.environment.value,
+            deployment=configured_settings.deployment_name,
+            version=__version__,
+            docs_enabled=configured_settings.enable_docs,
         )
+        return HTMLResponse(apply_public_branding(html))
 
     @application.get("/health", response_model=HealthResponse, tags=["health"])
     @application.get("/health/live", response_model=HealthResponse, tags=["health"])

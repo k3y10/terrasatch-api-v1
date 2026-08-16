@@ -27,7 +27,13 @@ async def test_root_serves_clean_terralisten_operations_console() -> None:
     for expected in (
         "TerraSatch · TerraListen Radio Console",
         "TerraSatch Sasquatch",
-        "https://www.terrasatch.com/terralisten-sasquatch.png",
+        "/assets/terralisten-sasquatch.webp",
+        'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
+        (
+            'property="og:image" content="'
+            "https://api.terrasatch.com/assets/terralisten-sasquatch.png\""
+        ),
+        'name="twitter:card" content="summary"',
         "TERRALISTEN",
         "TerraListen Receiver",
         "Receive-only radio intelligence for field operations.",
@@ -48,6 +54,7 @@ async def test_root_serves_clean_terralisten_operations_console() -> None:
     ):
         assert expected in response.text
 
+    assert "https://www.terrasatch.com/terralisten-sasquatch.png" not in response.text
     assert "API · RX" not in response.text
     assert "FIELD INTELLIGENCE RECEIVER" not in response.text
 
@@ -83,6 +90,35 @@ async def test_receiver_waveform_uses_fluid_bar_sizing() -> None:
     assert "transform-origin:50% 100%" in response.text
     assert ".wave i{width:4px;min-width:4px" not in response.text
     assert ".wave i{width:3px;min-width:3px" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_local_sasquatch_asset_is_served_by_api() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/assets/terralisten-sasquatch.webp")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/webp")
+    assert response.content.startswith(b"RIFF")
+    assert b"WEBP" in response.content[:16]
+    assert len(response.content) > 10_000
+    assert "max-age=86400" in response.headers["cache-control"]
+
+
+@pytest.mark.asyncio
+async def test_local_sasquatch_preview_asset_is_served_by_api() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/assets/terralisten-sasquatch.png")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(response.content) > 8_000
+    assert "max-age=86400" in response.headers["cache-control"]
 
 
 @pytest.mark.asyncio
