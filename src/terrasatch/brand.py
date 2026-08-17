@@ -38,9 +38,16 @@ _SOCIAL_META = f'''  <link rel="icon" type="image/png" href="{SASQUATCH_PREVIEW_
 
 
 def apply_public_branding(html: str) -> str:
-    """Replace the remote logo dependency and add explicit link-preview metadata."""
+    """Replace remote logo dependencies and inject public social/favicon metadata."""
 
     branded = html.replace(_REMOTE_SASQUATCH_URL, SASQUATCH_ASSET_URL)
-    if _SOCIAL_META not in branded and _THEME_META in branded:
-        branded = branded.replace(_THEME_META, _THEME_META + _SOCIAL_META, 1)
+    if _SOCIAL_META in branded:
+        return branded
+
+    if _THEME_META in branded:
+        return branded.replace(_THEME_META, _THEME_META + _SOCIAL_META, 1)
+
+    if "</head>" in branded:
+        return branded.replace("</head>", _SOCIAL_META + "</head>", 1)
+
     return branded
