@@ -12,7 +12,7 @@ from terrasatch.edge.profile import load_edge_profile
 
 @edge_app.command("sync")
 def sync() -> None:
-    """Report provider inventory/capabilities and fetch the current remote radio policy."""
+    """Report provider inventory/capabilities and fetch current radio/AI policy."""
 
     profile = load_edge_profile()
     receivers = discover_receivers()
@@ -33,13 +33,10 @@ def sync() -> None:
         if receiver.backend == "rtl" and receiver.capture_ready:
             capabilities.update({"radio:receive", "audio:capture"})
         if receiver.backend == "hackrf":
-            # Hardware discovery alone does not mean a TerraListen TX adapter exists.
             capabilities.add("hardware:hackrf")
 
     try:
-        payload = EdgeApiClient.from_environment(
-            base_url=profile.api_base_url
-        ).heartbeat(
+        payload = EdgeApiClient.from_environment(base_url=profile.api_base_url).heartbeat(
             hardware_inventory=inventory,
             capabilities=sorted(capabilities),
         )
@@ -56,6 +53,9 @@ def sync() -> None:
     radio = remote_config.get("radio", {})
     if not isinstance(radio, dict):
         radio = {}
+    ai = radio.get("ai_channel", {})
+    if not isinstance(ai, dict):
+        ai = {}
 
     typer.echo(f"device_id: {device.get('id', 'unknown')}")
     typer.echo(f"device_name: {device.get('name', 'unknown')}")
@@ -65,6 +65,12 @@ def sync() -> None:
     )
     typer.echo(f"receive_enabled: {radio.get('receive_enabled', 'auto')}")
     typer.echo(f"transmit_enabled: {radio.get('transmit_enabled', False)}")
-    typer.echo(
-        "transmit_policy: provider must report radio:transmit before admin can enable TX"
-    )
+    typer.echo("transmit_policy: provider must report radio:transmit before admin can enable TX")
+    typer.echo("ai_agent: " + str(ai.get("agent_name", "Satchy")))
+    typer.echo("ai_channel_name: " + str(ai.get("name", "Satchy AI Channel")))
+    typer.echo("ai_activation_phrase: " + str(ai.get("activation_phrase", "TerraSatch")))
+    typer.echo("ai_logical_channel_id: " + str(ai.get("logical_channel_id") or "not bound"))
+    typer.echo("ai_provider_channel: " + str(ai.get("provider_channel") or "not bound"))
+    typer.echo("ai_frequency_hz: " + str(ai.get("frequency_hz") or "not configured"))
+    typer.echo("ai_reply_route: " + str(ai.get("reply_route", "dashboard")))
+    typer.echo("ai_execution: policy only until the configured outbound provider/Edge adapter executes it")
