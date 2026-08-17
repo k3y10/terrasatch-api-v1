@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ def test_admin_ui_uses_orange_terminal_theme() -> None:
     assert "/assets/terralisten-sasquatch.webp" in html
 
 
-def test_dashboard_exposes_real_admin_commands_and_satchy_capability_controls() -> None:
+def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> None:
     organization_id = uuid4()
     site_id = uuid4()
     device_id = uuid4()
@@ -25,8 +26,12 @@ def test_dashboard_exposes_real_admin_commands_and_satchy_capability_controls() 
         site_id=site_id,
         name="Field Node",
         hostname="field-node",
+        platform="linux",
+        architecture="x86_64",
+        agent_version="test",
+        last_seen_at=datetime.now(UTC),
         capabilities=["radio:receive", "radio:transmit"],
-        hardware_inventory=[{"provider": "test-full-duplex"}],
+        hardware_inventory=[{"provider": "test-full-duplex", "name": "Test Radio"}],
         remote_config={
             "radio": {
                 "receive_enabled": True,
@@ -71,6 +76,14 @@ def test_dashboard_exposes_real_admin_commands_and_satchy_capability_controls() 
     assert "PROVIDER-AWARE RX / TX" in html
     assert "CAPABILITY-GATED RADIO" in html
     assert "arbitrary OS shell" in html
+    assert "Registered device health" in html
+    assert "Heartbeat-backed state" in html
+    assert "ONLINE" in html
+    assert "Test Radio" in html
+    assert "RX ON" in html
+    assert "TX READY" in html
+    assert "/admin/fleet-status" in html
+    assert "setInterval(refresh,10000)" in html
     assert "Satchy AI Channel" in html
     assert "edge ai" in html
     assert "Logical first, provider bound" in html
