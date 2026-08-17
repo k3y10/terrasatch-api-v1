@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 
@@ -13,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.commands_v2 import run_admin_command
+from terrasatch.admin.device_status import device_status_payload, fleet_summary
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
 from terrasatch.admin.ui import render_login, render_one_time_key
 from terrasatch.admin.ui_v2 import render_dashboard
@@ -27,6 +29,7 @@ from terrasatch.organizations.service import (
     create_site,
     list_organizations,
     list_sites,
+    resolve_organization,
 )
 
 router = APIRouter(tags=["admin"])
@@ -152,6 +155,43 @@ async def admin_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
             csrf_token=csrf_token,
             error_message=error_message,
         )
+    )
+
+
+@router.get("/admin/fleet-status", include_in_schema=False, response_model=None)
+async def admin_fleet_status(
+    request: Request,
+    organization: str = "",
+) -> JSONResponse:
+    """Return current registered Edge heartbeat/capability state to an admin session."""
+
+    settings: Settings = request.app.state.settings
+    _require_authenticated(request, settings)
+
+    async def load_fleet(session: AsyncSession) -> list[dict[str, object]]:
+        if organization:
+            organizations = [await resolve_organization(session, organization)]
+        else:
+            organizations = await list_organizations(session)
+
+        now = datetime.now(UTC)
+        devices: list[dict[str, object]] = []
+        for item in organizations:
+            for device in await list_devices(session, organization_id=item.id):
+                payload = device_status_payload(device, now=now)
+                payload["organization_id"] = str(item.id)
+                payload["organization_name"] = item.name
+                devices.append(payload)
+        return devices
+
+    devices = await _run_database(settings, load_fleet)
+    return JSONResponse(
+        {
+            "ok": True,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "summary": fleet_summary(devices),
+            "devices": devices,
+        }
     )
 
 

@@ -59,9 +59,7 @@ def _confirmed(parts: list[str]) -> bool:
 
 def _require_confirmation(parts: list[str], description: str) -> None:
     if not _confirmed(parts):
-        raise InvalidConfiguration(
-            f"Confirmation required: rerun with --confirm to {description}."
-        )
+        raise InvalidConfiguration(f"Confirmation required: rerun with --confirm to {description}.")
 
 
 def _uuid(value: str, label: str) -> UUID:
@@ -204,9 +202,13 @@ async def run_admin_command(
     if verb in {"org", "organization", "organizations"}:
         if not args or args[0] == "list":
             organizations = await list_organizations(session)
-            lines = ["ID                                   NAME                     SLUG             STATUS"]
+            lines = [
+                "ID                                   NAME                     "
+                "SLUG             STATUS"
+            ]
             lines.extend(
-                f"{org.id}  {org.name[:24]:24} {org.slug[:16]:16} {'enabled' if org.enabled else 'disabled'}"
+                f"{org.id}  {org.name[:24]:24} {org.slug[:16]:16} "
+                f"{'enabled' if org.enabled else 'disabled'}"
                 for org in organizations
             )
             return AdminCommandResult(lines)
@@ -232,7 +234,10 @@ async def run_admin_command(
                 session, selector=args[1], enabled=action == "enable"
             )
             return AdminCommandResult(
-                [f"[ok] organization {organization.name}: {'enabled' if organization.enabled else 'disabled'}"]
+                [
+                    f"[ok] organization {organization.name}: "
+                    f"{'enabled' if organization.enabled else 'disabled'}"
+                ]
             )
         raise InvalidConfiguration("Usage: org list|select|rename|enable|disable ...")
 
@@ -290,7 +295,8 @@ async def run_admin_command(
             devices = await list_devices(session, organization_id=organization.id)
             lines = ["ID                                   NAME                     MODE   STATUS"]
             lines.extend(
-                f"{device.id}  {device.name[:24]:24} {radio_mode(device):6} {'enabled' if device.enabled else 'disabled'}"
+                f"{device.id}  {device.name[:24]:24} {radio_mode(device):6} "
+                f"{'enabled' if device.enabled else 'disabled'}"
                 for device in devices
             )
             return AdminCommandResult(lines)
@@ -335,12 +341,14 @@ async def run_admin_command(
             enable = state == "on"
             if action == "rx" and enable and not device_supports_receive(device):
                 raise InvalidConfiguration(
-                    "Receive unavailable: this Edge device has not reported a receive-capable provider."
+                    "Receive unavailable: this Edge device has not reported "
+                    "a receive-capable provider."
                 )
             if action == "tx" and enable:
                 if not device_supports_transmit(device):
                     raise InvalidConfiguration(
-                        "Transmit unavailable: this Edge device has not reported a TX-capable provider/adapter."
+                        "Transmit unavailable: this Edge device has not reported "
+                        "a TX-capable provider/adapter."
                     )
                 _require_confirmation(parts, f"enable transmit for edge device {device.id}")
             config = dict(device.remote_config or {})
@@ -371,9 +379,12 @@ async def run_admin_command(
                 session,
                 organization_selector=selected_organization,
             )
-            lines = ["ID                                   NAME                     PREFIX       STATUS"]
+            lines = [
+                "ID                                   NAME                     PREFIX       STATUS"
+            ]
             lines.extend(
-                f"{key.id}  {key.name[:24]:24} {key.key_prefix[:12]:12} {'revoked' if key.revoked_at else 'active'}"
+                f"{key.id}  {key.name[:24]:24} {key.key_prefix[:12]:12} "
+                f"{'revoked' if key.revoked_at else 'active'}"
                 for key in keys
             )
             return AdminCommandResult(lines)

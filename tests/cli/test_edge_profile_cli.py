@@ -23,6 +23,15 @@ def test_edge_help_exposes_simple_demo_workflow() -> None:
         assert command in result.stdout
 
 
+def test_edge_sync_help_exposes_continuous_heartbeat_watch() -> None:
+    result = CliRunner().invoke(app, ["edge", "sync", "--help"])
+
+    assert result.exit_code == 0
+    assert "--watch" in result.stdout
+    assert "--interval-seconds" in result.stdout
+    assert "heartbeats" in result.stdout
+
+
 def test_demo_setup_requires_no_organization(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TERRASATCH_EDGE_PROFILE", str(tmp_path / "edge.json"))
 
