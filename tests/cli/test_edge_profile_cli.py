@@ -11,6 +11,7 @@ def test_edge_help_exposes_simple_demo_workflow() -> None:
         "setup",
         "status",
         "detect",
+        "sync",
         "capture",
         "demo",
         "demo-submit",
