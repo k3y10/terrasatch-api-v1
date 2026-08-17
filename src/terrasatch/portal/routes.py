@@ -1,4 +1,5 @@
 """Session-protected organization member portal."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -123,6 +124,7 @@ async def portal_dashboard(
     organization: str = "",
 ) -> HTMLResponse | RedirectResponse:
     settings: Settings = request.app.state.settings
+    _enabled(settings)
     user_id = _portal_user_id(request)
     if user_id is None:
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
