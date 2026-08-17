@@ -84,6 +84,10 @@ def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> 
     assert "TX READY" in html
     assert "/admin/fleet-status" in html
     assert "setInterval(refresh,10000)" in html
+    assert "--fleet-green:#6ee7a0" in html
+    assert ".status-dot.pass,.status-dot.healthy" in html
+    assert ".status-dot.degraded" in html
+    assert ".status-dot.unhealthy,.status-dot.error" in html
     assert "Satchy AI Channel" in html
     assert "edge ai" in html
     assert "Logical first, provider bound" in html
