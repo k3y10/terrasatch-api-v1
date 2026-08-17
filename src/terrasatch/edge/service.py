@@ -185,6 +185,10 @@ async def heartbeat_device(
     device.hardware_inventory = payload.hardware_inventory
     device.capabilities = sorted(set(payload.capabilities))
     await session.flush()
+    # TimestampMixin.updated_at uses a SQL expression on UPDATE. Refresh while
+    # the AsyncSession is still open so route serialization never touches an
+    # expired/detached updated_at attribute after _run_database commits/closes.
+    await session.refresh(device)
     return device
 
 
@@ -214,4 +218,5 @@ async def update_device(
     if payload.remote_config is not None:
         device.remote_config = payload.remote_config
     await session.flush()
+    await session.refresh(device)
     return device
