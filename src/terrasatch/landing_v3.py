@@ -1,4 +1,5 @@
 """Fleet-scaled TerraListen public console built on the live radio surface."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
