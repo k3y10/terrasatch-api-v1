@@ -43,15 +43,35 @@ def device_health(
     return "offline", age_seconds
 
 
-def _hardware_label(device: EdgeDevice) -> str:
-    labels: list[str] = []
-    for item in getattr(device, "hardware_inventory", []) or []:
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("name") or item.get("provider") or "").strip()
-        if label and label not in labels:
-            labels.append(label)
-    return ", ".join(labels) if labels else "No hardware reported"
+def _hardware_summary(device: EdgeDevice) -> tuple[str, str, int]:
+    inventory = [
+        item
+        for item in (getattr(device, "hardware_inventory", []) or [])
+        if isinstance(item, dict)
+    ]
+    if not inventory:
+        return "No radio hardware reported", "none", 0
+
+    def score(item: dict[str, object]) -> int:
+        provider = str(item.get("provider") or "").lower()
+        name = str(item.get("name") or "").lower()
+        detail = f"{provider} {name}"
+        if provider in {"rtl", "rtl-sdr"} or any(
+            token in detail for token in ("nooelec", "nesdr", "rtl283", "rtl-sdr")
+        ):
+            return 100
+        if provider == "hackrf" or "hackrf" in detail:
+            return 90
+        if any(token in detail for token in ("radio", "receiver", "sdr")):
+            return 70
+        if bool(item.get("capture_ready")):
+            return 60
+        return 0
+
+    primary = max(inventory, key=score)
+    primary_name = str(primary.get("name") or primary.get("provider") or "Unknown hardware").strip()
+    provider = str(primary.get("provider") or "unknown").strip()
+    return primary_name, provider, len(inventory)
 
 
 def device_status_payload(
@@ -69,6 +89,7 @@ def device_status_payload(
     rx_enabled = rx_supported and bool(radio.get("receive_enabled", rx_supported))
     tx_enabled = tx_supported and bool(radio.get("transmit_enabled", False))
     last_seen_at = getattr(device, "last_seen_at", None)
+    primary_hardware, provider, hardware_count = _hardware_summary(device)
 
     return {
         "id": str(device.id),
@@ -82,7 +103,10 @@ def device_status_payload(
         "health": health,
         "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
         "age_seconds": age_seconds,
-        "hardware": _hardware_label(device),
+        "hardware": primary_hardware,
+        "primary_hardware": primary_hardware,
+        "provider": provider,
+        "hardware_count": hardware_count,
         "hardware_inventory": getattr(device, "hardware_inventory", []) or [],
         "capabilities": getattr(device, "capabilities", []) or [],
         "rx_supported": rx_supported,
@@ -103,7 +127,7 @@ def device_status_payload(
 
 
 def fleet_summary(devices: list[dict[str, object]]) -> dict[str, int]:
-    """Count the current registered fleet health states."""
+    """Count current fleet health, site coverage, and radio capabilities."""
 
     counts = {
         "total": len(devices),
@@ -112,9 +136,15 @@ def fleet_summary(devices: list[dict[str, object]]) -> dict[str, int]:
         "offline": 0,
         "never": 0,
         "disabled": 0,
+        "sites": len({str(device.get("site_id")) for device in devices if device.get("site_id")}),
+        "rx_capable": sum(bool(device.get("rx_supported")) for device in devices),
+        "tx_capable": sum(bool(device.get("tx_supported")) for device in devices),
+        "attention": 0,
     }
     for device in devices:
         health = str(device.get("health", "never"))
         if health in counts:
             counts[health] += 1
+        if health in {"stale", "offline", "never"}:
+            counts["attention"] += 1
     return counts
