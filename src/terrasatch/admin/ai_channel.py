@@ -113,11 +113,15 @@ async def run_ai_channel_command(
             raise InvalidConfiguration("AI channel and Edge device must belong to the same site")
         ai["logical_channel_id"] = str(channel.id)
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
-        return [f"[ok] {updated.name}: Satchy bound to logical channel {channel.name} ({channel.id})"]
+        return [
+            f"[ok] {updated.name}: Satchy bound to logical channel {channel.name} ({channel.id})"
+        ]
 
     if action == "unbind":
         if not _confirmed(args):
-            raise InvalidConfiguration("Confirmation required: rerun with --confirm to unbind Satchy")
+            raise InvalidConfiguration(
+                "Confirmation required: rerun with --confirm to unbind Satchy"
+            )
         ai["logical_channel_id"] = None
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
         return [f"[ok] {updated.name}: Satchy logical channel unbound"]
@@ -155,7 +159,8 @@ async def run_ai_channel_command(
                 raise InvalidConfiguration("frequency must be between 100 kHz and 6 GHz")
             ai["frequency_hz"] = frequency_hz
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
-        return [f"[ok] {updated.name}: AI channel frequency -> {ai['frequency_hz'] or 'not configured'}"]
+        frequency_display = ai["frequency_hz"] or "not configured"
+        return [f"[ok] {updated.name}: AI channel frequency -> {frequency_display}"]
 
     if action == "modulation" and len(args) >= 2:
         modulation = args[1].lower()
@@ -173,11 +178,15 @@ async def run_ai_channel_command(
             raw_radio = (device.remote_config or {}).get("radio")
             radio = dict(raw_radio) if isinstance(raw_radio, dict) else {}
             if not _supports_transmit(device):
-                raise InvalidConfiguration("RF reply unavailable: Edge provider has not reported radio:transmit")
+                raise InvalidConfiguration(
+                    "RF reply unavailable: Edge provider has not reported radio:transmit"
+                )
             if not bool(radio.get("transmit_enabled", False)):
                 raise InvalidConfiguration("RF reply unavailable: enable Edge TX policy first")
             if not _confirmed(args):
-                raise InvalidConfiguration("Confirmation required: rerun with --confirm to configure RF reply policy")
+                raise InvalidConfiguration(
+                    "Confirmation required: rerun with --confirm to configure RF reply policy"
+                )
             ai["rf_reply_enabled"] = True
         else:
             ai["rf_reply_enabled"] = False
@@ -185,11 +194,14 @@ async def run_ai_channel_command(
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
         lines = [f"[ok] {updated.name}: Satchy reply route -> {route}"]
         if route in {"push", "tts"}:
-            lines.append("[note] route is control-plane policy until an outbound provider is installed")
+            lines.append(
+                "[note] route is control-plane policy until an outbound provider is installed"
+            )
         if route == "rf":
             lines.append("[note] RF execution remains Edge-provider controlled and operator-gated")
         return lines
 
     raise InvalidConfiguration(
-        "Usage: edge ai <device> show|bind|unbind|name|agent|trigger|provider-channel|frequency|modulation|reply ..."
+        "Usage: edge ai <device> show|bind|unbind|name|agent|trigger|"
+        "provider-channel|frequency|modulation|reply ..."
     )

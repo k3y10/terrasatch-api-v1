@@ -17,7 +17,10 @@ _SOCIAL_META = f'''  <link rel="icon" type="image/png" href="{SASQUATCH_PREVIEW_
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="TerraSatch">
   <meta property="og:title" content="TerraSatch · TerraListen Radio Console">
-  <meta property="og:description" content="Provider-aware radio intelligence with Satchy, the TerraListen AI radio agent.">
+  <meta
+    property="og:description"
+    content="Provider-aware radio intelligence with Satchy, the TerraListen AI radio agent."
+  >
   <meta property="og:url" content="https://api.terrasatch.com/">
   <meta property="og:image" content="{SASQUATCH_PREVIEW_PUBLIC_URL}">
   <meta property="og:image:type" content="image/png">
@@ -26,7 +29,10 @@ _SOCIAL_META = f'''  <link rel="icon" type="image/png" href="{SASQUATCH_PREVIEW_
   <meta property="og:image:alt" content="Satchy, the TerraSatch Sasquatch holding a field radio">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="TerraSatch · TerraListen Radio Console">
-  <meta name="twitter:description" content="Provider-aware radio intelligence with Satchy, the TerraListen AI radio agent.">
+  <meta
+    name="twitter:description"
+    content="Provider-aware radio intelligence with Satchy, the TerraListen AI radio agent."
+  >
   <meta name="twitter:image" content="{SASQUATCH_PREVIEW_PUBLIC_URL}">
 '''
 

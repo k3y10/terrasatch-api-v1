@@ -59,9 +59,7 @@ async def run_admin_command(
 
     if verb in {"agent", "agents", "channel", "channels"}:
         if not selected_organization:
-            raise InvalidConfiguration(
-                "Select an organization first with: org select <id|slug>"
-            )
+            raise InvalidConfiguration("Select an organization first with: org select <id|slug>")
         organization = await resolve_organization(session, selected_organization)
         lines = await run_radio_resource_command(
             session,

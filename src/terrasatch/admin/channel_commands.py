@@ -119,8 +119,7 @@ async def run_radio_resource_command(
                 f"profile -> {item.profile}",
             ]
         raise InvalidConfiguration(
-            "Usage: channel list | channel create <site_uuid> [name] "
-            "[--agent <agent_uuid>]"
+            "Usage: channel list | channel create <site_uuid> [name] [--agent <agent_uuid>]"
         )
 
     raise InvalidConfiguration("Unsupported radio resource command")

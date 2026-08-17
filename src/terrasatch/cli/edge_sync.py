@@ -60,8 +60,7 @@ def sync() -> None:
     typer.echo(f"device_id: {device.get('id', 'unknown')}")
     typer.echo(f"device_name: {device.get('name', 'unknown')}")
     typer.echo(
-        "reported_capabilities: "
-        + (", ".join(sorted(capabilities)) if capabilities else "none")
+        "reported_capabilities: " + (", ".join(sorted(capabilities)) if capabilities else "none")
     )
     typer.echo(f"receive_enabled: {radio.get('receive_enabled', 'auto')}")
     typer.echo(f"transmit_enabled: {radio.get('transmit_enabled', False)}")
@@ -73,4 +72,6 @@ def sync() -> None:
     typer.echo("ai_provider_channel: " + str(ai.get("provider_channel") or "not bound"))
     typer.echo("ai_frequency_hz: " + str(ai.get("frequency_hz") or "not configured"))
     typer.echo("ai_reply_route: " + str(ai.get("reply_route", "dashboard")))
-    typer.echo("ai_execution: policy only until the configured outbound provider/Edge adapter executes it")
+    typer.echo(
+        "ai_execution: policy only until the configured outbound provider/Edge adapter executes it"
+    )

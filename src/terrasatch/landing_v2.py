@@ -1,4 +1,5 @@
 """Orange TerraListen public console with Satchy AI-channel framing."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
