@@ -38,6 +38,24 @@ terrasatch edge api check
 
 The profile is stored under `~/.config/terrasatch/edge.json` by default and never contains the API key.
 
+## Registered-device heartbeat
+
+A paired Edge device reports its hardware inventory and provider capabilities through `/api/v1/edge/heartbeat`. The Admin Console uses the device's `last_seen_at` value to show online, stale, offline, or never-seen status.
+
+One-shot sync:
+
+```bash
+terrasatch edge sync
+```
+
+Continuous heartbeat for field/admin health visibility:
+
+```bash
+terrasatch edge sync --watch --interval-seconds 30
+```
+
+The current UI classifies a registered device as online when its most recent heartbeat is within 2 minutes, stale within 15 minutes, and offline after 15 minutes. A production Edge service can use the same heartbeat path continuously.
+
 ## WSL: attach the USB receiver
 
 WSL 2 does not receive arbitrary Windows USB devices automatically. Install `usbipd-win` on Windows once.
@@ -141,40 +159,62 @@ terrasatch edge demo \
 
 If a demo site and API key are configured, the reviewed text is submitted through the existing production transmission pipeline. If they are not configured, the local capture still succeeds and API submission is skipped.
 
-## Receiver compatibility
+## Receiver / provider compatibility
 
 ### RTL-SDR / Nooelec
 
-Current receive-audio backend. TerraListen uses `rtl_test` for a bounded probe and `rtl_fm` for bounded demodulated audio capture.
+Current receive-audio backend. TerraListen uses `rtl_test` for a bounded probe and `rtl_fm` for bounded demodulated audio capture. A healthy configured device reports `radio:receive` and `audio:capture`.
 
 ### HackRF
 
-The receiver registry recognizes HackRF tooling when `hackrf_info` is installed, but this release intentionally does not expose a HackRF audio capture/transmit path. A dedicated receive-only IQ-to-audio adapter can be added behind the same `backend=hackrf` profile later without changing the organization/API model.
+The receiver registry recognizes HackRF tooling when `hackrf_info` is installed, but hardware discovery alone does not mean a TerraListen receive-audio or TX adapter is enabled. The UI therefore shows HackRF as discovered / adapter pending rather than falsely marking TX ready.
+
+### TX-capable providers
+
+The TerraListen control plane supports provider-reported `radio:transmit` capability and explicit TX policy. TX remains off by default. A provider must actually implement the outbound radio adapter before hardware execution is possible.
+
+## Satchy AI channel
+
+Satchy is the TerraListen AI radio agent. The AI channel is logical first and can be bound per site to an approved provider channel, frequency, modulation, and reply policy.
+
+Example admin flow:
+
+```text
+agent create <site_uuid> Satchy
+channel create <site_uuid> "Satchy AI Channel" --agent <agent_uuid>
+edge ai <device_uuid> bind <channel_uuid>
+edge ai <device_uuid> trigger TerraSatch
+edge ai <device_uuid> provider-channel "Operations 2"
+```
+
+RF reply remains provider-gated and requires explicit TX policy plus a TX-capable adapter.
 
 ## Safety boundary
 
-TerraListen Edge is receive-only. It does not key, PTT, or transmit on the connected radio hardware. Use only radio traffic and frequencies you are authorized to receive/process.
+The current Nooelec/RTL-SDR implementation is receive-only hardware. TerraListen does not pretend that RX hardware can transmit. The control plane may represent TX capability and operator policy when a provider reports `radio:transmit`, but this release does not add an autonomous RF transmit implementation. Use only radio systems, channels, frequencies, and operations for which the operator is authorized.
 
 ## Architecture
 
 ```text
-Field radio
+Field radio / provider hardware
    |
-   | RF
+   | RF / provider interface
    v
-Nooelec / compatible receiver
+Nooelec / compatible RX receiver / future TX-capable provider
    |
-   | USB
+   | USB / local adapter
    v
 TerraListen Edge
    |                     local demo: stops here
    |
-   | HTTPS (optional)
+   | HTTPS heartbeat + events (optional)
    v
 api.terrasatch.com
    |
    +--> tenant derived from API credential
    +--> configured site
+   +--> registered device health / capabilities
+   +--> Satchy logical channel / policy
    +--> transmission / transcript / TerraEngine / event
 ```
 
