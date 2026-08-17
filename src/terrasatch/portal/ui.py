@@ -1,4 +1,5 @@
 """Organization-scoped browser portal renderers."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
