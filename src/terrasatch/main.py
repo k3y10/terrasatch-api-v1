@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from terrasatch import __version__
+from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.api.control_plane import router as control_plane_router
 from terrasatch.api.radio import router as radio_router
@@ -25,11 +26,12 @@ from terrasatch.brand import SASQUATCH_ASSET_PATH, SASQUATCH_PREVIEW_PATH, apply
 from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
-from terrasatch.landing_v2 import build_landing_page
+from terrasatch.landing_v3 import build_landing_page
 from terrasatch.observability.health import check_readiness, liveness
 from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
 from terrasatch.observability.request_id import RequestIdMiddleware
+from terrasatch.portal.routes import router as portal_router
 
 logger = structlog.get_logger(__name__)
 _BRAND_LOGO_PATH = Path(__file__).resolve().parent / "static" / "terrasatch-logo.svg"
@@ -66,9 +68,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = configured_settings
     application.add_middleware(RequestIdMiddleware)
-    if configured_settings.admin_is_configured:
+    if configured_settings.admin_session_secret is not None:
         session_secret = configured_settings.admin_session_secret
-        assert session_secret is not None
         application.add_middleware(
             SessionMiddleware,
             secret_key=session_secret.get_secret_value(),
@@ -206,6 +207,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(api_v1)
     application.include_router(realtime_router)
     application.include_router(admin_router)
+    application.include_router(admin_member_router)
+    application.include_router(portal_router)
     return application
 
 
