@@ -1,4 +1,4 @@
-"""Small authenticated client used by local receive-side edge tooling."""
+"""Small authenticated client used by local edge tooling."""
 
 from __future__ import annotations
 
@@ -38,6 +38,29 @@ class EdgeApiClient:
             timeout=self.timeout_seconds,
         ) as client:
             response = client.get("/api/v1/auth/me")
+            response.raise_for_status()
+            return response.json()
+
+    def heartbeat(
+        self,
+        *,
+        agent_version: str | None = None,
+        hardware_inventory: list[dict[str, object]] | None = None,
+        capabilities: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Publish provider inventory/capabilities and fetch the current Edge record."""
+
+        payload = {
+            "agent_version": agent_version,
+            "hardware_inventory": hardware_inventory or [],
+            "capabilities": capabilities or [],
+        }
+        with httpx.Client(
+            base_url=self.base_url,
+            headers=self.headers,
+            timeout=self.timeout_seconds,
+        ) as client:
+            response = client.post("/api/v1/edge/heartbeat", json=payload)
             response.raise_for_status()
             return response.json()
 

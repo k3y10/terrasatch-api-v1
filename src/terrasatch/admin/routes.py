@@ -9,14 +9,16 @@ from urllib.parse import quote
 
 import structlog
 from fastapi import APIRouter, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from terrasatch.admin.commands import run_admin_command
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
 from terrasatch.admin.ui import render_dashboard, render_login, render_one_time_key
-from terrasatch.auth.service import issue_api_key
+from terrasatch.auth.service import issue_api_key, list_api_keys
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
+from terrasatch.edge.service import list_devices
 from terrasatch.errors import TerraSatchError
 from terrasatch.observability.quality import build_quality_report
 from terrasatch.organizations.service import (
@@ -91,19 +93,46 @@ async def admin_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
         logger.warning("admin.organization_list_failed", error_type=type(error).__name__)
         organizations = []
         error_message = "Organization data is unavailable while the database is unhealthy."
+
     selected_organization = request.query_params.get("organization")
     sites: list[object] = []
+    edge_devices: list[object] = []
+    api_keys: list[object] = []
     selected_name = "No organization selected"
+    selected_slug = ""
+    selected_enabled = False
+
     if selected_organization:
         try:
             organization, sites = await _run_database(
                 settings,
-                lambda session: list_sites(session, organization_selector=selected_organization),
+                lambda session: list_sites(
+                    session,
+                    organization_selector=selected_organization,
+                    enabled=None,
+                ),
             )
             selected_name = organization.name
+            selected_slug = organization.slug
+            selected_enabled = organization.enabled
+            edge_devices = await _run_database(
+                settings,
+                lambda session: list_devices(
+                    session,
+                    organization_id=organization.id,
+                ),
+            )
+            api_keys = await _run_database(
+                settings,
+                lambda session: list_api_keys(
+                    session,
+                    organization_selector=str(organization.id),
+                ),
+            )
         except Exception as error:
-            logger.warning("admin.site_list_failed", error_type=type(error).__name__)
-            error_message = "Site data is unavailable for the selected organization."
+            logger.warning("admin.tenant_context_failed", error_type=type(error).__name__)
+            error_message = "Tenant context is unavailable for the selected organization."
+
     csrf_token = issue_csrf_token(request.session)
     return HTMLResponse(
         render_dashboard(
@@ -114,10 +143,53 @@ async def admin_dashboard(request: Request) -> HTMLResponse | RedirectResponse:
             organizations=organizations,
             selected_organization=selected_organization or "",
             selected_name=selected_name,
+            selected_slug=selected_slug,
+            selected_enabled=selected_enabled,
             sites=sites,
+            edge_devices=edge_devices,
+            api_keys=api_keys,
             csrf_token=csrf_token,
             error_message=error_message,
         )
+    )
+
+
+@router.post("/admin/command", include_in_schema=False, response_model=None)
+async def admin_command(
+    request: Request,
+    command: Annotated[str, Form()],
+    organization: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    settings: Settings = request.app.state.settings
+    _require_authenticated(request, settings)
+    _verify_csrf(request, csrf_token)
+    try:
+        result = await _run_database(
+            settings,
+            lambda session: run_admin_command(
+                session,
+                command=command,
+                selected_organization=organization or None,
+            ),
+        )
+    except TerraSatchError as error:
+        return JSONResponse(
+            {"ok": False, "lines": [f"error: {error.message}"]},
+            status_code=error.status_code,
+        )
+    except Exception as error:
+        logger.exception("admin.command_failed", error_type=type(error).__name__)
+        return JSONResponse(
+            {"ok": False, "lines": ["error: command failed"]},
+            status_code=500,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "lines": result.lines,
+            "redirect": result.redirect,
+        }
     )
 
 
