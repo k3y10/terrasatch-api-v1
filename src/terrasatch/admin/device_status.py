@@ -28,13 +28,14 @@ def device_health(
 ) -> tuple[str, int | None]:
     """Return a UI health state and last-seen age for one registered Edge device."""
 
-    if not device.enabled:
+    if not bool(getattr(device, "enabled", True)):
         return "disabled", None
-    if device.last_seen_at is None:
+    last_seen_at = getattr(device, "last_seen_at", None)
+    if last_seen_at is None:
         return "never", None
 
     reference = now or datetime.now(UTC)
-    age_seconds = max(0, int((reference - _aware(device.last_seen_at)).total_seconds()))
+    age_seconds = max(0, int((reference - _aware(last_seen_at)).total_seconds()))
     if age_seconds <= ONLINE_AFTER_SECONDS:
         return "online", age_seconds
     if age_seconds <= STALE_AFTER_SECONDS:
@@ -44,7 +45,7 @@ def device_health(
 
 def _hardware_label(device: EdgeDevice) -> str:
     labels: list[str] = []
-    for item in device.hardware_inventory:
+    for item in getattr(device, "hardware_inventory", []) or []:
         if not isinstance(item, dict):
             continue
         label = str(item.get("name") or item.get("provider") or "").strip()
@@ -67,22 +68,23 @@ def device_status_payload(
     tx_supported = device_supports_transmit(device)
     rx_enabled = rx_supported and bool(radio.get("receive_enabled", rx_supported))
     tx_enabled = tx_supported and bool(radio.get("transmit_enabled", False))
+    last_seen_at = getattr(device, "last_seen_at", None)
 
     return {
         "id": str(device.id),
         "site_id": str(device.site_id),
         "name": device.name,
-        "hostname": device.hostname,
-        "platform": device.platform,
-        "architecture": device.architecture,
-        "agent_version": device.agent_version,
-        "enabled": device.enabled,
+        "hostname": getattr(device, "hostname", None),
+        "platform": getattr(device, "platform", None),
+        "architecture": getattr(device, "architecture", None),
+        "agent_version": getattr(device, "agent_version", None),
+        "enabled": bool(getattr(device, "enabled", True)),
         "health": health,
-        "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
+        "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
         "age_seconds": age_seconds,
         "hardware": _hardware_label(device),
-        "hardware_inventory": device.hardware_inventory,
-        "capabilities": device.capabilities,
+        "hardware_inventory": getattr(device, "hardware_inventory", []) or [],
+        "capabilities": getattr(device, "capabilities", []) or [],
         "rx_supported": rx_supported,
         "tx_supported": tx_supported,
         "rx_enabled": rx_enabled,
@@ -103,7 +105,14 @@ def device_status_payload(
 def fleet_summary(devices: list[dict[str, object]]) -> dict[str, int]:
     """Count the current registered fleet health states."""
 
-    counts = {"total": len(devices), "online": 0, "stale": 0, "offline": 0, "never": 0, "disabled": 0}
+    counts = {
+        "total": len(devices),
+        "online": 0,
+        "stale": 0,
+        "offline": 0,
+        "never": 0,
+        "disabled": 0,
+    }
     for device in devices:
         health = str(device.get("health", "never"))
         if health in counts:
