@@ -70,7 +70,12 @@ def _verify_csrf(request: Request, csrf_token: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
 
 
-@router.get("/portal/login", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/portal/login",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    response_model=None,
+)
 async def portal_login_form(request: Request) -> HTMLResponse | RedirectResponse:
     settings: Settings = request.app.state.settings
     _enabled(settings)
@@ -118,7 +123,12 @@ async def portal_logout(
     return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/portal", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/portal",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    response_model=None,
+)
 async def portal_dashboard(
     request: Request,
     organization: str = "",
