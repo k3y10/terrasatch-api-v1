@@ -93,7 +93,10 @@ async def portal_login(
         lambda session: authenticate_user(session, email=email, password=password),
     )
     if user is None:
-        return HTMLResponse(render_portal_login(issue_csrf_token(request.session), failed=True), status_code=401)
+        return HTMLResponse(
+            render_portal_login(issue_csrf_token(request.session), failed=True),
+            status_code=401,
+        )
     request.session.clear()
     request.session["portal_user_id"] = str(user.id)
     request.session["portal_email"] = user.email
@@ -129,7 +132,11 @@ async def portal_dashboard(
         request.session.clear()
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    selected = next((item for item in access if str(item.organization_id) == organization), access[0])
+    remembered = str(request.session.get("portal_organization") or "")
+    selector = organization or remembered
+    selected = next((item for item in access if str(item.organization_id) == selector), access[0])
+    request.session["portal_organization"] = str(selected.organization_id)
+
     _, sites = await _run_database(
         settings,
         lambda session: list_sites(
@@ -172,15 +179,21 @@ async def portal_fleet_status(
     if not access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization access")
 
-    selected_id = UUID(organization) if organization else access[0].organization_id
+    remembered = str(request.session.get("portal_organization") or "")
+    selector = organization or remembered
+    selected_access = next(
+        (item for item in access if str(item.organization_id) == selector),
+        access[0],
+    )
     selected = await _run_database(
         settings,
         lambda session: get_user_organization_access(
             session,
             user_id=user_id,
-            organization_id=selected_id,
+            organization_id=selected_access.organization_id,
         ),
     )
+    request.session["portal_organization"] = str(selected.organization_id)
     devices = await _run_database(
         settings,
         lambda session: list_devices(session, organization_id=selected.organization_id),
