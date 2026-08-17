@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from terrasatch.admin.ui import _styles, render_dashboard, render_login
+from terrasatch.admin.ui import _styles, render_login
+from terrasatch.admin.ui_v2 import render_dashboard
 
 
 def test_admin_ui_uses_orange_terminal_theme() -> None:
@@ -15,7 +16,7 @@ def test_admin_ui_uses_orange_terminal_theme() -> None:
     assert "/assets/terralisten-sasquatch.webp" in html
 
 
-def test_dashboard_exposes_real_admin_commands_and_capability_gated_tx() -> None:
+def test_dashboard_exposes_real_admin_commands_and_satchy_capability_controls() -> None:
     organization_id = uuid4()
     site_id = uuid4()
     device_id = uuid4()
@@ -26,7 +27,17 @@ def test_dashboard_exposes_real_admin_commands_and_capability_gated_tx() -> None
         hostname="field-node",
         capabilities=["radio:receive", "radio:transmit"],
         hardware_inventory=[{"provider": "test-full-duplex"}],
-        remote_config={"radio": {"receive_enabled": True, "transmit_enabled": False}},
+        remote_config={
+            "radio": {
+                "receive_enabled": True,
+                "transmit_enabled": False,
+                "ai_channel": {
+                    "agent_name": "Satchy",
+                    "activation_phrase": "TerraSatch",
+                    "reply_route": "dashboard",
+                },
+            }
+        },
         enabled=True,
     )
     organization = SimpleNamespace(
@@ -60,3 +71,6 @@ def test_dashboard_exposes_real_admin_commands_and_capability_gated_tx() -> None
     assert "PROVIDER-AWARE RX / TX" in html
     assert "CAPABILITY-GATED RADIO" in html
     assert "arbitrary OS shell" in html
+    assert "Satchy AI Channel" in html
+    assert "edge ai" in html
+    assert "Logical first, provider bound" in html

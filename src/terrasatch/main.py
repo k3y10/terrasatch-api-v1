@@ -25,7 +25,7 @@ from terrasatch.brand import SASQUATCH_ASSET_PATH, SASQUATCH_PREVIEW_PATH, apply
 from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
-from terrasatch.landing import build_landing_page
+from terrasatch.landing_v2 import build_landing_page
 from terrasatch.observability.health import check_readiness, liveness
 from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
@@ -108,7 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terralisten-sasquatch.webp", include_in_schema=False)
     async def get_sasquatch_brand_asset() -> FileResponse:
-        """Serve Sassy locally for the TerraListen console UI."""
+        """Serve Satchy locally for the TerraListen console UI."""
 
         return FileResponse(
             SASQUATCH_ASSET_PATH,
@@ -118,7 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terralisten-sasquatch.png", include_in_schema=False)
     async def get_sasquatch_preview_asset() -> FileResponse:
-        """Serve the PNG Sassy asset for favicons and social link previews."""
+        """Serve the PNG Satchy asset for favicons and social link previews."""
 
         return FileResponse(
             SASQUATCH_PREVIEW_PATH,

@@ -16,7 +16,7 @@ def make_settings(*, docs_enabled: bool = True) -> Settings:
 
 
 @pytest.mark.asyncio
-async def test_root_serves_clean_terralisten_operations_console() -> None:
+async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -26,37 +26,27 @@ async def test_root_serves_clean_terralisten_operations_console() -> None:
     assert response.headers["content-type"].startswith("text/html")
     for expected in (
         "TerraSatch · TerraListen Radio Console",
-        "TerraSatch Sasquatch",
+        "Satchy, the TerraSatch Sasquatch",
         "/assets/terralisten-sasquatch.webp",
         'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
-        (
-            'property="og:image" content="'
-            "https://api.terrasatch.com/assets/terralisten-sasquatch.png\""
-        ),
-        'name="twitter:card" content="summary"',
-        "TERRALISTEN",
-        "TerraListen Receiver",
-        "Receive-only radio intelligence for field operations.",
-        "Waiting for field receiver input",
-        "LIVE INTELLIGENCE",
-        "SYSTEM STATUS",
-        "RECEIVER STATUS",
-        "SYSTEM INFO",
-        "LISTEN</b> · WATCH · LEARN · ADAPT",
+        "Satchy AI Radio Channel",
+        "SATCHY · AI AGENT",
+        "TX ORCHESTRATION",
+        "PROVIDER-GATED",
+        "TX REQUIRES CAPABLE PROVIDER + OPERATOR POLICY",
+        "RX ↔ SATCHY ↔ TX",
         "/health/ready",
         "/openapi.json",
         "/api/v1/reference",
-        "/api/v1/transmissions",
-        "/ws/v1/events",
         "/admin",
         "/docs",
         "landing-test",
     ):
         assert expected in response.text
 
+    assert "Receive Only" not in response.text
+    assert "Receive-only radio intelligence" not in response.text
     assert "https://www.terrasatch.com/terralisten-sasquatch.png" not in response.text
-    assert "API · RX" not in response.text
-    assert "FIELD INTELLIGENCE RECEIVER" not in response.text
 
 
 @pytest.mark.asyncio
@@ -69,27 +59,22 @@ async def test_landing_is_a_no_document_scroll_viewport_shell() -> None:
     assert response.status_code == 200
     assert "html,body{width:100%;height:100%;margin:0;overflow:hidden}" in response.text
     assert "height:100dvh" in response.text
-    assert "grid-template-rows:76px minmax(0,1fr) 36px" in response.text
-    assert "grid-template-columns:minmax(0,1fr) minmax(280px,330px)" in response.text
-    assert "@media(max-width:1100px)" in response.text
-    assert "@media(max-width:820px)" in response.text
-    assert "@media(max-width:640px)" in response.text
-    assert "@media(max-height:700px)" in response.text
+    assert "grid-template-columns:minmax(0,1fr) 325px" in response.text
+    assert "@media(max-width:1050px)" in response.text
+    assert "@media(max-width:800px)" in response.text
+    assert "@media(max-width:600px)" in response.text
 
 
 @pytest.mark.asyncio
-async def test_receiver_waveform_uses_fluid_bar_sizing() -> None:
+async def test_radio_visual_uses_fluid_bars() -> None:
     application = create_app(make_settings())
     transport = httpx.ASGITransport(app=application)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get("/")
 
     assert response.status_code == 200
-    assert "gap:clamp(1px,.18vw,3px)" in response.text
-    assert "flex:1 1 0;width:auto;min-width:0" in response.text
-    assert "transform-origin:50% 100%" in response.text
-    assert ".wave i{width:4px;min-width:4px" not in response.text
-    assert ".wave i{width:3px;min-width:3px" not in response.text
+    assert ".bars i{flex:1;" in response.text
+    assert "--h:" in response.text
 
 
 @pytest.mark.asyncio

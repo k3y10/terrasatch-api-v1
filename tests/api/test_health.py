@@ -149,7 +149,10 @@ async def test_configured_admin_can_log_in_with_a_csrf_protected_form() -> None:
         follow_redirects=False,
     ) as client:
         login_form = await client.get("/admin/login")
-        csrf_token = search(r'name=csrf_token value="([^"]+)"', login_form.text)
+        csrf_token = search(
+            r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']',
+            login_form.text,
+        )
         response = await client.post(
             "/admin/login",
             data={

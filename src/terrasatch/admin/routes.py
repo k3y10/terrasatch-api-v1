@@ -12,9 +12,10 @@ from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.admin.commands import run_admin_command
+from terrasatch.admin.commands_v2 import run_admin_command
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
-from terrasatch.admin.ui import render_dashboard, render_login, render_one_time_key
+from terrasatch.admin.ui import render_login, render_one_time_key
+from terrasatch.admin.ui_v2 import render_dashboard
 from terrasatch.auth.service import issue_api_key, list_api_keys
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
@@ -184,13 +185,7 @@ async def admin_command(
             {"ok": False, "lines": ["error: command failed"]},
             status_code=500,
         )
-    return JSONResponse(
-        {
-            "ok": True,
-            "lines": result.lines,
-            "redirect": result.redirect,
-        }
-    )
+    return JSONResponse({"ok": True, "lines": result.lines, "redirect": result.redirect})
 
 
 @router.get(
@@ -251,14 +246,8 @@ async def admin_create_organization(
     try:
         organization = await _run_database(settings, lambda session: create_organization(session, name=name))
     except TerraSatchError as error:
-        return RedirectResponse(
-            f"/admin?error={quote(error.message)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(
-        f"/admin?organization={organization.id}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return RedirectResponse(f"/admin?error={quote(error.message)}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(f"/admin?organization={organization.id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/admin/sites", include_in_schema=False)
@@ -281,10 +270,7 @@ async def admin_create_site(
             f"/admin?organization={organization}&error={quote(error.message)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    return RedirectResponse(
-        f"/admin?organization={organization}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return RedirectResponse(f"/admin?organization={organization}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/admin/api-keys", include_in_schema=False, response_model=None)
