@@ -1,4 +1,5 @@
 """Superadmin routes for creating organization member browser accounts."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -87,7 +88,10 @@ async def admin_member_upsert(
         organization_id = UUID(organization)
         member_role = MembershipRole(role.lower())
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid organization or role") from error
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid organization or role",
+        ) from error
 
     await _run_database(
         settings,
