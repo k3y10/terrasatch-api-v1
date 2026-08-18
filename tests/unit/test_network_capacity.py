@@ -60,17 +60,20 @@ async def test_existing_counted_member_can_be_updated_at_capacity(
     organization = SimpleNamespace(id="org-id")
 
     class FakeSession:
+        def __init__(self) -> None:
+            self.scalar_calls = 0
+
         async def get(self, _model: object, _identifier: object) -> object:
             return organization
 
         async def scalar(self, _statement: object) -> object:
-            return user if not hasattr(self, "seen_user") else membership
+            self.scalar_calls += 1
+            return user if self.scalar_calls == 1 else membership
 
         async def flush(self) -> None:
             return None
 
     session = FakeSession()
-    session.seen_user = True
 
     async def fake_count(_session: object) -> int:
         return 1
@@ -82,9 +85,9 @@ async def test_existing_counted_member_can_be_updated_at_capacity(
     monkeypatch.setattr(member_access, "_user_counts_toward_capacity", fake_counted)
     monkeypatch.setattr(member_access, "hash_admin_password", lambda _password: "new-hash")
 
-    # The service should not reject an existing active user merely because the
-    # unique-user limit has been reached. Password/role maintenance remains available.
-    result_user, _ = await member_access.create_or_update_organization_member(
+    # Hitting the unique-user limit must not block password/role maintenance for
+    # an existing active user that already consumes a member slot.
+    result_user, result_membership = await member_access.create_or_update_organization_member(
         session,  # type: ignore[arg-type]
         organization_id=organization.id,
         email=user.email,
@@ -94,3 +97,5 @@ async def test_existing_counted_member_can_be_updated_at_capacity(
         settings=make_settings(member_limit=1),
     )
     assert result_user.display_name == "Updated User"
+    assert result_user.password_hash == "new-hash"
+    assert result_membership.role == MembershipRole.OPERATOR
