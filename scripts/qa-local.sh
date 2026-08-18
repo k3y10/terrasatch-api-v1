@@ -5,10 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-VENV_DIR="${TERRASATCH_QA_VENV:-.venv-qa}"
+QA_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/terrasatch"
+VENV_DIR="${TERRASATCH_QA_VENV:-$QA_CACHE_ROOT/api-qa-venv}"
 
 printf '\nTerraSatch API local QA\n'
 printf 'Repository: %s\n' "$ROOT"
+printf 'QA venv: %s\n' "$VENV_DIR"
 printf 'Python: '
 "$PYTHON_BIN" --version
 
@@ -18,6 +20,7 @@ if sys.version_info < (3, 12):
     raise SystemExit(f"Python 3.12+ required, found {sys.version}")
 PY
 
+mkdir -p "$(dirname "$VENV_DIR")"
 if [[ ! -d "$VENV_DIR" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
