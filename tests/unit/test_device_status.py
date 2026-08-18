@@ -71,6 +71,24 @@ def test_device_payload_prioritizes_radio_hardware_and_reports_capabilities() ->
     assert payload["ai_channel"]["activation_phrase"] == "TerraSatch"
 
 
+def test_device_payload_does_not_present_host_hardware_as_radio() -> None:
+    now = datetime(2026, 8, 17, 20, 0, tzinfo=UTC)
+    device = _device(
+        last_seen_at=now,
+        inventory=[
+            {"provider": "host", "name": "Integrated Webcam"},
+            {"provider": "host", "name": "Bluetooth Adapter"},
+        ],
+    )
+
+    payload = device_status_payload(device, now=now)
+
+    assert payload["primary_hardware"] == "No radio hardware reported"
+    assert payload["provider"] == "none"
+    assert payload["hardware_count"] == 2
+    assert payload["rx_supported"] is False
+
+
 def test_fleet_summary_counts_health_sites_and_radio_capabilities() -> None:
     summary = fleet_summary(
         [
