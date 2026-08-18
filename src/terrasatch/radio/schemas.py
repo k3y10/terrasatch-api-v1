@@ -97,6 +97,10 @@ class TransmissionCreateRequest(BaseModel):
     source_message_id: str = Field(min_length=1, max_length=255)
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    transcript_provider: str | None = Field(default=None, min_length=1, max_length=100)
+    transcript_model: str | None = Field(default=None, min_length=1, max_length=100)
+    transcript_language: str | None = Field(default=None, min_length=1, max_length=16)
+    transcript_confidence: float | None = Field(default=None, ge=0, le=1)
 
     @field_validator("text", "source", "source_message_id", mode="before")
     @classmethod
@@ -105,9 +109,15 @@ class TransmissionCreateRequest(BaseModel):
 
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("callsign", mode="before")
+    @field_validator(
+        "callsign",
+        "transcript_provider",
+        "transcript_model",
+        "transcript_language",
+        mode="before",
+    )
     @classmethod
-    def normalize_optional_callsign(cls, value: object) -> object:
+    def normalize_optional_text(cls, value: object) -> object:
         if not isinstance(value, str):
             return value
         normalized = value.strip()
