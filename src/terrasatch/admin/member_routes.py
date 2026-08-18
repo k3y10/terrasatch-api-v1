@@ -102,6 +102,7 @@ async def admin_member_upsert(
             display_name=display_name,
             password=password,
             role=member_role,
+            settings=settings,
         ),
     )
     return RedirectResponse(
