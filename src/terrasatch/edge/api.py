@@ -77,7 +77,7 @@ async def post_pairing(payload: PairingStartRequest, request: Request) -> Pairin
     settings: Settings = request.app.state.settings
     pairing, device_code = await _run_database(
         settings,
-        lambda session: start_pairing(session, payload),
+        lambda session: start_pairing(session, payload, settings=settings),
     )
     public_base_url = str(settings.api_base_url).rstrip("/")
     return PairingStartResponse(
