@@ -69,6 +69,8 @@ def _hardware_summary(device: EdgeDevice) -> tuple[str, str, int]:
         return 0
 
     primary = max(inventory, key=score)
+    if score(primary) <= 0:
+        return "No radio hardware reported", "none", len(inventory)
     primary_name = str(primary.get("name") or primary.get("provider") or "Unknown hardware").strip()
     provider = str(primary.get("provider") or "unknown").strip()
     return primary_name, provider, len(inventory)
