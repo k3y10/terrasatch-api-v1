@@ -42,7 +42,12 @@ async def authenticate_user(
     password: str,
 ) -> User | None:
     normalized = email.strip().casefold()
-    user = await session.scalar(select(User).where(User.email == normalized, User.enabled.is_(True)))
+    user = await session.scalar(
+        select(User).where(
+            User.email == normalized,
+            User.enabled.is_(True),
+        )
+    )
     if user is None or not user.password_hash:
         return None
     if not verify_admin_password(password, user.password_hash):
@@ -173,7 +178,8 @@ async def create_or_update_organization_member(
         registered_users = await count_portal_users(session)
         if registered_users >= settings.max_portal_users:
             raise ResourceConflict(
-                "Member registration is temporarily paused because the configured network capacity was reached.",
+                "Member registration is temporarily paused because the configured "
+                "network capacity was reached.",
                 details={
                     "registered_members": registered_users,
                     "max_portal_users": settings.max_portal_users,
