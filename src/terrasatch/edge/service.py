@@ -16,18 +16,39 @@ from terrasatch.edge.codes import (
     normalize_user_code,
 )
 from terrasatch.edge.models import EdgeDevice, EdgePairing
-from terrasatch.edge.schemas import EdgeDeviceUpdateRequest, EdgeHeartbeatRequest, PairingStartRequest
-from terrasatch.errors import InvalidConfiguration, ResourceNotFound
+from terrasatch.edge.schemas import (
+    EdgeDeviceUpdateRequest,
+    EdgeHeartbeatRequest,
+    PairingStartRequest,
+)
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
+from terrasatch.network.status import count_registered_edges
 from terrasatch.organizations.service import get_site
 
 PAIRING_TTL_MINUTES = 10
 DEVICE_SCOPES = ("edge:connect", "edge:ingest", "read:sites")
 
 
+async def _ensure_edge_capacity(session: AsyncSession, settings: Settings) -> None:
+    registered = await count_registered_edges(session)
+    if registered >= settings.max_edge_devices:
+        raise ResourceConflict(
+            "Edge registration is temporarily paused because the configured "
+            "network capacity was reached.",
+            details={
+                "registered_nodes": registered,
+                "max_edge_devices": settings.max_edge_devices,
+            },
+        )
+
+
 async def start_pairing(
     session: AsyncSession,
     payload: PairingStartRequest,
+    *,
+    settings: Settings,
 ) -> tuple[EdgePairing, str]:
+    await _ensure_edge_capacity(session, settings)
     device_code = generate_device_code()
     pairing = EdgePairing(
         device_code_hash=hash_device_code(device_code),
@@ -95,6 +116,10 @@ async def claim_pairing(
         return "claimed", None, None
     if pairing.approved_at is None or pairing.organization_id is None or pairing.site_id is None:
         return "pending", None, None
+
+    # Re-check immediately before credential/device creation so pairings opened
+    # before the limit was reached cannot silently exceed the configured cap.
+    await _ensure_edge_capacity(session, settings)
 
     api_key, generated = await issue_api_key(
         session,

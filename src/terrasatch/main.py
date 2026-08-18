@@ -27,6 +27,7 @@ from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
 from terrasatch.landing_v3 import build_landing_page
+from terrasatch.network.status import get_public_network_status
 from terrasatch.observability.health import check_readiness, liveness
 from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
@@ -159,6 +160,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if report.status == "unhealthy":
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return report
+
+    @api_v1.get("/network/status", tags=["network"])
+    async def get_network_status(response: Response) -> dict[str, object]:
+        """Return aggregate growth/capacity counters without tenant or device identities."""
+
+        response.headers["Cache-Control"] = "public, max-age=15, stale-while-revalidate=30"
+        return await get_public_network_status(configured_settings)
 
     @api_v1.get("/auth/me", tags=["auth"])
     async def get_current_principal(

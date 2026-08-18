@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     intelligence_provider: str = "deterministic"
     storage_provider: str = "local_filesystem"
     billing_enabled: bool = False
+    max_edge_devices: int = Field(default=100, ge=1, le=100_000)
+    max_portal_users: int = Field(default=250, ge=1, le=1_000_000)
     admin_email: str | None = None
     admin_password_hash: SecretStr | None = None
     admin_session_secret: SecretStr | None = None

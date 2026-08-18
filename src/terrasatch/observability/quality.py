@@ -24,6 +24,7 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("GET", "/health/live", "public", "Explicit process liveness alias."),
         ("GET", "/health/ready", "public", "PostgreSQL and Redis readiness; returns 503 when unavailable."),
         ("GET", "/api/v1/health", "public", "Versioned readiness check."),
+        ("GET", "/api/v1/network/status", "public", "Privacy-safe aggregate Edge, site, member, and configured-capacity counters."),
         ("GET", "/api/v1/reference", "public", "Implemented route, scope, and error-code reference."),
         ("GET", "/api/v1/auth/me", "bearer_api_key", "Credential-derived organization and API scopes."),
         ("GET", "/api/v1/sites", "bearer_api_key", "List tenant sites with optional enabled filtering."),
@@ -85,7 +86,7 @@ def common_errors() -> list[ErrorCodeReference]:
         ErrorCodeReference(http_status=401, code="authentication_required", meaning="A bearer API key is absent, invalid, expired, or revoked."),
         ErrorCodeReference(http_status=403, code="insufficient_scope", meaning="The API key lacks the required scope for this operation."),
         ErrorCodeReference(http_status=404, code="not_found", meaning="The requested tenant-owned resource does not exist or is not visible to this tenant."),
-        ErrorCodeReference(http_status=409, code="resource_conflict", meaning="A resource with the requested unique name or slug already exists."),
+        ErrorCodeReference(http_status=409, code="resource_conflict", meaning="A resource conflicts with existing state or a configured registration limit has been reached."),
         ErrorCodeReference(http_status=422, code="validation_error", meaning="The request shape or value does not meet the API contract."),
         ErrorCodeReference(http_status=503, code="service_unavailable", meaning="A required dependency or configured provider is not ready."),
     ]

@@ -4,7 +4,7 @@ TerraSatch API is the production backend for TerraSatch field intelligence and T
 
 Production: `https://api.terrasatch.com`
 
-API release: **0.2.0**
+API release: **0.2.1**
 
 ## Current canonical path
 
@@ -37,6 +37,8 @@ Do not build a separate demo-only intelligence path. Simulator, recorded audio, 
 - live registered Edge fleet health and provider-aware RX/TX capability state
 - Satchy AI-channel configuration stored as Edge remote policy
 - organization member portal with tenant-scoped fleet visibility
+- public privacy-safe TerraSatch Network totals for registered/online nodes, field sites, members, and configured capacity
+- configurable registration guardrails that pause new Edge/member registration without interrupting existing users or nodes
 - Docker/Compose deployment behind Caddy at `api.terrasatch.com`
 
 The dedicated field runtime lives in the separate `terrasatch-edge` repository. Physical validation has confirmed Linux/WSL detection of a NESDR SMArt v5 / RTL2838 receiver, a bounded IQ receive probe, production Edge pairing, heartbeat/inventory sync, text ingestion, transcript persistence, and TerraEngine event extraction. RF demodulated audio → STT remains the next field-side phase.
@@ -50,9 +52,34 @@ GET /health
 GET /health/live
 GET /health/ready
 GET /api/v1/health
+GET /api/v1/network/status
 GET /api/v1/reference
 GET /openapi.json
 ```
+
+`GET /api/v1/network/status` exposes aggregate counts only. It does not return organization names, device IDs, hardware inventories, callsigns, site names, or individual user records. The result is short-lived cached so the public landing page does not query PostgreSQL on every visual refresh.
+
+## Network capacity guardrails
+
+The default release limits are configurable through environment settings:
+
+```text
+TERRASATCH_MAX_EDGE_DEVICES=100
+TERRASATCH_MAX_PORTAL_USERS=250
+```
+
+When a limit is reached, new registrations are paused while existing Edge heartbeats, ingestion, and portal access continue normally. Existing members can still have passwords/roles updated without consuming another unique-user slot.
+
+Public capacity states are:
+
+```text
+0–79%     HEALTHY
+80–89%    CAPACITY WATCH
+90–99%    NEAR CAPACITY
+100%      REGISTRATION PAUSED
+```
+
+These are onboarding guardrails, not a substitute for request throttling, queue/backpressure controls, or production capacity testing.
 
 ## Authenticated control plane
 
@@ -241,7 +268,7 @@ bash deploy/release-oracle.sh
 
 The release script refuses a dirty working tree, updates `main`, validates Compose, builds API/worker images, runs import/CLI smoke checks, applies Alembic migrations, recreates services, verifies the running revision locally, and verifies the same revision through the Caddy/TLS route.
 
-Release `0.2.0` includes migration `0006_user_password_hash`, following `0005_edge_control_plane`, so the normal release script must run Alembic before the application containers are recreated.
+Release `0.2.0` introduced migration `0006_user_password_hash`, following `0005_edge_control_plane`. Release `0.2.1` adds no database migration; the normal release script remains the supported deployment path.
 
 ## Current hardening boundary
 
@@ -251,6 +278,7 @@ Before broad multi-site customer deployment:
 - add request throttling to unauthenticated pairing-start
 - validate live WebSocket delivery from an Edge-created event
 - complete backup/restore and reboot/startup validation
+- load-test and tune the configured node/member limits against Oracle resources
 - add retention/audit/rate-limit policy appropriate to partner operational data
 
 ## Radio safety
@@ -258,7 +286,3 @@ Before broad multi-site customer deployment:
 TerraSatch must not infer transmit capability from receive hardware. Nooelec / RTL-SDR is receive-only. TX state in the API represents provider-reported capability plus explicit operator policy; actual RF transmission requires a dedicated TX-capable provider/adapter and remains gated separately from the API control plane.
 
 Operators are responsible for receiving and processing only traffic they are authorized to access. Secrets belong in environment variables or ignored owner-only files and must never be committed.
-
-## License
-
-Proprietary. All rights reserved.

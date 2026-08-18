@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import hash_admin_password, verify_admin_password
-from terrasatch.errors import InvalidConfiguration, ResourceNotFound
+from terrasatch.config import Settings
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
 from terrasatch.identity.models import Membership, MembershipRole, Organization, User
+from terrasatch.network.status import count_portal_users
 
 _ROLE_RANK = {
     MembershipRole.VIEWER: 10,
@@ -40,7 +42,12 @@ async def authenticate_user(
     password: str,
 ) -> User | None:
     normalized = email.strip().casefold()
-    user = await session.scalar(select(User).where(User.email == normalized, User.enabled.is_(True)))
+    user = await session.scalar(
+        select(User).where(
+            User.email == normalized,
+            User.enabled.is_(True),
+        )
+    )
     if user is None or not user.password_hash:
         return None
     if not verify_admin_password(password, user.password_hash):
@@ -125,6 +132,20 @@ async def list_organization_members(
     return list(rows.all())
 
 
+async def _user_counts_toward_capacity(session: AsyncSession, user: User) -> bool:
+    if not user.enabled:
+        return False
+    membership_id = await session.scalar(
+        select(Membership.id)
+        .where(
+            Membership.user_id == user.id,
+            Membership.enabled.is_(True),
+        )
+        .limit(1)
+    )
+    return membership_id is not None
+
+
 async def create_or_update_organization_member(
     session: AsyncSession,
     *,
@@ -133,6 +154,7 @@ async def create_or_update_organization_member(
     display_name: str,
     password: str,
     role: MembershipRole,
+    settings: Settings | None = None,
 ) -> tuple[User, Membership]:
     organization = await session.get(Organization, organization_id)
     if organization is None:
@@ -151,6 +173,19 @@ async def create_or_update_organization_member(
         raise InvalidConfiguration(str(error)) from error
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
+    already_counted = user is not None and await _user_counts_toward_capacity(session, user)
+    if not already_counted and settings is not None:
+        registered_users = await count_portal_users(session)
+        if registered_users >= settings.max_portal_users:
+            raise ResourceConflict(
+                "Member registration is temporarily paused because the configured "
+                "network capacity was reached.",
+                details={
+                    "registered_members": registered_users,
+                    "max_portal_users": settings.max_portal_users,
+                },
+            )
+
     if user is None:
         user = User(
             email=normalized_email,

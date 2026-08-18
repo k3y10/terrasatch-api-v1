@@ -36,13 +36,16 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
         "TX REQUIRES CAPABLE PROVIDER + OPERATOR POLICY",
         "RX ↔ SATCHY ↔ TX",
         "LISTENING · WAITING FOR EDGE",
-        "REGISTERED EDGE FLEET",
-        "RX CAPABLE",
-        "TX CAPABLE",
-        "ATTENTION",
+        "TERRASATCH NETWORK",
+        "REGISTERED NODES",
+        "FIELD SITES",
+        "MEMBERS",
+        "NETWORK HEALTH",
+        "PRIVATE FLEET DETAIL",
         "CURRENT COMPATIBILITY",
         "RTL-SDR / Nooelec",
         "HackRF",
+        "/api/v1/network/status",
         "/admin/fleet-status",
         "/portal/fleet-status",
         "/portal",
@@ -91,8 +94,9 @@ async def test_radio_visual_animates_standby_heartbeat_and_fluid_bars() -> None:
     assert "@keyframes heartbeat" in response.text
     assert 'id="radio-signal" data-edge="standby"' in response.text
     assert "setInterval(updateHealth,15000)" in response.text
-    assert "setInterval(updateFleet,10000)" in response.text
-    assert "setInterval(refreshFleetSummary,10000)" in response.text
+    assert "setInterval(refreshNetwork,30000)" in response.text
+    assert "setInterval(refreshFleet,10000)" in response.text
+    assert "setInterval(updateFleet,10000)" not in response.text
 
 
 @pytest.mark.asyncio
