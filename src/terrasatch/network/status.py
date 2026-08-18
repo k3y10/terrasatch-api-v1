@@ -9,12 +9,12 @@ from time import monotonic
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.admin.device_status import ONLINE_AFTER_SECONDS
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.models import EdgeDevice
 from terrasatch.identity.models import Membership, Organization, User
 
+ONLINE_AFTER_SECONDS = 120
 _PUBLIC_CACHE_SECONDS = 15.0
 _cache_lock = asyncio.Lock()
 _cached_payload: dict[str, object] | None = None
