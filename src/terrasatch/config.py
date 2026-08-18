@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     enable_docs: bool = True
     stt_provider: str = "local_whisper"
     intelligence_provider: str = "deterministic"
+    ollama_base_url: AnyHttpUrl = "http://127.0.0.1:11434"
+    ollama_model: str = Field(default="qwen3:1.7b", min_length=1, max_length=128)
+    intelligence_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
+    intelligence_fallback_to_deterministic: bool = True
     storage_provider: str = "local_filesystem"
     billing_enabled: bool = False
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
