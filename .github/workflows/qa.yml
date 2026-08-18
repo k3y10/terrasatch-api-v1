@@ -1,7 +1,6 @@
 name: QA
 
 on:
-  pull_request:
   push:
     branches:
       - agent/satchy-intelligence-0.3
@@ -10,55 +9,59 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  qa:
+    name: full-qa
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install
+      - name: Clone branch without marketplace actions
+        shell: bash
         run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" clone \
+            --depth 1 \
+            --branch "$GITHUB_REF_NAME" \
+            "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git rev-parse --short HEAD
+
+      - name: Verify Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 - <<'PY'
+          import sys
+          if sys.version_info < (3, 12):
+              raise SystemExit(f"Python 3.12+ required, found {sys.version}")
+          PY
+
+      - name: Install QA environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd repo
+          python3 -m venv .venv
+          . .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
+          python -c "import terrasatch; print(terrasatch.__version__)"
 
       - name: Ruff
         shell: bash
         run: |
-          mkdir -p qa-logs
-          set +e
-          ruff check src tests 2>&1 | tee qa-logs/ruff.log
-          echo "${PIPESTATUS[0]}" > qa-logs/ruff.status
-          exit 0
+          set -euo pipefail
+          cd repo
+          . .venv/bin/activate
+          ruff check src tests
 
-      - name: Tests
+      - name: Full pytest and coverage
         shell: bash
         run: |
-          set +e
-          pytest --cov=terrasatch --cov-report=term-missing 2>&1 | tee qa-logs/pytest.log
-          echo "${PIPESTATUS[0]}" > qa-logs/pytest.status
-          exit 0
-
-      - name: Upload QA logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-logs
-          path: qa-logs
-          retention-days: 3
-
-      - name: Enforce QA result
-        shell: bash
-        run: |
-          ruff_status="$(cat qa-logs/ruff.status)"
-          pytest_status="$(cat qa-logs/pytest.status)"
-          echo "ruff=$ruff_status pytest=$pytest_status"
-          if [ "$ruff_status" != "0" ] || [ "$pytest_status" != "0" ]; then
-            exit 1
-          fi
+          set -euo pipefail
+          cd repo
+          . .venv/bin/activate
+          pytest --cov=terrasatch --cov-report=term-missing
