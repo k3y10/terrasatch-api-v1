@@ -27,6 +27,11 @@ def build_landing_page(*, environment: str, deployment: str, version: str, docs_
     )
     html = html.replace(_OLD_FLEET, _NEW_FLEET, 1)
     html = html.replace(
+        "updateHealth();updateFleet();setInterval(updateHealth,15000);setInterval(updateFleet,10000);",
+        "updateHealth();setInterval(updateHealth,15000);",
+        1,
+    )
+    html = html.replace(
         '<a href="/admin">Admin</a>',
         '<a href="/portal">Portal</a><a href="/admin">Admin</a>',
         1,
