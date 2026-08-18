@@ -7,6 +7,17 @@ cd "$ROOT"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 QA_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/terrasatch"
 VENV_DIR="${TERRASATCH_QA_VENV:-$QA_CACHE_ROOT/api-qa-venv}"
+COVERAGE_XML="$QA_CACHE_ROOT/api-coverage.xml"
+
+# QA must never inherit production connectivity or model execution settings.
+export TERRASATCH_ENV=local
+export TERRASATCH_ENVIRONMENT=local
+export TERRASATCH_DEPLOYMENT_NAME=qa-local
+export TERRASATCH_API_BASE_URL=http://127.0.0.1:18000
+export TERRASATCH_DATABASE_URL=postgresql+asyncpg://terrasatch:terrasatch@127.0.0.1:55432/terrasatch_qa
+export TERRASATCH_REDIS_URL=redis://127.0.0.1:56379/15
+export TERRASATCH_INTELLIGENCE_PROVIDER=deterministic
+unset TERRASATCH_ADMIN_EMAIL TERRASATCH_ADMIN_PASSWORD_HASH TERRASATCH_ADMIN_SESSION_SECRET || true
 
 printf '\nTerraSatch API local QA\n'
 printf 'Repository: %s\n' "$ROOT"
@@ -20,7 +31,7 @@ if sys.version_info < (3, 12):
     raise SystemExit(f"Python 3.12+ required, found {sys.version}")
 PY
 
-mkdir -p "$(dirname "$VENV_DIR")"
+mkdir -p "$QA_CACHE_ROOT"
 if [[ ! -d "$VENV_DIR" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
@@ -30,6 +41,9 @@ source "$VENV_DIR/bin/activate"
 
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
+python -m pip check
+
+git diff --check
 
 printf '\n[1/6] Ruff\n'
 ruff check src tests
@@ -54,7 +68,7 @@ print(f"Transmission contract: {TransmissionCreateRequest.__name__}")
 PY
 
 printf '\n[3/6] Full pytest + project coverage threshold\n'
-pytest --cov=terrasatch --cov-report=term-missing --cov-report=xml
+pytest --cov=terrasatch --cov-report=term-missing --cov-report="xml:$COVERAGE_XML"
 
 printf '\n[4/6] Migration graph smoke\n'
 alembic heads
