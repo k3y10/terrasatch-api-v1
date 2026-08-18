@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.models import EdgeDevice
-from terrasatch.identity.models import Membership, Organization, User
+from terrasatch.identity.models import Membership, User
 
 ONLINE_AFTER_SECONDS = 120
 _PUBLIC_CACHE_SECONDS = 15.0
@@ -60,11 +60,9 @@ async def count_portal_users(session: AsyncSession) -> int:
     value = await session.scalar(
         select(func.count(func.distinct(User.id)))
         .join(Membership, Membership.user_id == User.id)
-        .join(Organization, Organization.id == Membership.organization_id)
         .where(
             User.enabled.is_(True),
             Membership.enabled.is_(True),
-            Organization.enabled.is_(True),
         )
     )
     return int(value or 0)
