@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import hash_admin_password, verify_admin_password
-from terrasatch.errors import InvalidConfiguration, ResourceNotFound
+from terrasatch.config import Settings
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
 from terrasatch.identity.models import Membership, MembershipRole, Organization, User
+from terrasatch.network.status import count_portal_users
 
 _ROLE_RANK = {
     MembershipRole.VIEWER: 10,
@@ -133,6 +135,7 @@ async def create_or_update_organization_member(
     display_name: str,
     password: str,
     role: MembershipRole,
+    settings: Settings | None = None,
 ) -> tuple[User, Membership]:
     organization = await session.get(Organization, organization_id)
     if organization is None:
@@ -152,6 +155,16 @@ async def create_or_update_organization_member(
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
     if user is None:
+        if settings is not None:
+            registered_users = await count_portal_users(session)
+            if registered_users >= settings.max_portal_users:
+                raise ResourceConflict(
+                    "Member registration is temporarily paused because the configured network capacity was reached.",
+                    details={
+                        "registered_members": registered_users,
+                        "max_portal_users": settings.max_portal_users,
+                    },
+                )
         user = User(
             email=normalized_email,
             display_name=normalized_name,
