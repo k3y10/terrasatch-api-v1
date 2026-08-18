@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "terrasatch-ai-radio-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "TerraSatch API: authorized radio traffic to structured operational intelligence."
 readme = "README.md"
 requires-python = ">=3.12"

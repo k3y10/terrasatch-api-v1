@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from terrasatch.admin.ui import _styles, render_login
-from terrasatch.admin.ui_v2 import render_dashboard
+from terrasatch.admin.ui_v3 import render_dashboard
 
 
 def test_admin_ui_uses_orange_terminal_theme() -> None:
@@ -91,3 +91,5 @@ def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> 
     assert "Satchy AI Channel" in html
     assert "edge ai" in html
     assert "Logical first, provider bound" in html
+    assert "/admin/members" in html
+    assert "Members & access" in html

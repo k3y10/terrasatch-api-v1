@@ -32,12 +32,16 @@ def test_device_health_tracks_online_stale_offline_and_never() -> None:
     assert device_health(_device(last_seen_at=now, enabled=False), now=now) == ("disabled", None)
 
 
-def test_device_payload_reports_hardware_rx_tx_mode_and_satchy_policy() -> None:
+def test_device_payload_prioritizes_radio_hardware_and_reports_capabilities() -> None:
     now = datetime(2026, 8, 17, 20, 0, tzinfo=UTC)
     device = _device(
         last_seen_at=now - timedelta(seconds=20),
         capabilities=["radio:receive", "radio:transmit"],
-        inventory=[{"provider": "gateway", "name": "Field Radio Gateway"}],
+        inventory=[
+            {"provider": "host", "name": "Bluetooth Network Connection"},
+            {"provider": "host", "name": "Integrated Webcam"},
+            {"provider": "rtl", "name": "NESDR SMArt v5", "capture_ready": True},
+        ],
         remote_config={
             "radio": {
                 "receive_enabled": True,
@@ -54,7 +58,10 @@ def test_device_payload_reports_hardware_rx_tx_mode_and_satchy_policy() -> None:
     payload = device_status_payload(device, now=now)
 
     assert payload["health"] == "online"
-    assert payload["hardware"] == "Field Radio Gateway"
+    assert payload["hardware"] == "NESDR SMArt v5"
+    assert payload["primary_hardware"] == "NESDR SMArt v5"
+    assert payload["provider"] == "rtl"
+    assert payload["hardware_count"] == 3
     assert payload["rx_supported"] is True
     assert payload["tx_supported"] is True
     assert payload["rx_enabled"] is True
@@ -64,14 +71,32 @@ def test_device_payload_reports_hardware_rx_tx_mode_and_satchy_policy() -> None:
     assert payload["ai_channel"]["activation_phrase"] == "TerraSatch"
 
 
-def test_fleet_summary_counts_health_states() -> None:
+def test_device_payload_does_not_present_host_hardware_as_radio() -> None:
+    now = datetime(2026, 8, 17, 20, 0, tzinfo=UTC)
+    device = _device(
+        last_seen_at=now,
+        inventory=[
+            {"provider": "host", "name": "Integrated Webcam"},
+            {"provider": "host", "name": "Bluetooth Adapter"},
+        ],
+    )
+
+    payload = device_status_payload(device, now=now)
+
+    assert payload["primary_hardware"] == "No radio hardware reported"
+    assert payload["provider"] == "none"
+    assert payload["hardware_count"] == 2
+    assert payload["rx_supported"] is False
+
+
+def test_fleet_summary_counts_health_sites_and_radio_capabilities() -> None:
     summary = fleet_summary(
         [
-            {"health": "online"},
-            {"health": "online"},
-            {"health": "stale"},
-            {"health": "offline"},
-            {"health": "never"},
+            {"health": "online", "site_id": "a", "rx_supported": True, "tx_supported": False},
+            {"health": "online", "site_id": "a", "rx_supported": True, "tx_supported": True},
+            {"health": "stale", "site_id": "b", "rx_supported": True, "tx_supported": False},
+            {"health": "offline", "site_id": "b", "rx_supported": False, "tx_supported": False},
+            {"health": "never", "site_id": "c", "rx_supported": False, "tx_supported": False},
         ]
     )
 
@@ -82,4 +107,8 @@ def test_fleet_summary_counts_health_states() -> None:
         "offline": 1,
         "never": 1,
         "disabled": 0,
+        "sites": 3,
+        "rx_capable": 3,
+        "tx_capable": 1,
+        "attention": 3,
     }

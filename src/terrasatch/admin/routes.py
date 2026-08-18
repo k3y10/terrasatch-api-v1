@@ -17,7 +17,7 @@ from terrasatch.admin.commands_v2 import run_admin_command
 from terrasatch.admin.device_status import device_status_payload, fleet_summary
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token, verify_admin_password
 from terrasatch.admin.ui import render_login, render_one_time_key
-from terrasatch.admin.ui_v2 import render_dashboard
+from terrasatch.admin.ui_v3 import render_dashboard
 from terrasatch.auth.service import issue_api_key, list_api_keys
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory

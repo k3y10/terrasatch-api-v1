@@ -75,12 +75,13 @@ class Team(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A human user. Authentication provider linkage is intentionally separate."""
+    """A human user with an optional local browser credential."""
 
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
