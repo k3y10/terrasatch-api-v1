@@ -92,7 +92,9 @@ async def build_public_network_status(
     )
     field_sites = int(
         await session.scalar(
-            select(func.count(func.distinct(EdgeDevice.site_id))).where(EdgeDevice.enabled.is_(True))
+            select(func.count(func.distinct(EdgeDevice.site_id))).where(
+                EdgeDevice.enabled.is_(True)
+            )
         )
         or 0
     )
@@ -125,7 +127,7 @@ async def build_public_network_status(
 
 
 async def get_public_network_status(settings: Settings) -> dict[str, object]:
-    """Return a short-lived cached aggregate so public page refreshes do not hammer PostgreSQL."""
+    """Return a short-lived cached aggregate for the public console."""
 
     global _cached_payload, _cached_key, _cache_expires_at
 
