@@ -18,6 +18,7 @@ ONLINE_AFTER_SECONDS = 120
 _PUBLIC_CACHE_SECONDS = 15.0
 _cache_lock = asyncio.Lock()
 _cached_payload: dict[str, object] | None = None
+_cached_key: tuple[str, int, int] | None = None
 _cache_expires_at = 0.0
 
 
@@ -37,6 +38,14 @@ def _percent(value: int, limit: int) -> int:
     if limit <= 0:
         return 100
     return min(100, round((value / limit) * 100))
+
+
+def _settings_cache_key(settings: Settings) -> tuple[str, int, int]:
+    return (
+        str(settings.database_url),
+        settings.max_edge_devices,
+        settings.max_portal_users,
+    )
 
 
 async def count_registered_edges(session: AsyncSession) -> int:
@@ -120,15 +129,16 @@ async def build_public_network_status(
 async def get_public_network_status(settings: Settings) -> dict[str, object]:
     """Return a short-lived cached aggregate so public page refreshes do not hammer PostgreSQL."""
 
-    global _cached_payload, _cache_expires_at
+    global _cached_payload, _cached_key, _cache_expires_at
 
+    key = _settings_cache_key(settings)
     current = monotonic()
-    if _cached_payload is not None and current < _cache_expires_at:
+    if _cached_payload is not None and _cached_key == key and current < _cache_expires_at:
         return dict(_cached_payload)
 
     async with _cache_lock:
         current = monotonic()
-        if _cached_payload is not None and current < _cache_expires_at:
+        if _cached_payload is not None and _cached_key == key and current < _cache_expires_at:
             return dict(_cached_payload)
 
         session_factory = create_session_factory(settings)
@@ -136,5 +146,6 @@ async def get_public_network_status(settings: Settings) -> dict[str, object]:
             payload = await build_public_network_status(session, settings=settings)
 
         _cached_payload = payload
+        _cached_key = key
         _cache_expires_at = monotonic() + _PUBLIC_CACHE_SECONDS
         return dict(payload)
