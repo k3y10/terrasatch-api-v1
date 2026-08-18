@@ -16,7 +16,11 @@ from terrasatch.edge.codes import (
     normalize_user_code,
 )
 from terrasatch.edge.models import EdgeDevice, EdgePairing
-from terrasatch.edge.schemas import EdgeDeviceUpdateRequest, EdgeHeartbeatRequest, PairingStartRequest
+from terrasatch.edge.schemas import (
+    EdgeDeviceUpdateRequest,
+    EdgeHeartbeatRequest,
+    PairingStartRequest,
+)
 from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
 from terrasatch.network.status import count_registered_edges
 from terrasatch.organizations.service import get_site
@@ -29,7 +33,8 @@ async def _ensure_edge_capacity(session: AsyncSession, settings: Settings) -> No
     registered = await count_registered_edges(session)
     if registered >= settings.max_edge_devices:
         raise ResourceConflict(
-            "Edge registration is temporarily paused because the configured network capacity was reached.",
+            "Edge registration is temporarily paused because the configured "
+            "network capacity was reached.",
             details={
                 "registered_nodes": registered,
                 "max_edge_devices": settings.max_edge_devices,
