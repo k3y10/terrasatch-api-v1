@@ -74,17 +74,17 @@ def _device_response(device: EdgeDevice) -> DeviceResponse:
 
 @router.post("/pairings", response_model=PairingStartResponse, status_code=status.HTTP_201_CREATED)
 async def post_pairing(payload: PairingStartRequest, request: Request) -> PairingStartResponse:
+    settings: Settings = request.app.state.settings
     pairing, device_code = await _run_database(
-        request.app.state.settings,
+        settings,
         lambda session: start_pairing(session, payload),
     )
+    public_base_url = str(settings.api_base_url).rstrip("/")
     return PairingStartResponse(
         pairing_id=pairing.id,
         device_code=device_code,
         user_code=pairing.user_code,
-        verification_url=(
-            f"{str(request.base_url).rstrip('/')}/admin/edge/pair?code={pairing.user_code}"
-        ),
+        verification_url=f"{public_base_url}/admin/edge/pair?code={pairing.user_code}",
         expires_at=pairing.expires_at,
     )
 
