@@ -132,11 +132,9 @@ async def _user_counts_toward_capacity(session: AsyncSession, user: User) -> boo
         return False
     membership_id = await session.scalar(
         select(Membership.id)
-        .join(Organization, Organization.id == Membership.organization_id)
         .where(
             Membership.user_id == user.id,
             Membership.enabled.is_(True),
-            Organization.enabled.is_(True),
         )
         .limit(1)
     )
