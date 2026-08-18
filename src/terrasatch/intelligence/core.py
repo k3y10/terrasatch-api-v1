@@ -1,4 +1,4 @@
-"""Provider-neutral TerraEngine extraction for the first software acceptance pipeline."""
+"""Provider-neutral TerraEngine extraction for TerraSatch operational intelligence."""
 
 from __future__ import annotations
 
@@ -47,8 +47,6 @@ class ExtractedEvent(BaseModel):
 
 
 class IntelligenceProvider(Protocol):
-    """Replaceable structured-intelligence provider contract."""
-
     async def extract_events(
         self,
         *,
@@ -76,9 +74,6 @@ _LOCATION_RE = re.compile(
     r"\b(?:near|at|on|below|above|toward|towards)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9' -]{2,80})",
     re.I,
 )
-# Bare 4-5 digit values and comma-formatted elevations are accepted because field radio traffic
-# commonly omits the unit ("around 9800"). Short values must explicitly say feet/ft so callsign
-# numbers such as "Patrol 4" or "Unit 12" can never be interpreted as elevation.
 _NUMERIC_ELEVATION_RE = re.compile(
     r"\b(?:around|roughly|about|approximately)?\s*(?:(\d{1,2},\d{3}|\d{4,5})\s*(?:feet|ft)?|(\d{1,3})\s*(?:feet|ft))\b",
     re.I,
@@ -86,11 +81,7 @@ _NUMERIC_ELEVATION_RE = re.compile(
 
 
 class DeterministicIntelligenceProvider:
-    """Conservative rules provider used for tests, demos, and offline development.
-
-    It intentionally extracts only information supported directly by the source text. Future
-    model-backed providers can implement the same protocol without changing persistence or APIs.
-    """
+    """Conservative zero-cost rules provider and offline fallback."""
 
     name = "deterministic"
 
@@ -116,7 +107,7 @@ class DeterministicIntelligenceProvider:
         location_text = self._extract_location(normalized)
         event_type, severity, summary = self._classify(lowered, normalized)
 
-        data: dict[str, object] = {}
+        data: dict[str, object] = {"intelligence_provider": self.name}
         keywords = self._keywords(lowered)
         if keywords:
             data["keywords"] = keywords
@@ -143,8 +134,6 @@ class DeterministicIntelligenceProvider:
 
     @staticmethod
     def _extract_aspect(text: str) -> str | None:
-        # Check compound aspects before cardinal directions to avoid matching "east" inside
-        # "northeast". Sorting by pattern text length keeps the rule explicit and deterministic.
         ordered = sorted(_ASPECTS, key=lambda item: len(item[0].pattern), reverse=True)
         for pattern, aspect in ordered:
             if pattern.search(text):
@@ -190,7 +179,8 @@ class DeterministicIntelligenceProvider:
         if "mayday" in lowered or "missing person" in lowered:
             return EventType.INCIDENT, "high", "High-priority incident reported."
         if any(term in lowered for term in ("burial", "buried", "avalanche", "slide")):
-            return EventType.AVALANCHE, "high" if "burial" in lowered else "moderate", "Avalanche-related field report received."
+            severity = "high" if "burial" in lowered else "moderate"
+            return EventType.AVALANCHE, severity, "Avalanche-related field report received."
         if "shooting cracks" in lowered or "shooting crack" in lowered:
             return EventType.OBSERVATION, "moderate", "Shooting cracks reported."
         if "collapse" in lowered or "whumpf" in lowered or "whumph" in lowered:

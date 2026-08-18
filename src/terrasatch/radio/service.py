@@ -18,6 +18,7 @@ from terrasatch.errors import (
 )
 from terrasatch.identity.models import Site, Team
 from terrasatch.intelligence.core import TerraEngine
+from terrasatch.intelligence.providers import IntelligenceProviderError, build_intelligence_provider
 from terrasatch.organizations.service import slugify
 from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, Transcript, Transmission
 from terrasatch.radio.schemas import (
@@ -548,19 +549,23 @@ async def ingest_transmission(
         transmission_id=transmission.id,
         raw_text=raw_text,
         normalized_text=normalized_text,
-        language="en",
-        confidence=1.0,
-        provider="submitted_text",
-        model=None,
+        language=payload.transcript_language or "en",
+        confidence=(
+            payload.transcript_confidence
+            if payload.transcript_confidence is not None
+            else 1.0
+        ),
+        provider=payload.transcript_provider or "submitted_text",
+        model=payload.transcript_model,
     )
     session.add(transcript)
     await session.flush()
 
-    if settings.intelligence_provider != "deterministic":
-        raise ProviderUnavailable(
-            f"Intelligence provider '{settings.intelligence_provider}' is not implemented yet"
-        )
-    engine = TerraEngine()
+    try:
+        provider = build_intelligence_provider(settings)
+    except IntelligenceProviderError as exc:
+        raise ProviderUnavailable(str(exc)) from exc
+    engine = TerraEngine(provider)
     extracted = await engine.process(text=normalized_text, callsign_hint=payload.callsign)
     transcript.processing_latency_ms = max(int((perf_counter() - started) * 1000), 0)
 
