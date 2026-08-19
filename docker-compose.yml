@@ -44,6 +44,7 @@ services:
       TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:-terrasatch}@postgres:5432/terrasatch
       TERRASATCH_REDIS_URL: redis://redis:6379/0
       TERRASATCH_CORS_ORIGINS: ${TERRASATCH_CORS_ORIGINS:-http://${TERRASATCH_LAN_HOST:-localhost}:3000,http://${TERRASATCH_LAN_HOST:-localhost}:4173,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173}
+      TERRASATCH_UAC_ARCHIVE_PATH: ${TERRASATCH_UAC_ARCHIVE_PATH:-/var/lib/terrasatch/uac/avalanches.csv}
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,6 +52,8 @@ services:
         condition: service_healthy
     ports:
       - "${TERRASATCH_API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    volumes:
+      - ${TERRASATCH_UAC_ARCHIVE_HOST_DIR:-./data/uac}:/var/lib/terrasatch/uac:ro
 
   worker:
     build: .
