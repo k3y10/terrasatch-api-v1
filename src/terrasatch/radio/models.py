@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
@@ -21,7 +31,9 @@ class Agent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False)
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
     profile: Mapped[str] = mapped_column(String(100), default="general", nullable=False)
@@ -37,7 +49,9 @@ class Channel(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False)
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False
+    )
     agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -76,7 +90,9 @@ class Transmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False)
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False
+    )
     agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     channel_id: Mapped[UUID | None] = mapped_column(ForeignKey("channels.id", ondelete="SET NULL"))
     source_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -92,9 +108,7 @@ class Transcript(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Preserved transcript linked one-to-one with its source transmission in v1."""
 
     __tablename__ = "transcripts"
-    __table_args__ = (
-        UniqueConstraint("transmission_id", name="uq_transcripts_transmission_id"),
-    )
+    __table_args__ = (UniqueConstraint("transmission_id", name="uq_transcripts_transmission_id"),)
 
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -119,13 +133,22 @@ class OperationalEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False)
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False
+    )
     transmission_id: Mapped[UUID] = mapped_column(
         ForeignKey("transmissions.id", ondelete="CASCADE"), nullable=False, index=True
     )
     transcript_id: Mapped[UUID] = mapped_column(
         ForeignKey("transcripts.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    region_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("regions.id", ondelete="SET NULL"), index=True
+    )
+    terrain_cell_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("terrain_cells.id", ondelete="SET NULL"), index=True
+    )
+    spatial_status: Mapped[str | None] = mapped_column(String(32))
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     callsign: Mapped[str | None] = mapped_column(String(255))

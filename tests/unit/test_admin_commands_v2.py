@@ -11,3 +11,5 @@ async def test_admin_help_exposes_satchy_commands() -> None:
     assert "channel create <site_uuid>" in text
     assert "edge ai <device_uuid>" in text
     assert "reply dashboard|push|tts|rf" in text
+    assert "source show <id|slug>" in text
+    assert "database status | backup status" in text
