@@ -1,6 +1,6 @@
 # UAC historical archive on Oracle OCI
 
-The UAC partner workspace should not package the full Utah Avalanche Center CSV into the Vercel frontend. TerraSatch API can expose the public historical archive from a read-only file mounted into an Oracle Compose deployment.
+The UAC partner workspace should not package the full Utah Avalanche Center CSV into the Vercel frontend. TerraSatch API can expose the public historical archive from a read-only file mounted into an Oracle deployment.
 
 ## Data flow
 
@@ -26,7 +26,7 @@ TerraSatch Edge
   -> UAC workspace bridge
 ```
 
-The historical archive does not replace or fork the live Edge pipeline. During preview QA it can run on a separate OCI instance or staging API URL while live Edge traffic continues using the production TerraSatch API.
+The historical archive does not replace or fork the live Edge pipeline. During preview QA it can run on a separate OCI instance or staging URL while live Edge traffic continues using the production TerraSatch API.
 
 ## Oracle host setup
 
@@ -38,18 +38,37 @@ sudo cp /path/to/avalanches.csv /opt/terrasatch/data/uac/avalanches.csv
 sudo chmod 0644 /opt/terrasatch/data/uac/avalanches.csv
 ```
 
-Add these values to the owner-only deployment `.env` used by Compose:
+The full production Compose stack supports these settings:
 
 ```text
 TERRASATCH_UAC_ARCHIVE_HOST_DIR=/opt/terrasatch/data/uac
 TERRASATCH_UAC_ARCHIVE_PATH=/var/lib/terrasatch/uac/avalanches.csv
 ```
 
-Compose mounts the host directory read-only into the API container. The CSV stays out of Git, the Docker build context, PostgreSQL, Redis, and Vercel.
+The CSV stays out of Git, the Docker build context, PostgreSQL, Redis, and Vercel.
+
+## Preferred preview: lightweight archive-only container
+
+For isolated UAC QA, do not redirect the production API and do not start another PostgreSQL/Redis stack. On the spare OCI resource, check out `agent/uac-archive-oci-bridge` and run only the archive container:
+
+```bash
+cd /opt/terrasatch/api
+TERRASATCH_UAC_ARCHIVE_HOST_DIR=/opt/terrasatch/data/uac \
+  docker compose -f deploy/docker-compose.uac-archive-preview.yml up -d --build
+```
+
+The preview service binds to `127.0.0.1:8011` by default. Put Caddy/TLS in front of it for a staging hostname. The bind address and port can be changed without editing the Compose file:
+
+```text
+TERRASATCH_UAC_ARCHIVE_BIND_ADDRESS=127.0.0.1
+TERRASATCH_UAC_ARCHIVE_PORT=8011
+```
+
+The archive-only service does not require its own PostgreSQL or Redis containers. Its container health check calls `/api/v1/uac/archive?limit=1`, so it validates that the CSV is mounted and parseable.
 
 ## Validation before promotion
 
-On an isolated checkout of `agent/uac-archive-oci-bridge`, run the normal local QA first:
+Run local QA on the branch first:
 
 ```bash
 uv sync --extra dev
@@ -57,21 +76,27 @@ uv run ruff check src tests
 uv run pytest
 ```
 
-Validate the Compose configuration and file mount without changing production traffic:
+Validate the archive-only Compose configuration:
 
 ```bash
-docker compose config
 TERRASATCH_UAC_ARCHIVE_HOST_DIR=/opt/terrasatch/data/uac \
-  docker compose run --rm api \
-  python -c 'from pathlib import Path; p=Path("/var/lib/terrasatch/uac/avalanches.csv"); print(p.exists(), p.stat().st_size)'
+  docker compose -f deploy/docker-compose.uac-archive-preview.yml config
 ```
 
-After deploying the branch to an isolated API instance, verify:
+Verify the mounted file without changing production traffic:
 
 ```bash
-curl -fsS 'https://<staging-api>/api/v1/uac/archive?region=salt-lake&limit=3'
-curl -fsS 'https://<staging-api>/api/v1/uac/archive?region=salt-lake&trigger=human&limit=3'
-curl -fsS 'https://<staging-api>/api/v1/uac/archive?region=salt-lake&from=2026-04-01&to=2026-05-31&limit=3'
+TERRASATCH_UAC_ARCHIVE_HOST_DIR=/opt/terrasatch/data/uac \
+  docker compose -f deploy/docker-compose.uac-archive-preview.yml run --rm uac-archive \
+  python -c 'from pathlib import Path; p=Path("/data/avalanches.csv"); print(p.exists(), p.stat().st_size)'
+```
+
+After the preview service is running, verify locally on the OCI host:
+
+```bash
+curl -fsS 'http://127.0.0.1:8011/api/v1/uac/archive?region=salt-lake&limit=3'
+curl -fsS 'http://127.0.0.1:8011/api/v1/uac/archive?region=salt-lake&trigger=human&limit=3'
+curl -fsS 'http://127.0.0.1:8011/api/v1/uac/archive?region=salt-lake&from=2026-04-01&to=2026-05-31&limit=3'
 ```
 
 Expected metadata includes:
@@ -96,7 +121,7 @@ TERRASATCH_API_BASE_URL=https://api.terrasatch.com
 Point only UAC history at the isolated OCI service:
 
 ```text
-TERRASATCH_UAC_ARCHIVE_API_URL=https://<staging-api>
+TERRASATCH_UAC_ARCHIVE_API_URL=https://<staging-archive-host>
 ```
 
 The UAC history route checks `TERRASATCH_UAC_ARCHIVE_API_URL` first. If it is unset, it falls back to the ordinary TerraSatch API base URL. This lets the archive be validated independently without redirecting the existing Edge/API bridge.
