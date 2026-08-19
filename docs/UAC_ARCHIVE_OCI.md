@@ -1,6 +1,6 @@
 # UAC historical archive on Oracle OCI
 
-The UAC partner workspace should not package the full Utah Avalanche Center CSV into the Vercel frontend. TerraSatch API can expose the public historical archive from a read-only file mounted into the existing Oracle Compose deployment.
+The UAC partner workspace should not package the full Utah Avalanche Center CSV into the Vercel frontend. TerraSatch API can expose the public historical archive from a read-only file mounted into an Oracle Compose deployment.
 
 ## Data flow
 
@@ -17,6 +17,7 @@ Edge radio traffic remains on the existing canonical path:
 
 ```text
 TerraSatch Edge
+  -> api.terrasatch.com
   -> Transmission
   -> Transcript
   -> TerraEngine / OperationalEvent
@@ -25,7 +26,7 @@ TerraSatch Edge
   -> UAC workspace bridge
 ```
 
-The historical archive does not replace or fork the live Edge pipeline. It is a separate read-only source used to replay historical UAC observations through the same workspace presentation model.
+The historical archive does not replace or fork the live Edge pipeline. During preview QA it can run on a separate OCI instance or staging API URL while live Edge traffic continues using the production TerraSatch API.
 
 ## Oracle host setup
 
@@ -84,13 +85,21 @@ Expected metadata includes:
 
 The exact `supportedTotal` can be lower than `archiveTotal` because the current UAC workspace supports the nine named forecast regions and intentionally excludes records that do not map cleanly to one of those regions or are missing required date/place fields.
 
-## Connect the Vercel preview
+## Connect only the archive to the Vercel preview
 
-The UAC workspace already prefers the TerraSatch archive endpoint. Point its preview environment at the isolated API with one of the existing server-side base URL variables:
+Keep the existing operational API setting pointed at the live TerraSatch API so Edge event and transcript readback do not change:
 
 ```text
-TERRASATCH_API_BASE_URL=https://<staging-api>
+TERRASATCH_API_BASE_URL=https://api.terrasatch.com
 ```
+
+Point only UAC history at the isolated OCI service:
+
+```text
+TERRASATCH_UAC_ARCHIVE_API_URL=https://<staging-api>
+```
+
+The UAC history route checks `TERRASATCH_UAC_ARCHIVE_API_URL` first. If it is unset, it falls back to the ordinary TerraSatch API base URL. This lets the archive be validated independently without redirecting the existing Edge/API bridge.
 
 No public browser credential is required for the UAC archive endpoint because it serves public UAC historical data only. The existing Edge/API bridge still requires its server-side TerraSatch service credential to read tenant events/transcripts or ingest demo transmissions.
 
