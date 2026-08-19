@@ -7,11 +7,11 @@ import terrasatch.main as main_module
 from terrasatch.config import Settings
 
 
-CSV = """Date,Region,Place,Trigger,Trigger: additional info,Weak Layer,Depth,Width,Vertical,Aspect,Elevation,Coordinates,Caught,Carried,Buried - Partly,Buried - Fully,Injured,Killed,Accident and Rescue Summary,Terrain Summary,Weather Conditions and History,Comments 1,Comments 2,Comments 3,Comments 4,Comment
-05/31/2026,Salt Lake,Kessler Peak,Natural,,Ground interface,,,100',N,10000',40.6311,-111.6808,,,,,,,Warm afternoon,North-facing terrain,Recent warming,,,,
-04/28/2026,Salt Lake,Monitors,Snowboarder,Triggered by rider,Wet grains,10\",50',,E,9800',40.6351,-111.5758,1,1,,,,,Rider carried short distance,Steep east-facing terrain,Wet snow cycle,Observed wet loose activity,,,,
-03/01/2026,Provo,Aspen Grove,Natural,,Facets,2',200',500',NE,9000',40.3000,-111.6000,,,,,,,Large natural,Upper elevation terrain,Storm slab cycle,,,,
-"""
+CSV = '''Date,Region,Place,Trigger,Trigger: additional info,Weak Layer,Depth,Width,Vertical,Aspect,Elevation,Coordinates,Caught,Carried,Buried - Partly,Buried - Fully,Injured,Killed,Accident and Rescue Summary,Terrain Summary,Weather Conditions and History,Comments 1,Comments 2,Comments 3,Comments 4,Comment
+05/31/2026,Salt Lake,Kessler Peak,Natural,,Ground interface,,,100',N,10000',"40.6311,-111.6808",,,,,,,Warm afternoon,North-facing terrain,Recent warming,,,,
+04/28/2026,Salt Lake,Monitors,Snowboarder,Triggered by rider,Wet grains,10",50',,E,9800',"40.6351,-111.5758",1,1,,,,,Rider carried short distance,Steep east-facing terrain,Wet snow cycle,Observed wet loose activity,,,,
+03/01/2026,Provo,Aspen Grove,Natural,,Facets,2',200',500',NE,9000',"40.3000,-111.6000",,,,,,,Large natural,Upper elevation terrain,Storm slab cycle,,,,
+'''
 
 
 def make_settings(path: str | None = None) -> Settings:
