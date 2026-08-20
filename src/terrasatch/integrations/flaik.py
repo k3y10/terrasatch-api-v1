@@ -153,8 +153,9 @@ def _normalize_groups(payload: Any) -> list[FlaikGroup]:
         start_time = _first(item, "startTime", "start_time", "startDateTime")
         end_time = _first(item, "endTime", "end_time", "endDateTime")
         instructor_id = _first(item, "instructorId", "instructor_id", "employeeId", "staffId")
-        # Never expose names, emails, payroll IDs, phone numbers, or provider employee payloads.
-        instructor_ref = f"Instructor {instructor_id}" if instructor_id is not None else None
+        # Never expose provider employee IDs, names, emails, payroll IDs, phone numbers,
+        # or raw employee payloads. A simple assignment state is enough for field context.
+        instructor_ref = "Instructor assigned" if instructor_id is not None else None
         normalized.append(
             FlaikGroup(
                 group_id=group_id,
