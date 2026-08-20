@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     admin_session_secret: SecretStr | None = None
     admin_session_max_age_seconds: int = Field(default=28_800, ge=900, le=86_400)
 
+    # flaikConnect is a server-to-server integration. Keep all values private and
+    # leave disabled unless an authorized Snowbird environment is configured.
+    flaik_mode: str = Field(default="disabled", pattern="^(disabled|fixture|live)$")
+    flaik_auth_url: AnyHttpUrl | None = None
+    flaik_api_base_url: AnyHttpUrl | None = None
+    flaik_client_id: str | None = Field(default=None, max_length=512)
+    flaik_client_secret: SecretStr | None = None
+    flaik_scope: str = Field(default="flaik.connect.api.read", min_length=1, max_length=256)
+    flaik_classes_path: str | None = Field(default=None, max_length=512)
+    flaik_timekeeping_path: str | None = Field(default=None, max_length=512)
+    flaik_timeout_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+    flaik_enrich_transmissions: bool = False
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
@@ -79,6 +92,14 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_build_sha(cls, value: str) -> str:
         return value.strip() or "unknown"
+
+    @field_validator("flaik_client_id", "flaik_classes_path", "flaik_timekeeping_path", mode="before")
+    @classmethod
+    def normalize_optional_flaik_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
     @property
     def is_production(self) -> bool:
