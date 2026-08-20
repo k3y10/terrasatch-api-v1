@@ -17,6 +17,7 @@ from terrasatch import __version__
 from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.api.control_plane import router as control_plane_router
+from terrasatch.api.integrations import router as integrations_router
 from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
@@ -100,8 +101,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terrasatch-logo.svg", include_in_schema=False)
     async def get_brand_logo() -> FileResponse:
-        """Serve the vendored TerraSatch brand mark without an external asset dependency."""
-
         return FileResponse(
             _BRAND_LOGO_PATH,
             media_type="image/svg+xml",
@@ -110,8 +109,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terralisten-sasquatch.webp", include_in_schema=False)
     async def get_sasquatch_brand_asset() -> FileResponse:
-        """Serve Satchy locally for the TerraListen console UI."""
-
         return FileResponse(
             SASQUATCH_ASSET_PATH,
             media_type="image/webp",
@@ -120,8 +117,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/assets/terralisten-sasquatch.png", include_in_schema=False)
     async def get_sasquatch_preview_asset() -> FileResponse:
-        """Serve the PNG Satchy asset for favicons and social link previews."""
-
         return FileResponse(
             SASQUATCH_PREVIEW_PATH,
             media_type="image/png",
@@ -130,8 +125,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def get_landing_page() -> HTMLResponse:
-        """Render a branded public status page without exposing internal configuration."""
-
         html = build_landing_page(
             environment=configured_settings.environment.value,
             deployment=configured_settings.deployment_name,
@@ -163,8 +156,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @api_v1.get("/network/status", tags=["network"])
     async def get_network_status(response: Response) -> dict[str, object]:
-        """Return aggregate growth/capacity counters without tenant or device identities."""
-
         response.headers["Cache-Control"] = "public, max-age=15, stale-while-revalidate=30"
         return await get_public_network_status(configured_settings)
 
@@ -172,8 +163,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def get_current_principal(
         principal: Annotated[Principal, Depends(get_principal)],
     ) -> dict[str, object]:
-        """Return the credential-derived tenant context for server integrations."""
-
         return {
             "organization_id": str(principal.organization_id),
             "scopes": sorted(principal.scopes),
@@ -188,28 +177,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @api_v1.get("/reference", tags=["reference"])
     async def get_api_reference() -> dict[str, object]:
-        """Return the implemented endpoint, scope, and error-code catalog."""
-
         return reference_payload()
 
     api_v1.include_router(control_plane_router)
     api_v1.include_router(edge_router)
     api_v1.include_router(radio_router)
+    api_v1.include_router(integrations_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
     async def get_admin_quality(
         _principal: Annotated[Principal, Depends(require_scope("admin"))],
     ) -> dict[str, object]:
-        """Return live platform quality only to an admin-scoped service credential."""
-
         return (await build_quality_report(configured_settings)).model_dump(mode="json")
 
     @api_v1.get("/admin/reference", tags=["admin"])
     async def get_admin_reference(
         _principal: Annotated[Principal, Depends(require_scope("admin"))],
     ) -> dict[str, object]:
-        """Return the current implemented API, scopes, and error-code catalog."""
-
         return reference_payload()
 
     application.include_router(api_v1)

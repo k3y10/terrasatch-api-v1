@@ -1,4 +1,4 @@
-"""Browser-facing human identity and organization membership services."""
+"""Browser-facing human identity and organization/team membership services."""
 
 from __future__ import annotations
 
@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.admin.security import hash_admin_password, verify_admin_password
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
-from terrasatch.identity.models import Membership, MembershipRole, Organization, User
+from terrasatch.identity.models import (
+    Membership,
+    MembershipRole,
+    Organization,
+    Team,
+    TeamMembership,
+    User,
+)
 from terrasatch.network.status import count_portal_users
 
 _ROLE_RANK = {
@@ -31,6 +38,14 @@ class UserOrganizationAccess:
     role: MembershipRole
 
 
+@dataclass(frozen=True, slots=True)
+class UserTeamAccess:
+    team_membership_id: UUID
+    team_id: UUID
+    team_name: str
+    site_id: UUID | None
+
+
 def role_allows(role: MembershipRole, minimum: MembershipRole) -> bool:
     return _ROLE_RANK[role] >= _ROLE_RANK[minimum]
 
@@ -43,22 +58,19 @@ async def authenticate_user(
 ) -> User | None:
     normalized = email.strip().casefold()
     user = await session.scalar(
-        select(User).where(
-            User.email == normalized,
-            User.enabled.is_(True),
-        )
+        select(User).where(User.email == normalized, User.enabled.is_(True))
     )
     if user is None or not user.password_hash:
         return None
     if not verify_admin_password(password, user.password_hash):
         return None
-    memberships = await session.scalar(
+    membership_id = await session.scalar(
         select(Membership.id).where(
             Membership.user_id == user.id,
             Membership.enabled.is_(True),
         )
     )
-    return user if memberships is not None else None
+    return user if membership_id is not None else None
 
 
 async def list_user_access(
@@ -118,6 +130,106 @@ async def get_user_organization_access(
     )
 
 
+async def list_user_team_access(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    organization_id: UUID,
+) -> list[UserTeamAccess]:
+    """Return enabled teams only after confirming organization membership."""
+
+    await get_user_organization_access(
+        session,
+        user_id=user_id,
+        organization_id=organization_id,
+    )
+    rows = await session.execute(
+        select(TeamMembership, Team)
+        .join(Team, Team.id == TeamMembership.team_id)
+        .where(
+            TeamMembership.organization_id == organization_id,
+            TeamMembership.user_id == user_id,
+            TeamMembership.enabled.is_(True),
+            Team.organization_id == organization_id,
+            Team.enabled.is_(True),
+        )
+        .order_by(Team.name)
+    )
+    return [
+        UserTeamAccess(
+            team_membership_id=membership.id,
+            team_id=team.id,
+            team_name=team.name,
+            site_id=team.site_id,
+        )
+        for membership, team in rows.all()
+    ]
+
+
+async def set_user_team_memberships(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+    team_ids: set[UUID],
+) -> list[UserTeamAccess]:
+    """Replace one user's team assignments without crossing the tenant boundary."""
+
+    membership = await session.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.user_id == user_id,
+            Membership.enabled.is_(True),
+        )
+    )
+    if membership is None:
+        raise ResourceNotFound("User is not an enabled member of this organization")
+
+    if team_ids:
+        teams = list(
+            await session.scalars(
+                select(Team).where(
+                    Team.organization_id == organization_id,
+                    Team.id.in_(team_ids),
+                    Team.enabled.is_(True),
+                )
+            )
+        )
+        missing = team_ids - {team.id for team in teams}
+        if missing:
+            raise InvalidConfiguration(
+                "One or more teams are not enabled in the selected organization",
+                details={"team_ids": sorted(str(item) for item in missing)},
+            )
+
+    existing = list(
+        await session.scalars(
+            select(TeamMembership).where(
+                TeamMembership.organization_id == organization_id,
+                TeamMembership.user_id == user_id,
+            )
+        )
+    )
+    by_team = {item.team_id: item for item in existing}
+    for item in existing:
+        item.enabled = item.team_id in team_ids
+    for team_id in team_ids - set(by_team):
+        session.add(
+            TeamMembership(
+                organization_id=organization_id,
+                user_id=user_id,
+                team_id=team_id,
+                enabled=True,
+            )
+        )
+    await session.flush()
+    return await list_user_team_access(
+        session,
+        user_id=user_id,
+        organization_id=organization_id,
+    )
+
+
 async def list_organization_members(
     session: AsyncSession,
     *,
@@ -137,10 +249,7 @@ async def _user_counts_toward_capacity(session: AsyncSession, user: User) -> boo
         return False
     membership_id = await session.scalar(
         select(Membership.id)
-        .where(
-            Membership.user_id == user.id,
-            Membership.enabled.is_(True),
-        )
+        .where(Membership.user_id == user.id, Membership.enabled.is_(True))
         .limit(1)
     )
     return membership_id is not None

@@ -16,8 +16,11 @@ from terrasatch.brand import SASQUATCH_ASSET_URL
 from terrasatch.identity.access import (
     create_or_update_organization_member,
     list_organization_members,
+    list_user_team_access,
+    set_user_team_memberships,
 )
 from terrasatch.identity.models import MembershipRole
+from terrasatch.identity.service import list_teams
 from terrasatch.organizations.service import list_organizations, resolve_organization
 
 router = APIRouter(tags=["admin-members"])
@@ -45,6 +48,8 @@ async def admin_members(
         selected = organizations[0]
 
     members = []
+    teams = []
+    member_team_names: dict[UUID, list[str]] = {}
     if selected is not None:
         members = await _run_database(
             settings,
@@ -53,6 +58,24 @@ async def admin_members(
                 organization_id=selected.id,
             ),
         )
+        teams = await _run_database(
+            settings,
+            lambda session: list_teams(
+                session,
+                organization_id=selected.id,
+                enabled=True,
+            ),
+        )
+        for _membership, user in members:
+            team_access = await _run_database(
+                settings,
+                lambda session, user_id=user.id: list_user_team_access(
+                    session,
+                    user_id=user_id,
+                    organization_id=selected.id,
+                ),
+            )
+            member_team_names[user.id] = [item.team_name for item in team_access]
 
     options = "".join(
         f'<option value="{_attr(org.id)}"{" selected" if selected and org.id == selected.id else ""}>{escape(org.name)}</option>'
@@ -61,13 +84,17 @@ async def admin_members(
     rows = "".join(
         f"<tr><td>{escape(user.display_name)}</td><td>{escape(user.email)}</td>"
         f"<td>{escape(membership.role.value.upper())}</td>"
+        f"<td>{escape(', '.join(member_team_names.get(user.id, [])) or 'No teams')}</td>"
         f"<td>{'enabled' if membership.enabled and user.enabled else 'disabled'}</td></tr>"
         for membership, user in members
-    ) or '<tr><td colspan="4" class="muted">No organization users yet.</td></tr>'
+    ) or '<tr><td colspan="5" class="muted">No organization users yet.</td></tr>'
+    team_options = "".join(
+        f'<option value="{_attr(team.id)}">{escape(team.name)}</option>' for team in teams
+    )
     org_id = str(selected.id) if selected else ""
     csrf = issue_csrf_token(request.session)
     return HTMLResponse(
-        f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TerraSatch Members</title>{_styles()}</head><body><header><a href="/admin"><img src="{escape(SASQUATCH_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>MEMBERS & ACCESS</b></span></a><nav><a href="/admin">Operations</a><a href="/portal">Portal</a></nav></header><main><section class="head"><div><h1>Organization users</h1><p>Create individual browser accounts and assign an organization role. Creating an existing email updates its password and role for the selected organization.</p></div><form method="get"><label>Organization<select name="organization" onchange="this.form.submit()">{options}</select></label></form></section><section class="split"><div class="panel"><h2>Members</h2><div class="table"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>{rows}</tbody></table></div></div><div class="panel"><h2>Create or update member</h2><form class="member-form" method="post" action="/admin/members"><input type="hidden" name="csrf_token" value="{_attr(csrf)}"><input type="hidden" name="organization" value="{_attr(org_id)}"><label>Display name<input name="display_name" required></label><label>Email<input type="email" name="email" required></label><label>Role<select name="role"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option><option value="owner">Owner</option></select></label><label>Temporary / reset password<input type="password" name="password" minlength="12" required autocomplete="new-password"></label><button type="submit" {'disabled' if not selected else ''}>Save member</button><small>Passwords are stored only as scrypt hashes. Share temporary credentials out-of-band and have the user sign in at <code>/portal</code>.</small></form></div></section><section class="roles"><div><strong>OWNER</strong><span>Organization authority.</span></div><div><strong>ADMIN</strong><span>Administrative member.</span></div><div><strong>OPERATOR</strong><span>Operational user.</span></div><div><strong>VIEWER</strong><span>Read-oriented access.</span></div></section></main></body></html>'''
+        f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TerraSatch Members</title>{_styles()}</head><body><header><a href="/admin"><img src="{escape(SASQUATCH_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>MEMBERS & ACCESS</b></span></a><nav><a href="/admin">Operations</a><a href="/portal">Portal</a></nav></header><main><section class="head"><div><h1>Organization users</h1><p>Create individual browser accounts, assign one organization role, and explicitly choose the teams each employee may operate within.</p></div><form method="get"><label>Organization<select name="organization" onchange="this.form.submit()">{options}</select></label></form></section><section class="split"><div class="panel"><h2>Members</h2><div class="table"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Teams</th><th>Status</th></tr></thead><tbody>{rows}</tbody></table></div></div><div class="panel"><h2>Create or update member</h2><form class="member-form" method="post" action="/admin/members"><input type="hidden" name="csrf_token" value="{_attr(csrf)}"><input type="hidden" name="organization" value="{_attr(org_id)}"><label>Display name<input name="display_name" required></label><label>Email<input type="email" name="email" required></label><label>Role<select name="role"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option><option value="owner">Owner</option></select></label><label>Teams<select name="team_ids" multiple size="5">{team_options}</select></label><label>Temporary / reset password<input type="password" name="password" minlength="12" required autocomplete="new-password"></label><button type="submit" {'disabled' if not selected else ''}>Save member</button><small>One email can belong to multiple organizations. Team access is explicit inside each organization. Passwords are stored only as scrypt hashes.</small></form></div></section><section class="roles"><div><strong>OWNER</strong><span>Organization authority.</span></div><div><strong>ADMIN</strong><span>Administrative member.</span></div><div><strong>OPERATOR</strong><span>Operational user.</span></div><div><strong>VIEWER</strong><span>Read-oriented access.</span></div></section></main></body></html>'''
     )
 
 
@@ -80,6 +107,7 @@ async def admin_member_upsert(
     role: Annotated[str, Form()],
     password: Annotated[str, Form()],
     csrf_token: Annotated[str, Form()],
+    team_ids: Annotated[list[str] | None, Form()] = None,
 ) -> RedirectResponse:
     settings = request.app.state.settings
     _require_authenticated(request, settings)
@@ -87,15 +115,15 @@ async def admin_member_upsert(
     try:
         organization_id = UUID(organization)
         member_role = MembershipRole(role.lower())
+        parsed_team_ids = {UUID(value) for value in team_ids or []}
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid organization or role",
+            detail="Invalid organization, team, or role",
         ) from error
 
-    await _run_database(
-        settings,
-        lambda session: create_or_update_organization_member(
+    async def operation(session):
+        user, membership = await create_or_update_organization_member(
             session,
             organization_id=organization_id,
             email=email,
@@ -103,8 +131,16 @@ async def admin_member_upsert(
             password=password,
             role=member_role,
             settings=settings,
-        ),
-    )
+        )
+        await set_user_team_memberships(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            team_ids=parsed_team_ids,
+        )
+        return user, membership
+
+    await _run_database(settings, operation)
     return RedirectResponse(
         f"/admin/members?organization={organization_id}",
         status_code=status.HTTP_303_SEE_OTHER,

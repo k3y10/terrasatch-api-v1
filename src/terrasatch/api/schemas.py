@@ -104,6 +104,17 @@ class TeamResponse(BaseModel):
     updated_at: datetime
 
 
+class TeamMembershipSetRequest(BaseModel):
+    team_ids: list[UUID] = Field(default_factory=list, max_length=128)
+
+
+class TeamMembershipResponse(BaseModel):
+    organization_id: UUID
+    user_id: UUID
+    team_ids: list[UUID]
+    teams: list[TeamResponse]
+
+
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     scopes: list[str] = Field(min_length=1, max_length=32)

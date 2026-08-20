@@ -105,3 +105,28 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class TeamMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A human user's explicit access to one operating team."""
+
+    __tablename__ = "team_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "team_id",
+            name="uq_team_memberships_org_user_team",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    team_id: Mapped[UUID] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

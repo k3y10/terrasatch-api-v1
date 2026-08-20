@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
@@ -14,7 +15,7 @@ from terrasatch.admin.data_ui import render_data_inspector, render_data_sources
 from terrasatch.admin.routes import _require_authenticated, _run_database, _verify_csrf
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.config import Settings
-from terrasatch.errors import TerraSatchError
+from terrasatch.errors import InvalidConfiguration, TerraSatchError
 from terrasatch.masterdata.service import (
     create_data_source,
     enqueue_source_sync,
@@ -85,6 +86,7 @@ async def admin_create_data_source(
     csrf_token: Annotated[str, Form()],
     endpoint_url: Annotated[str, Form()] = "",
     credential_reference: Annotated[str, Form()] = "",
+    configuration_json: Annotated[str, Form()] = "{}",
     enabled: Annotated[bool, Form()] = False,
 ) -> RedirectResponse:
     settings: Settings = request.app.state.settings
@@ -93,6 +95,12 @@ async def admin_create_data_source(
 
     async def create(session: AsyncSession) -> object:
         organization_id = await resolve_organization_id(session, organization)
+        try:
+            configuration = json.loads(configuration_json or "{}")
+        except json.JSONDecodeError as error:
+            raise InvalidConfiguration("Source configuration must be valid JSON") from error
+        if not isinstance(configuration, dict):
+            raise InvalidConfiguration("Source configuration must be a JSON object")
         source = await create_data_source(
             session,
             organization_id=organization_id,
@@ -102,6 +110,7 @@ async def admin_create_data_source(
             adapter_key=adapter_key,
             endpoint_url=endpoint_url or None,
             credential_reference=credential_reference or None,
+            configuration=configuration,
             enabled=enabled,
         )
         await write_audit_log(

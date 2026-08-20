@@ -91,5 +91,24 @@ class ManualSnapshotAdapter:
         return AdapterBatch(records=(), next_cursor=cursor)
 
 
+class FlaikContextAdapter:
+    """Allow-listed configuration marker for direct, read-only flaik operational context."""
+
+    key = "flaik_context"
+    version = "1"
+
+    async def fetch(
+        self,
+        *,
+        configuration: Mapping[str, object],
+        cursor: str | None,
+        etag: str | None,
+        last_modified: str | None,
+    ) -> AdapterBatch:
+        del configuration, etag, last_modified
+        return AdapterBatch(records=(), next_cursor=cursor)
+
+
 adapters = AdapterRegistry()
 adapters.register(ManualSnapshotAdapter())
+adapters.register(FlaikContextAdapter())

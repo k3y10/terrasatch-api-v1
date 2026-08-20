@@ -20,7 +20,9 @@ from terrasatch.identity.access import (
     authenticate_user,
     get_user_organization_access,
     list_user_access,
+    list_user_team_access,
 )
+from terrasatch.identity.service import list_teams
 from terrasatch.organizations.service import list_sites
 from terrasatch.portal.ui import render_portal, render_portal_login
 
@@ -68,6 +70,25 @@ def _require_user(request: Request, settings: Settings) -> UUID:
 def _verify_csrf(request: Request, csrf_token: str) -> None:
     if not csrf_token_is_valid(request.session, csrf_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
+
+
+async def _selected_access(
+    request: Request,
+    settings: Settings,
+    user_id: UUID,
+    organization: str,
+):
+    access = await _run_database(
+        settings,
+        lambda session: list_user_access(session, user_id=user_id),
+    )
+    if not access:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization access")
+    remembered = str(request.session.get("portal_organization") or "")
+    selector = organization or remembered
+    selected = next((item for item in access if str(item.organization_id) == selector), access[0])
+    request.session["portal_organization"] = str(selected.organization_id)
+    return access, selected
 
 
 @router.get(
@@ -123,6 +144,83 @@ async def portal_logout(
     return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.get("/portal/context", include_in_schema=False, response_model=None)
+async def portal_context(
+    request: Request,
+    organization: str = "",
+) -> JSONResponse:
+    """Return the signed-in human's organization/site/team context for partner UI handoff."""
+
+    settings: Settings = request.app.state.settings
+    user_id = _require_user(request, settings)
+    access, selected = await _selected_access(request, settings, user_id, organization)
+    _, sites = await _run_database(
+        settings,
+        lambda session: list_sites(
+            session,
+            organization_selector=str(selected.organization_id),
+            enabled=True,
+        ),
+    )
+    teams = await _run_database(
+        settings,
+        lambda session: list_teams(
+            session,
+            organization_id=selected.organization_id,
+            enabled=True,
+        ),
+    )
+    team_access = await _run_database(
+        settings,
+        lambda session: list_user_team_access(
+            session,
+            user_id=user_id,
+            organization_id=selected.organization_id,
+        ),
+    )
+    assigned = {item.team_id for item in team_access}
+    return JSONResponse(
+        {
+            "ok": True,
+            "user": {
+                "id": str(user_id),
+                "display_name": str(
+                    request.session.get("portal_display_name") or "TerraSatch User"
+                ),
+                "email": str(request.session.get("portal_email") or ""),
+            },
+            "organizations": [
+                {
+                    "id": str(item.organization_id),
+                    "name": item.organization_name,
+                    "slug": item.organization_slug,
+                    "role": item.role.value,
+                }
+                for item in access
+            ],
+            "organization": {
+                "id": str(selected.organization_id),
+                "name": selected.organization_name,
+                "slug": selected.organization_slug,
+                "role": selected.role.value,
+            },
+            "sites": [
+                {"id": str(site.id), "name": site.name, "slug": site.slug}
+                for site in sites
+            ],
+            "teams": [
+                {
+                    "id": str(team.id),
+                    "name": team.name,
+                    "site_id": str(team.site_id) if team.site_id else None,
+                    "assigned": team.id in assigned,
+                }
+                for team in teams
+            ],
+        }
+    )
+
+
 @router.get(
     "/portal",
     response_class=HTMLResponse,
@@ -139,15 +237,11 @@ async def portal_dashboard(
     if user_id is None:
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    access = await _run_database(settings, lambda session: list_user_access(session, user_id=user_id))
-    if not access:
+    try:
+        access, selected = await _selected_access(request, settings, user_id, organization)
+    except HTTPException:
         request.session.clear()
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
-
-    remembered = str(request.session.get("portal_organization") or "")
-    selector = organization or remembered
-    selected = next((item for item in access if str(item.organization_id) == selector), access[0])
-    request.session["portal_organization"] = str(selected.organization_id)
 
     _, sites = await _run_database(
         settings,
@@ -187,16 +281,7 @@ async def portal_fleet_status(
 ) -> JSONResponse:
     settings: Settings = request.app.state.settings
     user_id = _require_user(request, settings)
-    access = await _run_database(settings, lambda session: list_user_access(session, user_id=user_id))
-    if not access:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization access")
-
-    remembered = str(request.session.get("portal_organization") or "")
-    selector = organization or remembered
-    selected_access = next(
-        (item for item in access if str(item.organization_id) == selector),
-        access[0],
-    )
+    _access, selected_access = await _selected_access(request, settings, user_id, organization)
     selected = await _run_database(
         settings,
         lambda session: get_user_organization_access(
@@ -205,7 +290,6 @@ async def portal_fleet_status(
             organization_id=selected_access.organization_id,
         ),
     )
-    request.session["portal_organization"] = str(selected.organization_id)
     devices = await _run_database(
         settings,
         lambda session: list_devices(session, organization_id=selected.organization_id),

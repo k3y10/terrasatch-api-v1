@@ -35,6 +35,10 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("POST", "/api/v1/teams", "bearer_api_key", "Create a tenant-owned operating team."),
         ("GET", "/api/v1/teams/{team_id}", "bearer_api_key", "Read one tenant-owned operating team."),
         ("PATCH", "/api/v1/teams/{team_id}", "bearer_api_key", "Update or disable a tenant-owned operating team."),
+        ("GET", "/api/v1/team-memberships/{user_id}", "bearer_api_key", "Read one organization member's explicit team assignments."),
+        ("PUT", "/api/v1/team-memberships/{user_id}", "bearer_api_key", "Replace one organization member's explicit team assignments."),
+        ("GET", "/api/v1/integrations/flaik/status", "bearer_api_key", "Read tenant/site-scoped PII-minimized flaik operational context."),
+        ("POST", "/api/v1/integrations/flaik/correlate", "bearer_api_key", "Correlate radio text with tenant/site-scoped flaik context through TerraEngine."),
         ("POST", "/api/v1/edge/pairings", "public", "Start a short-lived Edge device pairing flow."),
         ("POST", "/api/v1/edge/pairings/token", "public", "Poll an Edge pairing and claim its device credential once approved."),
         ("POST", "/api/v1/edge/pairings/{user_code}/approve", "bearer_api_key", "Approve an Edge pairing for a tenant site."),
@@ -72,9 +76,11 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("GET", "/admin/edge/pair", "admin_session", "Browser flow for selecting a tenant site for an Edge pairing."),
         ("POST", "/admin/edge/pair", "admin_session", "Approve an Edge pairing from the browser admin console."),
         ("GET", "/admin/data-sources", "admin_session", "Inspect source connections, queued syncs, provenance counts, and backup state."),
-        ("POST", "/admin/data-sources", "admin_session", "Register a disabled-by-default source adapter and secret reference."),
+        ("POST", "/admin/data-sources", "admin_session", "Register a disabled-by-default source adapter, secret reference, and secretless JSON configuration."),
         ("POST", "/admin/data-sources/{source_id}/sync", "admin_session", "Queue a bounded source sync without provider I/O in the request path."),
         ("GET", "/admin/data-inspector", "admin_session", "Search tenant-scoped canonical records and provenance."),
+        ("GET", "/admin/members", "admin_session", "Manage organization users, roles, and explicit team assignments."),
+        ("GET", "/portal/context", "admin_session", "Return signed-in human organization, site, role, and team context."),
     ]
     return [
         ApiCatalogEntry(method=method, path=path, authorization=authorization, summary=summary)

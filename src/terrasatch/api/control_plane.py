@@ -1,4 +1,4 @@
-"""Tenant-safe JSON control-plane endpoints for sites, teams, and API keys."""
+"""Tenant-safe JSON control-plane endpoints for sites, teams, members, and API keys."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from terrasatch.api.schemas import (
     SiteResponse,
     SiteUpdateRequest,
     TeamCreateRequest,
+    TeamMembershipResponse,
+    TeamMembershipSetRequest,
     TeamResponse,
     TeamUpdateRequest,
 )
@@ -25,6 +27,7 @@ from terrasatch.auth.models import ApiKey
 from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
+from terrasatch.identity.access import list_user_team_access, set_user_team_memberships
 from terrasatch.identity.models import Site, Team
 from terrasatch.identity.service import create_team, get_team, list_teams, update_team
 from terrasatch.organizations.service import create_site, get_site, list_sites, update_site
@@ -36,8 +39,6 @@ async def _run_database[Result](
     settings: Settings,
     operation: Callable[[AsyncSession], Awaitable[Result]],
 ) -> Result:
-    """Run one request-scoped database transaction."""
-
     session_factory = create_session_factory(settings)
     async with session_factory() as session:
         try:
@@ -84,14 +85,39 @@ def _api_key_response(api_key: ApiKey) -> ApiKeyResponse:
     )
 
 
+async def _team_membership_response(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+) -> TeamMembershipResponse:
+    access = await list_user_team_access(
+        session,
+        user_id=user_id,
+        organization_id=organization_id,
+    )
+    teams: list[TeamResponse] = []
+    for item in access:
+        team = await get_team(
+            session,
+            organization_id=organization_id,
+            team_id=item.team_id,
+        )
+        teams.append(_team_response(team))
+    return TeamMembershipResponse(
+        organization_id=organization_id,
+        user_id=user_id,
+        team_ids=[item.team_id for item in access],
+        teams=teams,
+    )
+
+
 @router.get("/sites", response_model=list[SiteResponse])
 async def get_sites(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("read:sites"))],
     enabled: Annotated[bool | None, Query()] = None,
 ) -> list[SiteResponse]:
-    """List sites only for the API key's server-derived organization."""
-
     _organization, sites = await _run_database(
         request.app.state.settings,
         lambda session: list_sites(
@@ -109,8 +135,6 @@ async def post_site(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("write:sites"))],
 ) -> SiteResponse:
-    """Create a site in the authenticated key's organization."""
-
     site = await _run_database(
         request.app.state.settings,
         lambda session: create_site(
@@ -230,13 +254,50 @@ async def patch_team(
     return _team_response(team)
 
 
+@router.get("/team-memberships/{user_id}", response_model=TeamMembershipResponse)
+async def get_team_memberships(
+    user_id: UUID,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("read:teams"))],
+) -> TeamMembershipResponse:
+    return await _run_database(
+        request.app.state.settings,
+        lambda session: _team_membership_response(
+            session,
+            organization_id=principal.organization_id,
+            user_id=user_id,
+        ),
+    )
+
+
+@router.put("/team-memberships/{user_id}", response_model=TeamMembershipResponse)
+async def put_team_memberships(
+    user_id: UUID,
+    payload: TeamMembershipSetRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("admin"))],
+) -> TeamMembershipResponse:
+    async def operation(session: AsyncSession) -> TeamMembershipResponse:
+        await set_user_team_memberships(
+            session,
+            organization_id=principal.organization_id,
+            user_id=user_id,
+            team_ids=set(payload.team_ids),
+        )
+        return await _team_membership_response(
+            session,
+            organization_id=principal.organization_id,
+            user_id=user_id,
+        )
+
+    return await _run_database(request.app.state.settings, operation)
+
+
 @router.get("/api-keys", response_model=list[ApiKeyResponse])
 async def get_api_keys(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("admin"))],
 ) -> list[ApiKeyResponse]:
-    """List non-secret credential metadata for the key's organization."""
-
     keys = await _run_database(
         request.app.state.settings,
         lambda session: list_api_keys(
@@ -253,8 +314,6 @@ async def post_api_key(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("admin"))],
 ) -> IssuedApiKeyResponse:
-    """Issue a tenant-scoped service key and return its raw token exactly once."""
-
     api_key, generated = await _run_database(
         request.app.state.settings,
         lambda session: issue_api_key(
@@ -274,8 +333,6 @@ async def post_api_key_revoke(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("admin"))],
 ) -> ApiKeyResponse:
-    """Revoke a service key only if it belongs to the caller's organization."""
-
     api_key = await _run_database(
         request.app.state.settings,
         lambda session: revoke_api_key(
