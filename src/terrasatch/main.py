@@ -17,6 +17,7 @@ from terrasatch import __version__
 from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.api.control_plane import router as control_plane_router
+from terrasatch.api.integrations import router as integrations_router
 from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
 from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
@@ -195,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(control_plane_router)
     api_v1.include_router(edge_router)
     api_v1.include_router(radio_router)
+    api_v1.include_router(integrations_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
     async def get_admin_quality(
