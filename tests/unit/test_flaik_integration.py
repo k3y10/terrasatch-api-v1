@@ -20,13 +20,6 @@ async def test_fixture_snapshot_is_pii_minimized_and_operational() -> None:
         assert sensitive_field not in serialized
 
 
-def test_radio_text_correlates_to_fixture_group_without_employee_pii() -> None:
-    settings = Settings(flaik_mode="fixture")
-    snapshot = pytest.run if False else None  # keep static analyzers from treating fixture as global state
-    del snapshot
-    # Build the deterministic fixture through the public async client in the async test below.
-
-
 @pytest.mark.asyncio
 async def test_radio_text_correlates_to_fixture_group() -> None:
     snapshot = await FlaikClient(Settings(flaik_mode="fixture")).snapshot()
@@ -58,7 +51,9 @@ async def test_terraengine_can_attach_flaik_operational_context() -> None:
     assert len(events) == 1
     context = events[0].data["operational_context"]
     assert isinstance(context, dict)
-    assert context["flaik"]["group_id"] == "MS-204"
+    flaik = context["flaik"]
+    assert isinstance(flaik, dict)
+    assert flaik["group_id"] == "MS-204"
 
 
 @pytest.mark.asyncio
