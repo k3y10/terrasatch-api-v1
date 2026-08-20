@@ -250,5 +250,13 @@ class TerraEngine:
         *,
         text: str,
         callsign_hint: str | None = None,
+        operational_context: dict[str, object] | None = None,
     ) -> list[ExtractedEvent]:
-        return await self.provider.extract_events(text=text, callsign_hint=callsign_hint)
+        events = await self.provider.extract_events(text=text, callsign_hint=callsign_hint)
+        if operational_context:
+            for event in events:
+                event.data = {
+                    **event.data,
+                    "operational_context": operational_context,
+                }
+        return events
