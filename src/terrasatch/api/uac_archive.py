@@ -98,7 +98,13 @@ def _text(row: dict[str, str], key: str) -> str:
     return (row.get(key) or "").strip()
 
 
-def _archive_context(row: dict[str, str], *, weak_layer: str, width: str, vertical: str) -> dict[str, object] | None:
+def _archive_context(
+    row: dict[str, str],
+    *,
+    weak_layer: str,
+    width: str,
+    vertical: str,
+) -> dict[str, object] | None:
     comments = [
         _text(row, "Comments 1"),
         _text(row, "Comments 2"),
@@ -163,7 +169,12 @@ def _record(row: dict[str, str], row_index: int) -> dict[str, object] | None:
         "coordinates": coordinates,
         "sourceUrl": "https://utahavalanchecenter.org/avalanches/filters",
         "source": "uac",
-        "archiveContext": _archive_context(row, weak_layer=weak_layer, width=width, vertical=vertical),
+        "archiveContext": _archive_context(
+            row,
+            weak_layer=weak_layer,
+            width=width,
+            vertical=vertical,
+        ),
     }
 
 

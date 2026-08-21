@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 from pathlib import Path
 
 import httpx
@@ -5,7 +7,6 @@ import pytest
 
 import terrasatch.main as main_module
 from terrasatch.config import Settings
-
 
 CSV = '''Date,Region,Place,Trigger,Trigger: additional info,Weak Layer,Depth,Width,Vertical,Aspect,Elevation,Coordinates,Caught,Carried,Buried - Partly,Buried - Fully,Injured,Killed,Accident and Rescue Summary,Terrain Summary,Weather Conditions and History,Comments 1,Comments 2,Comments 3,Comments 4,Comment
 05/31/2026,Salt Lake,Kessler Peak,Natural,,Ground interface,,,100',N,10000',"40.6311,-111.6808",,,,,,,Warm afternoon,North-facing terrain,Recent warming,,,,
