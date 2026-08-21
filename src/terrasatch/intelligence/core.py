@@ -267,7 +267,8 @@ class DeterministicIntelligenceProvider:
             return EventType.FIRE, "moderate", "Fire or smoke observation reported."
         if any(term in positive_text for term in ("road closed", "road closure", "road is closed")):
             return EventType.ROAD_STATUS, "moderate", "Road closure reported."
-        if "weather" in positive_text or any(term in positive_text for term in ("snowing", "wind", "rain", "sunny", "clear skies", "clear weather")):
+        weather_terms = ("snowing", "wind", "rain", "sunny", "clear skies", "clear weather")
+        if "weather" in positive_text or any(term in positive_text for term in weather_terms):
             return EventType.WEATHER, None, "Weather update reported."
         if any(term in positive_text for term in ("need", "request", "send", "bring")):
             return EventType.REQUEST, None, "Operational request reported."
