@@ -26,6 +26,8 @@ Rules:
 - Never invent coordinates. latitude and longitude must be null; spatial grounding happens later.
 - Keep named places in location_text exactly enough for a trusted terrain resolver to match them.
 - Preserve uncertainty in confidence. Do not turn guesses into facts.
+- Preserve negation. Phrases such as \"no avalanches observed\" are negative findings, not avalanche events; never infer a positive hazard solely from a keyword inside a negated phrase.
+- When the transcript explicitly reports no avalanche activity, prefer an OBSERVATION event and preserve that negative finding in data rather than creating an AVALANCHE event.
 - Use concise factual summaries, not advice.
 - Return no more than necessary events.
 """
