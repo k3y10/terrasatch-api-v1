@@ -74,3 +74,56 @@ async def test_terraengine_understands_worded_demo_elevation() -> None:
 
     assert events[0].aspect == "E"
     assert events[0].elevation_ft == 9800
+
+
+@pytest.mark.asyncio
+async def test_field_observation_preserves_negated_avalanche_and_demo_context() -> None:
+    events = await TerraEngine().process(
+        text=(
+            "Field observation. Cardiff Bowl, northeast-facing aspect. "
+            "No avalanches observed. Sunny clear weather. Everything is green."
+        ),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == EventType.OBSERVATION
+    assert event.location_text == "Cardiff Bowl"
+    assert event.aspect == "NE"
+    assert event.severity is None
+    assert event.summary == "No avalanche activity observed."
+    assert event.data["negative_findings"] == ["avalanche"]
+    assert event.data["observation"] == "No avalanche observed"
+    assert event.data["avalanche_problem"] == "None observed"
+    assert event.data["weather_conditions"] == ["sunny", "clear"]
+    assert event.data["field_status"] == "green"
+    assert "avalanche" not in event.data.get("keywords", [])
+
+
+@pytest.mark.asyncio
+async def test_positive_avalanche_report_remains_avalanche_event() -> None:
+    events = await TerraEngine().process(
+        text="Field observation. Cardiff Bowl. Avalanche observed on the northeast aspect.",
+    )
+
+    event = events[0]
+    assert event.event_type == EventType.AVALANCHE
+    assert event.severity == "moderate"
+    assert event.location_text == "Cardiff Bowl"
+    assert event.aspect == "NE"
+    assert "avalanche" in event.data["keywords"]
+
+
+@pytest.mark.asyncio
+async def test_negated_avalanche_does_not_hide_positive_instability_signal() -> None:
+    events = await TerraEngine().process(
+        text="No avalanches observed at Cardiff Bowl, but shooting cracks on the northeast aspect.",
+    )
+
+    event = events[0]
+    assert event.event_type == EventType.OBSERVATION
+    assert event.summary == "Shooting cracks reported."
+    assert event.severity == "moderate"
+    assert event.data["negative_findings"] == ["avalanche"]
+    assert "shooting cracks" in event.data["keywords"]
+    assert "avalanche" not in event.data["keywords"]
