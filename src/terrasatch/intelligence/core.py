@@ -74,8 +74,33 @@ _LOCATION_RE = re.compile(
     r"\b(?:near|at|on|below|above|toward|towards)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9' -]{2,80})",
     re.I,
 )
+_FIELD_OBSERVATION_LOCATION_RE = re.compile(
+    r"\bfield observation\b\s*[.:,-]?\s*(?:(?:at|near|on)\s+)?(?:the\s+)?"
+    r"([A-Za-z][A-Za-z0-9' -]{2,80}?)"
+    r"(?=\s*(?:[,.;]|(?:north(?:east|west)?|south(?:east|west)?|east|west)"
+    r"(?:[- ]facing)?\s+(?:aspect|terrain)\b|no\s+(?:avalanche|avalanches|slide|slides)\b|"
+    r"sunny\b|clear\b|everything\b|$))",
+    re.I,
+)
 _NUMERIC_ELEVATION_RE = re.compile(
     r"\b(?:around|roughly|about|approximately)?\s*(?:(\d{1,2},\d{3}|\d{4,5})\s*(?:feet|ft)?|(\d{1,3})\s*(?:feet|ft))\b",
+    re.I,
+)
+_NEGATED_AVALANCHE_RE = re.compile(
+    r"\b(?:no|without)\s+(?:(?:signs?|evidence)\s+of\s+)?(?:avalanche(?:s| activity)?|slides?)\b"
+    r"(?:\s+(?:observed|seen|reported|noted))?"
+    r"|\b(?:avalanche(?:s| activity)?|slides?)\s+(?:was|were)?\s*not\s+"
+    r"(?:observed|seen|reported|noted)\b",
+    re.I,
+)
+_NEGATED_CRACK_RE = re.compile(
+    r"\b(?:no|without)\s+(?:shooting\s+)?cracks?\b(?:\s+(?:observed|seen|reported|noted))?"
+    r"|\bshooting\s+cracks?\s+(?:were)?\s*not\s+(?:observed|seen|reported|noted)\b",
+    re.I,
+)
+_NEGATED_COLLAPSE_RE = re.compile(
+    r"\b(?:no|without)\s+(?:collaps(?:e|es|ing)|whumpf(?:ing)?|whumph(?:ing)?)\b"
+    r"(?:\s+(?:observed|heard|reported|noted))?",
     re.I,
 )
 
@@ -111,6 +136,24 @@ class DeterministicIntelligenceProvider:
         keywords = self._keywords(lowered)
         if keywords:
             data["keywords"] = keywords
+
+        negative_findings = self._negative_findings(lowered)
+        if negative_findings:
+            data["negative_findings"] = negative_findings
+        if "avalanche" in negative_findings:
+            data["observation"] = "No avalanche observed"
+            data["avalanche_problem"] = "None observed"
+
+        weather_conditions = [
+            condition
+            for condition in ("sunny", "clear", "snowing", "rain")
+            if re.search(rf"\b{re.escape(condition)}\b", lowered)
+        ]
+        if weather_conditions:
+            data["weather_conditions"] = weather_conditions
+
+        if re.search(r"\b(?:everything is|all)\s+green\b", lowered):
+            data["field_status"] = "green"
 
         return [
             ExtractedEvent(
@@ -161,6 +204,12 @@ class DeterministicIntelligenceProvider:
 
     @staticmethod
     def _extract_location(text: str) -> str | None:
+        field_match = _FIELD_OBSERVATION_LOCATION_RE.search(text)
+        if field_match:
+            candidate = field_match.group(1).strip(" ,.-")
+            if candidate:
+                return candidate
+
         match = _LOCATION_RE.search(text)
         if not match:
             return None
@@ -175,34 +224,62 @@ class DeterministicIntelligenceProvider:
         return candidate or None
 
     @staticmethod
-    def _classify(lowered: str, original: str) -> tuple[EventType, str | None, str]:
-        if "mayday" in lowered or "missing person" in lowered:
+    def _positive_text(lowered: str) -> str:
+        text = lowered
+        for pattern in (_NEGATED_AVALANCHE_RE, _NEGATED_CRACK_RE, _NEGATED_COLLAPSE_RE):
+            text = pattern.sub(" ", text)
+        return " ".join(text.split())
+
+    @staticmethod
+    def _negative_findings(lowered: str) -> list[str]:
+        findings: list[str] = []
+        if _NEGATED_AVALANCHE_RE.search(lowered):
+            findings.append("avalanche")
+        if _NEGATED_CRACK_RE.search(lowered):
+            findings.append("shooting_cracks")
+        if _NEGATED_COLLAPSE_RE.search(lowered):
+            findings.append("collapse")
+        return findings
+
+    @classmethod
+    def _classify(cls, lowered: str, original: str) -> tuple[EventType, str | None, str]:
+        positive_text = cls._positive_text(lowered)
+        negative_findings = cls._negative_findings(lowered)
+
+        if "mayday" in positive_text or "missing person" in positive_text:
             return EventType.INCIDENT, "high", "High-priority incident reported."
-        if any(term in lowered for term in ("burial", "buried", "avalanche", "slide")):
-            severity = "high" if "burial" in lowered else "moderate"
+        if any(term in positive_text for term in ("burial", "buried", "avalanche", "slide")):
+            severity = "high" if "burial" in positive_text else "moderate"
             return EventType.AVALANCHE, severity, "Avalanche-related field report received."
-        if "shooting cracks" in lowered or "shooting crack" in lowered:
+        if "shooting cracks" in positive_text or "shooting crack" in positive_text:
             return EventType.OBSERVATION, "moderate", "Shooting cracks reported."
-        if "collapse" in lowered or "whumpf" in lowered or "whumph" in lowered:
+        if "collapse" in positive_text or "whumpf" in positive_text or "whumph" in positive_text:
             return EventType.HAZARD, "moderate", "Snowpack instability reported."
-        if any(term in lowered for term in ("injury", "injured", "medical")):
+        if "avalanche" in negative_findings:
+            return EventType.OBSERVATION, None, "No avalanche activity observed."
+        if "shooting_cracks" in negative_findings:
+            return EventType.OBSERVATION, None, "No shooting cracks observed."
+        if "collapse" in negative_findings:
+            return EventType.OBSERVATION, None, "No snowpack collapse observed."
+        if any(term in positive_text for term in ("injury", "injured", "medical")):
             return EventType.MEDICAL, "high", "Medical or injury report received."
-        if any(term in lowered for term in ("wildfire", "fire", "smoke")):
+        if any(term in positive_text for term in ("wildfire", "fire", "smoke")):
             return EventType.FIRE, "moderate", "Fire or smoke observation reported."
-        if any(term in lowered for term in ("road closed", "road closure", "road is closed")):
+        if any(term in positive_text for term in ("road closed", "road closure", "road is closed")):
             return EventType.ROAD_STATUS, "moderate", "Road closure reported."
-        if "weather" in lowered or any(term in lowered for term in ("snowing", "wind", "rain")):
+        if "weather" in positive_text or any(term in positive_text for term in ("snowing", "wind", "rain", "sunny", "clear skies", "clear weather")):
             return EventType.WEATHER, None, "Weather update reported."
-        if any(term in lowered for term in ("need", "request", "send", "bring")):
+        if any(term in positive_text for term in ("need", "request", "send", "bring")):
             return EventType.REQUEST, None, "Operational request reported."
-        if any(term in lowered for term in ("heading", "moving", "en route", "on the way")):
+        if any(term in positive_text for term in ("heading", "moving", "en route", "on the way")):
             return EventType.LOCATION_UPDATE, None, "Movement or destination update reported."
 
         summary = original if len(original) <= 280 else original[:277].rstrip() + "..."
         return EventType.GENERAL_UPDATE, None, summary
 
-    @staticmethod
-    def _keywords(lowered: str) -> list[str]:
+    @classmethod
+    def _keywords(cls, lowered: str) -> list[str]:
+        positive_text = cls._positive_text(lowered)
         vocabulary = (
             "avalanche",
             "slide",
@@ -216,7 +293,7 @@ class DeterministicIntelligenceProvider:
             "smoke",
             "road closed",
         )
-        return [term for term in vocabulary if term in lowered]
+        return [term for term in vocabulary if term in positive_text]
 
     @staticmethod
     def _confidence(
