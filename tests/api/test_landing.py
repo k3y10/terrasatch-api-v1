@@ -26,6 +26,9 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert response.headers["content-type"].startswith("text/html")
     for expected in (
         "TerraSatch · TerraListen Radio Console",
+        'aria-label="TerraSatch TerraListen home"',
+        '<strong>TerraSatch</strong><i aria-hidden="true">·</i><b>TerraListen</b>',
+        "Radio intelligence for field operations",
         "Satchy, the TerraSatch Sasquatch",
         "/assets/terralisten-sasquatch.webp",
         'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
@@ -61,6 +64,7 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert "Receive Only" not in response.text
     assert "Receive-only radio intelligence" not in response.text
     assert "https://www.terrasatch.com/terralisten-sasquatch.png" not in response.text
+    assert ">TERRASATCH</strong><b>TERRALISTEN<" not in response.text
 
 
 @pytest.mark.asyncio
