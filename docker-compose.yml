@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: imresamu/postgis:16-3.6.1-alpine3.22@sha256:8fcc73f4afd381738dea98a0b0b17212c4d46f59f1eec40808e40710fd66dfda
     restart: unless-stopped
     environment:
       POSTGRES_DB: terrasatch
