@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     intelligence_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     intelligence_fallback_to_deterministic: bool = True
     storage_provider: str = "local_filesystem"
+    uac_archive_path: str | None = None
     billing_enabled: bool = False
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
     max_portal_users: int = Field(default=250, ge=1, le=1_000_000)
@@ -79,6 +80,14 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_build_sha(cls, value: str) -> str:
         return value.strip() or "unknown"
+
+    @field_validator("uac_archive_path")
+    @classmethod
+    def normalize_uac_archive_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @property
     def is_production(self) -> bool:

@@ -1,0 +1,27 @@
+services:
+  uac-archive:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      TERRASATCH_ENV: staging
+      TERRASATCH_DEPLOYMENT_NAME: uac-archive-preview
+      TERRASATCH_API_BASE_URL: http://localhost:8000
+      TERRASATCH_ENABLE_DOCS: "false"
+      TERRASATCH_UAC_ARCHIVE_PATH: /data/avalanches.csv
+    ports:
+      - "${TERRASATCH_UAC_ARCHIVE_BIND_ADDRESS:-127.0.0.1}:${TERRASATCH_UAC_ARCHIVE_PORT:-8011}:8000"
+    volumes:
+      - "${TERRASATCH_UAC_ARCHIVE_HOST_DIR:-/opt/terrasatch/data/uac}:/data:ro"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/v1/uac/archive?limit=1', timeout=5).read()
+      interval: 30s
+      timeout: 7s
+      retries: 3
+      start_period: 15s
