@@ -13,4 +13,9 @@ def render_dashboard(**kwargs: object) -> str:
         '<span>ACCESS</span><a href="/admin/members">› Members & access</a><a href="#keys">› API keys</a>',
         1,
     )
+    html = html.replace(
+        '<a href="#fleet">› Registered Edge health</a>',
+        '<a href="#fleet">› Registered Edge health</a><a href="/admin/data-sources">› Data sources</a><a href="/admin/data-inspector">› Data inspector</a>',
+        1,
+    )
     return html

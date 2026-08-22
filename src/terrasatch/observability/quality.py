@@ -71,6 +71,10 @@ def api_catalog() -> list[ApiCatalogEntry]:
         ("GET", "/admin", "admin_session", "Browser operator console with controlled create operations."),
         ("GET", "/admin/edge/pair", "admin_session", "Browser flow for selecting a tenant site for an Edge pairing."),
         ("POST", "/admin/edge/pair", "admin_session", "Approve an Edge pairing from the browser admin console."),
+        ("GET", "/admin/data-sources", "admin_session", "Inspect source connections, queued syncs, provenance counts, and backup state."),
+        ("POST", "/admin/data-sources", "admin_session", "Register a disabled-by-default source adapter and secret reference."),
+        ("POST", "/admin/data-sources/{source_id}/sync", "admin_session", "Queue a bounded source sync without provider I/O in the request path."),
+        ("GET", "/admin/data-inspector", "admin_session", "Search tenant-scoped canonical records and provenance."),
     ]
     return [
         ApiCatalogEntry(method=method, path=path, authorization=authorization, summary=summary)

@@ -13,6 +13,7 @@ from terrasatch.admin.commands import AdminCommandResult
 from terrasatch.admin.commands import run_admin_command as run_base_admin_command
 from terrasatch.edge.service import get_device
 from terrasatch.errors import InvalidConfiguration
+from terrasatch.masterdata.admin_commands import run_masterdata_command
 from terrasatch.organizations.service import resolve_organization
 
 
@@ -52,6 +53,9 @@ async def run_admin_command(
             "  edge ai <device_uuid> trigger <phrase> | provider-channel <label|off>",
             "  edge ai <device_uuid> frequency <hz|off> | modulation fm|nfm|wbfm|am",
             "  edge ai <device_uuid> reply dashboard|push|tts|rf [--confirm]",
+            "  source list | source show <id|slug> | source sync <id|slug>",
+            "  sync list | sync <source-id|slug> | inspect [source|event] <id|text>",
+            "  database status | backup status",
         ]
         if not base.lines:
             return AdminCommandResult(extra)
@@ -68,6 +72,15 @@ async def run_admin_command(
             args=args,
         )
         return AdminCommandResult(lines)
+
+    masterdata_result = await run_masterdata_command(
+        session,
+        verb=verb,
+        args=args,
+        selected_organization=selected_organization,
+    )
+    if masterdata_result is not None:
+        return masterdata_result
 
     if verb in {"edge", "device", "devices"} and args:
         action = args[0].lower()

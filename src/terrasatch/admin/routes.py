@@ -23,6 +23,7 @@ from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.service import list_devices
 from terrasatch.errors import TerraSatchError
+from terrasatch.masterdata.service import resolve_organization_id, write_audit_log
 from terrasatch.observability.quality import build_quality_report
 from terrasatch.organizations.service import (
     create_organization,
@@ -205,15 +206,31 @@ async def admin_command(
     settings: Settings = request.app.state.settings
     _require_authenticated(request, settings)
     _verify_csrf(request, csrf_token)
-    try:
-        result = await _run_database(
-            settings,
-            lambda session: run_admin_command(
-                session,
-                command=command,
-                selected_organization=organization or None,
-            ),
+
+    async def execute_command(session: AsyncSession) -> object:
+        result = await run_admin_command(
+            session,
+            command=command,
+            selected_organization=organization or None,
         )
+        organization_id = (
+            await resolve_organization_id(session, organization) if organization else None
+        )
+        await write_audit_log(
+            session,
+            organization_id=organization_id,
+            actor_type="admin_session",
+            actor_id=settings.admin_email,
+            action="admin.command",
+            target_type="operation",
+            target_id=command.strip().split(maxsplit=1)[0] if command.strip() else None,
+            request_id=getattr(request.state, "request_id", None),
+            details={"succeeded": True},
+        )
+        return result
+
+    try:
+        result = await _run_database(settings, execute_command)
     except TerraSatchError as error:
         return JSONResponse(
             {"ok": False, "lines": [f"error: {error.message}"]},
@@ -258,7 +275,9 @@ async def admin_login(
         or expected_hash is None
         or not verify_admin_password(password, expected_hash.get_secret_value())
     ):
-        return HTMLResponse(render_login(issue_csrf_token(request.session), failed=True), status_code=401)
+        return HTMLResponse(
+            render_login(issue_csrf_token(request.session), failed=True), status_code=401
+        )
     request.session.clear()
     request.session["admin_authenticated"] = True
     issue_csrf_token(request.session)
@@ -284,10 +303,16 @@ async def admin_create_organization(
     _require_authenticated(request, settings)
     _verify_csrf(request, csrf_token)
     try:
-        organization = await _run_database(settings, lambda session: create_organization(session, name=name))
+        organization = await _run_database(
+            settings, lambda session: create_organization(session, name=name)
+        )
     except TerraSatchError as error:
-        return RedirectResponse(f"/admin?error={quote(error.message)}", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(f"/admin?organization={organization.id}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            f"/admin?error={quote(error.message)}", status_code=status.HTTP_303_SEE_OTHER
+        )
+    return RedirectResponse(
+        f"/admin?organization={organization.id}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post("/admin/sites", include_in_schema=False)
@@ -310,7 +335,9 @@ async def admin_create_site(
             f"/admin?organization={organization}&error={quote(error.message)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    return RedirectResponse(f"/admin?organization={organization}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        f"/admin?organization={organization}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post("/admin/api-keys", include_in_schema=False, response_model=None)
