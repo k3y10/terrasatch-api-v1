@@ -26,7 +26,8 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert response.headers["content-type"].startswith("text/html")
     for expected in (
         "TerraSatch · TerraListen Radio Console",
-        'aria-label="TerraSatch TerraListen home"',
+        'aria-label="TerraListen, a feature by TerraSatch"',
+        '<span class="brand-mark"><img src="/assets/terralisten-sasquatch.webp"',
         '<span class="brand-product" aria-label="TerraListen">',
         "<strong>TERRA</strong><b>LISTEN</b>",
         "A FEATURE BY <em>TERRASATCH</em>",
@@ -68,6 +69,8 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert ">TERRASATCH</strong><b>TERRALISTEN<" not in response.text
     assert '<span class="brand-name">' not in response.text
     assert ".brand small{display:none}" not in response.text
+    assert ".brand-mark{display:grid;width:54px;height:54px" in response.text
+    assert ".brand-mark img{display:block;width:51px;height:51px" in response.text
 
 
 @pytest.mark.asyncio
