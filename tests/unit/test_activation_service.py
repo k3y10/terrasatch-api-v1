@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.errors import InvalidConfiguration, TenantAccessDenied
 from terrasatch.radio.activation_service import validate_edge_ingest_activation
 from terrasatch.radio.schemas import ActivationMetadata, TransmissionCreateRequest
 
@@ -57,7 +57,7 @@ async def test_unpaired_service_credential_keeps_legacy_ingestion_behavior() -> 
 
 @pytest.mark.asyncio
 async def test_paired_edge_is_always_bound_to_its_assigned_site() -> None:
-    with pytest.raises(InvalidConfiguration, match="paired Edge device"):
+    with pytest.raises(TenantAccessDenied, match="paired Edge device"):
         await validate_edge_ingest_activation(
             FakeSession(_device(site_id=SITE_ID)),
             organization_id=ORG_ID,
@@ -68,7 +68,7 @@ async def test_paired_edge_is_always_bound_to_its_assigned_site() -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_paired_edge_cannot_ingest() -> None:
-    with pytest.raises(InvalidConfiguration, match="disabled"):
+    with pytest.raises(TenantAccessDenied, match="disabled"):
         await validate_edge_ingest_activation(
             FakeSession(_device(enabled=False)),
             organization_id=ORG_ID,
