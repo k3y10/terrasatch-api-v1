@@ -453,18 +453,26 @@ async def post_transmission(
     session_factory = create_session_factory(settings)
     async with session_factory() as session:
         try:
-            await validate_edge_ingest_activation(
+            activation = await validate_edge_ingest_activation(
                 session,
                 organization_id=principal.organization_id,
                 api_key_id=principal.api_key_id,
                 payload=payload,
             )
+            ingest_payload = payload
+            if activation.enforced:
+                ingest_payload = payload.model_copy(update={"text": activation.intelligence_text})
             transmission, transcript, events, duplicate = await ingest_transmission(
                 session,
                 settings=settings,
                 organization_id=principal.organization_id,
-                payload=payload,
+                payload=ingest_payload,
             )
+            if activation.enforced and not duplicate:
+                raw_text = payload.text.strip()
+                transcript.raw_text = raw_text
+                transcript.normalized_text = " ".join(raw_text.split())
+                await session.flush()
             await session.commit()
         except Exception:
             await session.rollback()
