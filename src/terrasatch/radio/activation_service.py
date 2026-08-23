@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.edge.models import EdgeDevice
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.errors import TenantAccessDenied
 from terrasatch.radio.activation import (
     ActivationDecision,
     ActivationEvidence,
@@ -49,9 +49,9 @@ async def validate_edge_ingest_activation(
         )
 
     if not device.enabled:
-        raise InvalidConfiguration("Paired Edge device is disabled")
+        raise TenantAccessDenied("Paired Edge device is disabled")
     if device.site_id != payload.site_id:
-        raise InvalidConfiguration("Transmission site does not match the paired Edge device")
+        raise TenantAccessDenied("Transmission site does not match the paired Edge device")
 
     evidence: ActivationEvidence | None = None
     if payload.activation is not None:
