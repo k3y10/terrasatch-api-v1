@@ -14,6 +14,7 @@ from terrasatch.auth.dependencies import Principal, require_any_scope, require_s
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.events.bus import publish_event
+from terrasatch.radio.activation_service import validate_edge_ingest_activation
 from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, Transcript, Transmission
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
@@ -452,6 +453,12 @@ async def post_transmission(
     session_factory = create_session_factory(settings)
     async with session_factory() as session:
         try:
+            await validate_edge_ingest_activation(
+                session,
+                organization_id=principal.organization_id,
+                api_key_id=principal.api_key_id,
+                payload=payload,
+            )
             transmission, transcript, events, duplicate = await ingest_transmission(
                 session,
                 settings=settings,
