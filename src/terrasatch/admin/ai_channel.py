@@ -20,6 +20,9 @@ _DEFAULT_AI_CHANNEL: dict[str, object] = {
     "name": "Satchy AI Channel",
     "agent_name": "Satchy",
     "activation_phrase": "TerraSatch",
+    "activation_required": False,
+    "activation_position": "start",
+    "activation_case_sensitive": False,
     "logical_channel_id": None,
     "provider_channel": None,
     "frequency_hz": None,
@@ -53,6 +56,7 @@ def ai_channel_lines(device: EdgeDevice) -> list[str]:
         f"AI       {ai['name']}",
         f"AGENT    {ai['agent_name']}",
         f"TRIGGER  {ai['activation_phrase']}",
+        f"GATE     {'required' if ai['activation_required'] else 'off'} ({ai['activation_position']})",
         f"CHANNEL  {ai['logical_channel_id'] or 'not bound'}",
         f"PROVIDER {ai['provider_channel'] or 'not bound'}",
         f"FREQ     {ai['frequency_hz'] or 'not configured'}",
@@ -64,6 +68,15 @@ def ai_channel_lines(device: EdgeDevice) -> list[str]:
 
 def _confirmed(args: list[str]) -> bool:
     return "--confirm" in args
+
+
+def _parse_on_off(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"on", "true", "yes", "required", "enable", "enabled"}:
+        return True
+    if normalized in {"off", "false", "no", "optional", "disable", "disabled"}:
+        return False
+    raise InvalidConfiguration("activation enforcement must be 'on' or 'off'")
 
 
 async def _save(
@@ -140,6 +153,13 @@ async def run_ai_channel_command(
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
         return [f"[ok] {updated.name}: {key} -> {value}"]
 
+    if action in {"enforce", "gate"} and len(args) >= 2:
+        ai["activation_required"] = _parse_on_off(args[1])
+        ai["activation_position"] = "start"
+        updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
+        state = "required" if ai["activation_required"] else "off"
+        return [f"[ok] {updated.name}: activation gate -> {state}"]
+
     if action in {"provider-channel", "provider"} and len(args) >= 2:
         value = " ".join(item for item in args[1:] if item != "--confirm").strip()
         ai["provider_channel"] = None if value.lower() in {"off", "none", "clear"} else value
@@ -202,6 +222,6 @@ async def run_ai_channel_command(
         return lines
 
     raise InvalidConfiguration(
-        "Usage: edge ai <device> show|bind|unbind|name|agent|trigger|"
+        "Usage: edge ai <device> show|bind|unbind|name|agent|trigger|enforce|"
         "provider-channel|frequency|modulation|reply ..."
     )
