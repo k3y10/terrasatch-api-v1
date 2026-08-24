@@ -87,6 +87,28 @@ class CallsignResponse(BaseModel):
     updated_at: datetime
 
 
+class ActivationMetadata(BaseModel):
+    """Optional Edge evidence for an API-verified activation decision.
+
+    These fields never select an organization or site. Tenant identity remains derived
+    from the authenticated credential, and the API independently validates configured
+    activation policy when enforcement is enabled.
+    """
+
+    detected: bool | None = None
+    phrase: str | None = Field(default=None, min_length=1, max_length=255)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    provider_channel: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("phrase", "provider_channel", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or None
+
+
 class TransmissionCreateRequest(BaseModel):
     site_id: UUID
     agent_id: UUID | None = None
@@ -101,6 +123,7 @@ class TransmissionCreateRequest(BaseModel):
     transcript_model: str | None = Field(default=None, min_length=1, max_length=100)
     transcript_language: str | None = Field(default=None, min_length=1, max_length=16)
     transcript_confidence: float | None = Field(default=None, ge=0, le=1)
+    activation: ActivationMetadata | None = None
 
     @field_validator("text", "source", "source_message_id", mode="before")
     @classmethod
