@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from time import perf_counter
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,9 +19,20 @@ from terrasatch.errors import (
 )
 from terrasatch.identity.models import Site, Team
 from terrasatch.intelligence.core import TerraEngine
-from terrasatch.intelligence.providers import IntelligenceProviderError, build_intelligence_provider
+from terrasatch.intelligence.providers import (
+    IntelligenceProviderError,
+    IntelligenceSettings,
+    build_intelligence_provider,
+)
 from terrasatch.organizations.service import slugify
-from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, Transcript, Transmission
+from terrasatch.radio.models import (
+    Agent,
+    Callsign,
+    Channel,
+    OperationalEvent,
+    Transcript,
+    Transmission,
+)
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
     AgentUpdateRequest,
@@ -144,9 +156,7 @@ async def list_agents(
     if enabled is not None:
         query = query.where(Agent.enabled.is_(enabled))
     return list(
-        await session.scalars(
-            query.order_by(Agent.created_at.desc()).limit(limit).offset(offset)
-        )
+        await session.scalars(query.order_by(Agent.created_at.desc()).limit(limit).offset(offset))
     )
 
 
@@ -249,9 +259,7 @@ async def list_channels(
     if enabled is not None:
         query = query.where(Channel.enabled.is_(enabled))
     return list(
-        await session.scalars(
-            query.order_by(Channel.created_at.desc()).limit(limit).offset(offset)
-        )
+        await session.scalars(query.order_by(Channel.created_at.desc()).limit(limit).offset(offset))
     )
 
 
@@ -502,8 +510,8 @@ async def ingest_transmission(
         source_message_id=source_message_id,
     )
     if existing is not None:
-        transmission, transcript, events = existing
-        return transmission, transcript, events, True
+        transmission, transcript, existing_events = existing
+        return transmission, transcript, existing_events, True
 
     await _site_for_org(session, organization_id=organization_id, site_id=payload.site_id)
     agent: Agent | None = None
@@ -539,6 +547,7 @@ async def ingest_transmission(
         started_at=payload.started_at,
         ended_at=payload.ended_at,
         received_at=datetime.now(UTC),
+        rf_metadata=payload.rf_metadata.model_dump(mode="json", exclude_none=False),
     )
     session.add(transmission)
     await session.flush()
@@ -551,9 +560,7 @@ async def ingest_transmission(
         normalized_text=normalized_text,
         language=payload.transcript_language or "en",
         confidence=(
-            payload.transcript_confidence
-            if payload.transcript_confidence is not None
-            else 1.0
+            payload.transcript_confidence if payload.transcript_confidence is not None else 1.0
         ),
         provider=payload.transcript_provider or "submitted_text",
         model=payload.transcript_model,
@@ -562,7 +569,7 @@ async def ingest_transmission(
     await session.flush()
 
     try:
-        provider = build_intelligence_provider(settings)
+        provider = build_intelligence_provider(cast(IntelligenceSettings, settings))
     except IntelligenceProviderError as exc:
         raise ProviderUnavailable(str(exc)) from exc
     engine = TerraEngine(provider)

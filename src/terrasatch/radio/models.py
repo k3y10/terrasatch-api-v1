@@ -102,6 +102,7 @@ class Transmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    rf_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class Transcript(UUIDPrimaryKeyMixin, TimestampMixin, Base):

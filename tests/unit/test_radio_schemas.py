@@ -69,3 +69,33 @@ def test_transmission_accepts_ordered_time_window() -> None:
     )
 
     assert request.started_at == started
+
+
+def test_transmission_accepts_structured_nullable_rf_provenance() -> None:
+    request = TransmissionCreateRequest.model_validate(
+        _payload(
+            rf_metadata={
+                "receiver_device_id": "receiver-1",
+                "receiver_name": "wasatch-rx-01",
+                "sdr_index": 0,
+                "radio_profile": "bca-frs-na",
+                "channel": 5,
+                "frequency_hz": 462_662_500,
+                "privacy_code": 10,
+                "privacy_code_source": "configured",
+                "tone_detected": False,
+                "peak_rms": 8421,
+                "signal_dbfs": None,
+                "snr_db": None,
+                "duration_ms": 6250,
+            }
+        )
+    )
+    assert request.rf_metadata.frequency_hz == 462_662_500
+    assert request.rf_metadata.tone_detected is False
+    assert request.rf_metadata.snr_db is None
+
+
+def test_legacy_transmission_without_rf_metadata_remains_valid() -> None:
+    request = TransmissionCreateRequest.model_validate(_payload())
+    assert request.rf_metadata.receiver_device_id is None

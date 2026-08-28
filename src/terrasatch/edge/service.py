@@ -1,7 +1,9 @@
 """Edge pairing and device lifecycle services."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -101,7 +103,7 @@ async def claim_pairing(
     *,
     settings: Settings,
     device_code: str,
-) -> tuple[str, EdgeDevice | None, str | None]:
+) -> tuple[Literal["pending", "approved", "expired", "claimed"], EdgeDevice | None, str | None]:
     pairing = await session.scalar(
         select(EdgePairing)
         .where(EdgePairing.device_code_hash == hash_device_code(device_code))
@@ -209,6 +211,7 @@ async def heartbeat_device(
         device.agent_version = payload.agent_version
     device.hardware_inventory = payload.hardware_inventory
     device.capabilities = sorted(set(payload.capabilities))
+    device.telemetry = payload.telemetry
     await session.flush()
     # TimestampMixin.updated_at uses a SQL expression on UPDATE. Refresh while
     # the AsyncSession is still open so route serialization never touches an

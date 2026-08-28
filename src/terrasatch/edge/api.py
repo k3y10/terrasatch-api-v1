@@ -1,4 +1,5 @@
 """HTTP control plane for TerraSatch Edge devices."""
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -65,6 +66,7 @@ def _device_response(device: EdgeDevice) -> DeviceResponse:
         hardware_inventory=device.hardware_inventory,
         capabilities=device.capabilities,
         remote_config=device.remote_config,
+        telemetry=getattr(device, "telemetry", {}),
         enabled=device.enabled,
         last_seen_at=device.last_seen_at,
         created_at=device.created_at,

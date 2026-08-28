@@ -1,4 +1,5 @@
 """API schemas for Edge pairing, inventory, heartbeat, and remote configuration."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -45,6 +46,7 @@ class DeviceResponse(BaseModel):
     hardware_inventory: list[dict[str, object]]
     capabilities: list[str]
     remote_config: dict[str, object]
+    telemetry: dict[str, object] = Field(default_factory=dict)
     enabled: bool
     last_seen_at: datetime | None
     created_at: datetime
@@ -61,6 +63,7 @@ class EdgeHeartbeatRequest(BaseModel):
     agent_version: str | None = Field(default=None, max_length=64)
     hardware_inventory: list[dict[str, object]] = Field(default_factory=list, max_length=256)
     capabilities: list[str] = Field(default_factory=list, max_length=128)
+    telemetry: dict[str, object] = Field(default_factory=dict)
 
 
 class EdgeHeartbeatResponse(BaseModel):

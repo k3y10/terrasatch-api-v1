@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AgentCreateRequest(BaseModel):
@@ -109,6 +109,28 @@ class ActivationMetadata(BaseModel):
         return normalized or None
 
 
+class RfMetadata(BaseModel):
+    """Physical receiver provenance; unavailable measurements remain null."""
+
+    model_config = ConfigDict(extra="allow")
+
+    receiver_device_id: str | None = Field(default=None, max_length=255)
+    receiver_name: str | None = Field(default=None, max_length=255)
+    sdr_index: int | None = Field(default=None, ge=0)
+    sdr_serial: str | None = Field(default=None, max_length=255)
+    radio_profile: str | None = Field(default=None, max_length=100)
+    channel: int | None = Field(default=None, ge=1)
+    frequency_hz: int | None = Field(default=None, gt=0)
+    privacy_code: int | None = Field(default=None, ge=0)
+    privacy_code_source: str | None = Field(default=None, max_length=32)
+    ctcss_hz: float | None = Field(default=None, gt=0)
+    tone_detected: bool = False
+    peak_rms: int | None = Field(default=None, ge=0)
+    signal_dbfs: float | None = None
+    snr_db: float | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+
+
 class TransmissionCreateRequest(BaseModel):
     site_id: UUID
     agent_id: UUID | None = None
@@ -124,6 +146,7 @@ class TransmissionCreateRequest(BaseModel):
     transcript_language: str | None = Field(default=None, min_length=1, max_length=16)
     transcript_confidence: float | None = Field(default=None, ge=0, le=1)
     activation: ActivationMetadata | None = None
+    rf_metadata: RfMetadata = Field(default_factory=RfMetadata)
 
     @field_validator("text", "source", "source_message_id", mode="before")
     @classmethod
@@ -151,7 +174,11 @@ class TransmissionCreateRequest(BaseModel):
         for field_name, value in (("started_at", self.started_at), ("ended_at", self.ended_at)):
             if value is not None and value.utcoffset() is None:
                 raise ValueError(f"{field_name} must include a timezone offset")
-        if self.started_at is not None and self.ended_at is not None and self.ended_at < self.started_at:
+        if (
+            self.started_at is not None
+            and self.ended_at is not None
+            and self.ended_at < self.started_at
+        ):
             raise ValueError("ended_at must be greater than or equal to started_at")
         return self
 
@@ -168,6 +195,7 @@ class TransmissionResponse(BaseModel):
     ended_at: datetime | None
     received_at: datetime
     created_at: datetime
+    rf_metadata: RfMetadata = Field(default_factory=RfMetadata)
 
 
 class TranscriptResponse(BaseModel):
