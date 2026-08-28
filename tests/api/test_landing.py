@@ -26,14 +26,11 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert response.headers["content-type"].startswith("text/html")
     for expected in (
         "TerraSatch · TerraListen Radio Console",
-        'aria-label="TerraListen, a feature by TerraSatch"',
-        '<span class="brand-mark"><img src="/assets/terralisten-sasquatch.webp"',
-        '<span class="brand-product" aria-label="TerraListen">',
-        "<strong>TERRA</strong><b>LISTEN</b>",
-        "A FEATURE BY <em>TERRASATCH</em>",
+        'aria-label="TerraSatch field intelligence"',
+        '<span class="brand-wordmark"><img src="/assets/terrasatch.png"',
         "Satchy, the TerraSatch Sasquatch",
-        "/assets/terralisten-sasquatch.webp",
-        'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
+        "/assets/terrasatch.png",
+        'rel="icon" type="image/png" href="/assets/satchy.png"',
         "Satchy AI Radio Channel",
         "SATCHY · AI AGENT",
         "TX ORCHESTRATION",
@@ -69,8 +66,8 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
     assert ">TERRASATCH</strong><b>TERRALISTEN<" not in response.text
     assert '<span class="brand-name">' not in response.text
     assert ".brand small{display:none}" not in response.text
-    assert ".brand-mark{display:grid;width:54px;height:54px" in response.text
-    assert ".brand-mark img{display:block;width:51px;height:51px" in response.text
+    assert ".brand-wordmark{display:block;width:210px;height:62px" in response.text
+    assert ".brand-wordmark img{display:block;width:210px;height:auto" in response.text
 
 
 @pytest.mark.asyncio
@@ -151,6 +148,27 @@ async def test_local_sasquatch_preview_asset_is_served_by_api() -> None:
     assert response.headers["content-type"].startswith("image/png")
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(response.content) > 8_000
+    assert "max-age=86400" in response.headers["cache-control"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("asset_url", "minimum_size"),
+    [
+        ("/assets/terrasatch.png", 500_000),
+        ("/assets/satchy.png", 1_000_000),
+    ],
+)
+async def test_current_brand_assets_are_served_by_api(asset_url: str, minimum_size: int) -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(asset_url)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(response.content) > minimum_size
     assert "max-age=86400" in response.headers["cache-control"]
 
 

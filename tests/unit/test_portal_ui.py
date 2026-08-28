@@ -48,6 +48,7 @@ def test_portal_renders_membership_role_and_multiple_edge_devices() -> None:
         },
         csrf_token="csrf",
     )
+    assert "/assets/satchy.png" in html
 
     assert "ROLE · OPERATOR" in html
     assert "Wasatch Edge" in html

@@ -23,7 +23,13 @@ from terrasatch.api.schemas import ErrorDetail, ErrorResponse, HealthResponse
 from terrasatch.api.uac_archive import router as uac_archive_router
 from terrasatch.auth.dependencies import Principal, get_principal, require_scope
 from terrasatch.auth.scopes import SUPPORTED_API_SCOPES
-from terrasatch.brand import SASQUATCH_ASSET_PATH, SASQUATCH_PREVIEW_PATH, apply_public_branding
+from terrasatch.brand import (
+    LEGACY_SASQUATCH_WEBP_PATH,
+    SASQUATCH_PREVIEW_PATH,
+    SATCHY_ASSET_PATH,
+    TERRASATCH_LOGO_ASSET_PATH,
+    apply_public_branding,
+)
 from terrasatch.config import Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
@@ -109,12 +115,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
+    @application.get("/assets/terrasatch.png", include_in_schema=False)
+    async def get_terrasatch_logo_asset() -> FileResponse:
+        """Serve the current full TerraSatch wordmark."""
+
+        return FileResponse(
+            TERRASATCH_LOGO_ASSET_PATH,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @application.get("/assets/satchy.png", include_in_schema=False)
+    async def get_satchy_brand_asset() -> FileResponse:
+        """Serve the current compact Satchy brand mark."""
+
+        return FileResponse(
+            SATCHY_ASSET_PATH,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @application.get("/assets/terralisten-sasquatch.webp", include_in_schema=False)
     async def get_sasquatch_brand_asset() -> FileResponse:
         """Serve Satchy locally for the TerraListen console UI."""
 
         return FileResponse(
-            SASQUATCH_ASSET_PATH,
+            LEGACY_SASQUATCH_WEBP_PATH,
             media_type="image/webp",
             headers={"Cache-Control": "public, max-age=86400"},
         )
