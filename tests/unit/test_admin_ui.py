@@ -14,7 +14,7 @@ def test_admin_ui_uses_orange_terminal_theme() -> None:
     assert "#166534" not in styles
     assert "ts-admin@terrasatch" in html
     assert "establish session" in html
-    assert "/assets/terralisten-sasquatch.webp" in html
+    assert "/assets/satchy.png" in html
 
 
 def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> None:

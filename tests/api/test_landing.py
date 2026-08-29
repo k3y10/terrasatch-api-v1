@@ -15,25 +15,25 @@ def make_settings(*, docs_enabled: bool = True) -> Settings:
     )
 
 
+async def _get(path: str = "/", *, docs_enabled: bool = True) -> httpx.Response:
+    app = create_app(make_settings(docs_enabled=docs_enabled))
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.get(path)
+
+
 @pytest.mark.asyncio
 async def test_root_serves_provider_aware_satchy_radio_console() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/")
-
+    response = await _get()
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     for expected in (
         "TerraSatch · TerraListen Radio Console",
-        'aria-label="TerraListen, a feature by TerraSatch"',
-        '<span class="brand-mark"><img src="/assets/terralisten-sasquatch.webp"',
-        '<span class="brand-product" aria-label="TerraListen">',
-        "<strong>TERRA</strong><b>LISTEN</b>",
-        "A FEATURE BY <em>TERRASATCH</em>",
+        'aria-label="TerraSatch field intelligence"',
+        '<span class="brand-wordmark"><img src="/assets/terrasatch.png"',
         "Satchy, the TerraSatch Sasquatch",
-        "/assets/terralisten-sasquatch.webp",
-        'rel="icon" type="image/png" href="/assets/terralisten-sasquatch.png"',
+        "/assets/terrasatch.png",
+        'rel="icon" type="image/png" href="/assets/satchy.png"',
         "Satchy AI Radio Channel",
         "SATCHY · AI AGENT",
         "TX ORCHESTRATION",
@@ -62,24 +62,22 @@ async def test_root_serves_provider_aware_satchy_radio_console() -> None:
         "landing-test",
     ):
         assert expected in response.text
-
-    assert "Receive Only" not in response.text
-    assert "Receive-only radio intelligence" not in response.text
-    assert "https://www.terrasatch.com/terralisten-sasquatch.png" not in response.text
-    assert ">TERRASATCH</strong><b>TERRALISTEN<" not in response.text
-    assert '<span class="brand-name">' not in response.text
-    assert ".brand small{display:none}" not in response.text
-    assert ".brand-mark{display:grid;width:54px;height:54px" in response.text
-    assert ".brand-mark img{display:block;width:51px;height:51px" in response.text
+    for forbidden in (
+        "Receive Only",
+        "Receive-only radio intelligence",
+        "https://www.terrasatch.com/terralisten-sasquatch.png",
+        ">TERRASATCH</strong><b>TERRALISTEN<",
+        '<span class="brand-name">',
+        ".brand small{display:none}",
+    ):
+        assert forbidden not in response.text
+    assert ".brand-wordmark{display:block;width:210px;height:62px" in response.text
+    assert ".brand-wordmark img{display:block;width:210px;height:auto" in response.text
 
 
 @pytest.mark.asyncio
 async def test_landing_is_a_no_document_scroll_viewport_shell() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/")
-
+    response = await _get()
     assert response.status_code == 200
     assert "html,body{width:100%;height:100%;margin:0;overflow:hidden}" in response.text
     assert "height:100dvh" in response.text
@@ -91,11 +89,7 @@ async def test_landing_is_a_no_document_scroll_viewport_shell() -> None:
 
 @pytest.mark.asyncio
 async def test_radio_visual_animates_standby_heartbeat_and_fluid_bars() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/")
-
+    response = await _get()
     assert response.status_code == 200
     assert ".bars i{flex:1;" in response.text
     assert "--h:" in response.text
@@ -111,11 +105,7 @@ async def test_radio_visual_animates_standby_heartbeat_and_fluid_bars() -> None:
 
 @pytest.mark.asyncio
 async def test_health_states_have_distinct_non_brand_colors() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/")
-
+    response = await _get()
     assert response.status_code == 200
     assert "--green:#6ee7a0" in response.text
     assert "--yellow:#f6c65b" in response.text
@@ -127,11 +117,7 @@ async def test_health_states_have_distinct_non_brand_colors() -> None:
 
 @pytest.mark.asyncio
 async def test_local_sasquatch_asset_is_served_by_api() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/assets/terralisten-sasquatch.webp")
-
+    response = await _get("/assets/terralisten-sasquatch.webp")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/webp")
     assert response.content.startswith(b"RIFF")
@@ -142,11 +128,7 @@ async def test_local_sasquatch_asset_is_served_by_api() -> None:
 
 @pytest.mark.asyncio
 async def test_local_sasquatch_preview_asset_is_served_by_api() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/assets/terralisten-sasquatch.png")
-
+    response = await _get("/assets/terralisten-sasquatch.png")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/png")
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
@@ -155,12 +137,28 @@ async def test_local_sasquatch_preview_asset_is_served_by_api() -> None:
 
 
 @pytest.mark.asyncio
-async def test_local_brand_fallback_asset_is_still_served_by_api() -> None:
-    application = create_app(make_settings())
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/assets/terrasatch-logo.svg")
+@pytest.mark.parametrize(
+    ("asset_url", "maximum_size"),
+    [
+        ("/assets/terrasatch.png", 810_000),
+        ("/assets/satchy.png", 1_210_000),
+    ],
+)
+async def test_current_brand_assets_are_served_within_budget(
+    asset_url: str,
+    maximum_size: int,
+) -> None:
+    response = await _get(asset_url)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert 1_000 < len(response.content) <= maximum_size
+    assert "max-age=86400" in response.headers["cache-control"]
 
+
+@pytest.mark.asyncio
+async def test_local_brand_fallback_asset_is_still_served_by_api() -> None:
+    response = await _get("/assets/terrasatch-logo.svg")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert "TERRASATCH" in response.text
@@ -170,11 +168,7 @@ async def test_local_brand_fallback_asset_is_still_served_by_api() -> None:
 
 @pytest.mark.asyncio
 async def test_landing_page_does_not_link_disabled_swagger() -> None:
-    application = create_app(make_settings(docs_enabled=False))
-    transport = httpx.ASGITransport(app=application)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/")
-
+    response = await _get(docs_enabled=False)
     assert response.status_code == 200
     assert 'href="/docs"' not in response.text
     assert "Docs Off" in response.text

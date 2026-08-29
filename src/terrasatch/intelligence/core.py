@@ -71,7 +71,7 @@ _CALLSIGN_RE = re.compile(
     re.I,
 )
 _LOCATION_RE = re.compile(
-    r"\b(?:near|at|on|below|above|toward|towards)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9' -]{2,80})",
+    r"\b(?:near|at|on|from|below|above|toward|towards)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9' -]{2,80})",
     re.I,
 )
 _FIELD_OBSERVATION_LOCATION_RE = re.compile(
@@ -215,7 +215,7 @@ class DeterministicIntelligenceProvider:
             return None
         candidate = match.group(1)
         candidate = re.split(
-            r"\b(?:around|roughly|about|approximately|with|and|but|we're|we are|at)\b",
+            r"\b(?:around|roughly|about|approximately|with|and|but|we're|we are|at|on)\b",
             candidate,
             maxsplit=1,
             flags=re.I,

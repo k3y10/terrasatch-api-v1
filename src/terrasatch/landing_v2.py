@@ -5,8 +5,12 @@ from __future__ import annotations
 
 from html import escape
 
+from terrasatch.brand import TERRASATCH_LOGO_ASSET_URL
 
-def build_landing_page(*, environment: str, deployment: str, version: str, docs_enabled: bool) -> str:
+
+def build_landing_page(
+    *, environment: str, deployment: str, version: str, docs_enabled: bool
+) -> str:
     docs = '<a href="/docs">Docs</a>' if docs_enabled else '<span class="off">Docs Off</span>'
     html = """<!doctype html>
 <html lang="en">
@@ -18,14 +22,14 @@ def build_landing_page(*, environment: str, deployment: str, version: str, docs_
 <title>TerraSatch · TerraListen Radio Console</title>
 <style>
 :root{color-scheme:dark;--bg:#080b0d;--p:#101519;--p2:#0b1013;--t:#f0f2f1;--m:#8f989e;--m2:#5e676d;--l:rgba(255,255,255,.09);--o:#f47a20;--o2:#ffad59;--os:rgba(244,122,32,.11);--green:#6ee7a0;--green-soft:rgba(110,231,160,.11);--yellow:#f6c65b;--yellow-soft:rgba(246,198,91,.11);--red:#ff6b6b;--red-soft:rgba(255,107,107,.11);--blue:#72b7ff;--blue-soft:rgba(114,183,255,.11);--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:radial-gradient(circle at 70% -15%,rgba(244,122,32,.11),transparent 34%),#080b0d;color:var(--t);font:13px/1.45 Inter,system-ui,sans-serif}.app{height:100dvh;display:grid;grid-template-rows:70px minmax(0,1fr) 32px}.top{display:grid;grid-template-columns:1fr auto auto;gap:20px;align-items:center;padding:0 30px;border-bottom:1px solid var(--l)}.brand{display:flex;align-items:center;gap:11px;min-width:0;color:inherit;text-decoration:none}.brand-mark{display:grid;width:54px;height:54px;flex:0 0 54px;place-items:center;overflow:hidden;border:1px solid rgba(244,122,32,.3);border-radius:50%;background:radial-gradient(circle,rgba(244,122,32,.14),rgba(244,122,32,.025) 68%);box-shadow:0 0 18px rgba(244,122,32,.1)}.brand-mark img{display:block;width:51px;height:51px;object-fit:contain}.brand-copy{display:grid;gap:6px;min-width:0}.brand-product{display:flex;align-items:baseline;line-height:.82;white-space:nowrap}.brand-product strong,.brand-product b{display:block;font-size:19px;letter-spacing:.06em;font-weight:850}.brand-product strong{color:var(--t)}.brand-product b{color:var(--o2)}.brand small{color:var(--m);font:750 7.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}.brand small em{color:#d5dadd;font-style:normal;font-weight:850}.brand:focus-visible{outline:2px solid var(--o2);outline-offset:4px;border-radius:4px}.nav{display:flex;gap:17px}.nav a,.nav span{color:#bac1c4;text-decoration:none;font-size:11px}.nav a:hover{color:var(--o2)}.state{border:1px solid var(--l);background:rgba(255,255,255,.025);color:var(--m);padding:8px 10px;border-radius:999px;font:800 9px var(--mono);letter-spacing:.06em;transition:.2s ease}.state.healthy{border-color:rgba(110,231,160,.35);background:var(--green-soft);color:var(--green)}.state.degraded{border-color:rgba(246,198,91,.35);background:var(--yellow-soft);color:var(--yellow)}.state.unhealthy{border-color:rgba(255,107,107,.35);background:var(--red-soft);color:var(--red)}.workspace{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;padding:14px 30px}.main{min-height:0;display:grid;grid-template-rows:minmax(0,1.12fr) minmax(214px,.88fr);gap:14px}.rail{min-height:0;display:grid;grid-template-rows:auto auto auto 1fr;gap:10px}.card{border:1px solid var(--l);border-radius:12px;background:linear-gradient(180deg,#11171a,#0b1013);overflow:hidden}.hero{padding:20px;display:grid;grid-template-rows:auto auto minmax(104px,1fr);gap:13px}.hero-head{display:flex;justify-content:space-between;gap:18px}.hero h1{margin:0;font-size:clamp(28px,2.2vw,39px);line-height:1;letter-spacing:-.035em}.hero p{margin:7px 0 0;color:#adb5b9;max-width:760px}.agent{min-width:230px;border:1px solid rgba(244,122,32,.28);background:var(--os);padding:11px 13px;border-radius:9px}.agent strong{color:var(--o2)}.agent span{display:block;color:#aeb6ba;font-size:10px;margin-top:4px}.caps{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.cap{border:1px solid var(--l);border-radius:8px;padding:9px;background:rgba(255,255,255,.015)}.cap span{display:block;color:var(--m2);font:800 8px var(--mono);letter-spacing:.08em}.cap b{display:block;margin-top:5px;font-size:10px}.orange{color:var(--o2)!important}.green{color:var(--green)!important}.yellow{color:var(--yellow)!important}.red{color:var(--red)!important}.blue{color:var(--blue)!important}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:radial-gradient(circle at 70% -15%,rgba(244,122,32,.11),transparent 34%),#080b0d;color:var(--t);font:13px/1.45 Inter,system-ui,sans-serif}.app{height:100dvh;display:grid;grid-template-rows:70px minmax(0,1fr) 32px}.top{display:grid;grid-template-columns:1fr auto auto;gap:20px;align-items:center;padding:0 30px;border-bottom:1px solid var(--l)}.brand{display:flex;align-items:center;min-width:0;color:inherit;text-decoration:none}.brand-wordmark{display:block;width:210px;height:62px;overflow:hidden;position:relative}.brand-wordmark img{display:block;width:210px;height:auto;transform:translateY(-25px)}.brand:focus-visible{outline:2px solid var(--o2);outline-offset:4px;border-radius:4px}.nav{display:flex;gap:17px}.nav a,.nav span{color:#bac1c4;text-decoration:none;font-size:11px}.nav a:hover{color:var(--o2)}.state{border:1px solid var(--l);background:rgba(255,255,255,.025);color:var(--m);padding:8px 10px;border-radius:999px;font:800 9px var(--mono);letter-spacing:.06em;transition:.2s ease}.state.healthy{border-color:rgba(110,231,160,.35);background:var(--green-soft);color:var(--green)}.state.degraded{border-color:rgba(246,198,91,.35);background:var(--yellow-soft);color:var(--yellow)}.state.unhealthy{border-color:rgba(255,107,107,.35);background:var(--red-soft);color:var(--red)}.workspace{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;padding:14px 30px}.main{min-height:0;display:grid;grid-template-rows:minmax(0,1.12fr) minmax(214px,.88fr);gap:14px}.rail{min-height:0;display:grid;grid-template-rows:auto auto auto 1fr;gap:10px}.card{border:1px solid var(--l);border-radius:12px;background:linear-gradient(180deg,#11171a,#0b1013);overflow:hidden}.hero{padding:20px;display:grid;grid-template-rows:auto auto minmax(104px,1fr);gap:13px}.hero-head{display:flex;justify-content:space-between;gap:18px}.hero h1{margin:0;font-size:clamp(28px,2.2vw,39px);line-height:1;letter-spacing:-.035em}.hero p{margin:7px 0 0;color:#adb5b9;max-width:760px}.agent{min-width:230px;border:1px solid rgba(244,122,32,.28);background:var(--os);padding:11px 13px;border-radius:9px}.agent strong{color:var(--o2)}.agent span{display:block;color:#aeb6ba;font-size:10px;margin-top:4px}.caps{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.cap{border:1px solid var(--l);border-radius:8px;padding:9px;background:rgba(255,255,255,.015)}.cap span{display:block;color:var(--m2);font:800 8px var(--mono);letter-spacing:.08em}.cap b{display:block;margin-top:5px;font-size:10px}.orange{color:var(--o2)!important}.green{color:var(--green)!important}.yellow{color:var(--yellow)!important}.red{color:var(--red)!important}.blue{color:var(--blue)!important}
 .signal{position:relative;border:1px solid var(--l);border-radius:9px;background:#080d0f;overflow:hidden}.signal:before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);background-size:30px 30px}.bars{position:absolute;left:12px;right:12px;top:31px;bottom:26px;display:flex;align-items:end;gap:2px;overflow:hidden}.bars i{flex:1;height:var(--h);background:linear-gradient(var(--o2),var(--o),#6d2c0d);opacity:.5;border-radius:2px 2px 0 0;transform-origin:50% 100%;animation:listenPulse 1.65s ease-in-out infinite alternate;animation-delay:var(--d);will-change:transform,opacity}.signal[data-edge="online"] .bars i{opacity:.88;animation-duration:1.05s}.signal[data-edge="online"] .listen-core{color:var(--green)}.signal[data-edge="stale"] .listen-core{color:var(--yellow)}.signal[data-edge="offline"] .listen-core{color:var(--red)}.sig-top,.sig-bottom{position:absolute;z-index:3;left:12px;right:12px;display:flex;justify-content:space-between;font:800 8px var(--mono);letter-spacing:.08em}.sig-top{top:10px;color:var(--m)}.sig-bottom{bottom:8px;color:var(--m2)}.listen-core{position:absolute;z-index:4;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;place-items:center;color:var(--o2);pointer-events:none}.listen-dot{width:10px;height:10px;border-radius:50%;background:currentColor;box-shadow:0 0 16px currentColor}.listen-ring{position:absolute;width:36px;height:36px;border:1px solid currentColor;border-radius:50%;opacity:.55;animation:heartbeat 1.8s ease-out infinite}.listen-ring.two{animation-delay:.9s}.listen-label{position:absolute;top:24px;white-space:nowrap;color:currentColor;font:800 7px var(--mono);letter-spacing:.12em;text-shadow:0 2px 5px #000}.channel{display:grid;grid-template-columns:1.25fr .75fr}.chan-main,.flow{padding:16px}.chan-main{border-right:1px solid var(--l)}.channel h2{margin:0;font-size:16px}.channel p{color:var(--m);font-size:10px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.cell{border:1px solid var(--l);border-radius:7px;padding:8px;background:var(--p2)}.cell span{display:block;color:var(--m2);font:800 7px var(--mono);letter-spacing:.08em}.cell b{display:block;margin-top:5px;font-size:9px}.flow h3{margin:0 0 9px;color:var(--o2);font:800 9px var(--mono)}.step{display:grid;grid-template-columns:64px 1fr;gap:7px;margin:7px 0;font-size:9px}.step strong{color:var(--o);font:800 8px var(--mono)}.step span{color:#b5bdc0}.title{display:flex;justify-content:space-between;padding:11px 13px;border-bottom:1px solid var(--l);font-weight:800;font-size:10px}.title b{color:var(--o);font:800 8px var(--mono)}.rows{padding:4px 0}.row{display:grid;grid-template-columns:1fr auto;gap:9px;padding:6px 13px;font-size:10px;align-items:center}.row span{color:#b8c0c3}.row b{max-width:190px;text-align:right;font-size:9px}.health{color:var(--m)}.health.healthy,.health.online{color:var(--green)}.health.degraded,.health.stale{color:var(--yellow)}.health.unhealthy,.health.offline{color:var(--red)}.health.unknown,.health.never,.health.disabled{color:var(--m)}.health:before{content:"●";font-size:7px;margin-right:6px}.note{padding:0 13px 10px;color:var(--m);font-size:8px}.note strong{color:var(--o2)}.compat{display:flex;align-items:center;gap:8px}.compat em{font-style:normal;color:var(--m2);font-size:8px}.compat b{white-space:nowrap}.fleet-detail{padding:0 13px 10px;color:var(--m);font-size:8px;line-height:1.5}.fleet-detail strong{color:#c8ced1}.off{opacity:.4}footer{display:flex;justify-content:space-between;align-items:center;padding:0 30px;border-top:1px solid var(--l);color:var(--m2);font:750 7px var(--mono);letter-spacing:.07em}footer b{color:var(--o)}footer .policy{color:var(--o2)}
 @keyframes listenPulse{0%{transform:scaleY(.24);opacity:.30}35%{transform:scaleY(.58);opacity:.58}70%{transform:scaleY(.36);opacity:.42}100%{transform:scaleY(1);opacity:.88}}@keyframes heartbeat{0%{transform:scale(.45);opacity:.72}65%,100%{transform:scale(1.65);opacity:0}}
-@media(max-width:1100px){.workspace{grid-template-columns:1fr 300px}.caps{grid-template-columns:repeat(2,1fr)}.channel{grid-template-columns:1fr}.chan-main{border-right:0;border-bottom:1px solid var(--l)}}@media(max-width:820px){.top{grid-template-columns:1fr auto;padding:0 14px}.nav{display:none}.workspace{grid-template-columns:1fr;padding:10px 14px}.rail{display:none}.main{grid-template-rows:minmax(0,1.15fr) minmax(220px,.85fr)}}@media(max-width:600px){.top{gap:9px;padding:0 8px}.brand{gap:7px}.brand-mark{width:46px;height:46px;flex-basis:46px}.brand-mark img{width:43px;height:43px}.brand-copy{gap:4px}.brand-product strong,.brand-product b{font-size:14px;letter-spacing:.045em}.brand small{font-size:6px;letter-spacing:.08em}.state{padding:7px 8px;font-size:8px}.workspace{padding:7px}.hero{padding:12px}.agent{display:none}.hero h1{font-size:24px}.caps{gap:5px}.cap{padding:7px}.chan-main,.flow{padding:11px}.grid{grid-template-columns:repeat(2,1fr)}footer{padding:0 8px}.center{display:none}}
+@media(max-width:1100px){.workspace{grid-template-columns:1fr 300px}.caps{grid-template-columns:repeat(2,1fr)}.channel{grid-template-columns:1fr}.chan-main{border-right:0;border-bottom:1px solid var(--l)}}@media(max-width:820px){.top{grid-template-columns:1fr auto;padding:0 14px}.nav{display:none}.workspace{grid-template-columns:1fr;padding:10px 14px}.rail{display:none}.main{grid-template-rows:minmax(0,1.15fr) minmax(220px,.85fr)}}@media(max-width:600px){.top{gap:9px;padding:0 8px}.brand-wordmark{width:155px;height:54px}.brand-wordmark img{width:155px;transform:translateY(-18px)}.state{padding:7px 8px;font-size:8px}.workspace{padding:7px}.hero{padding:12px}.agent{display:none}.hero h1{font-size:24px}.caps{gap:5px}.cap{padding:7px}.chan-main,.flow{padding:11px}.grid{grid-template-columns:repeat(2,1fr)}footer{padding:0 8px}.center{display:none}}
 </style>
 </head>
 <body><div class="app">
-<header class="top"><a class="brand" href="https://www.terrasatch.com" aria-label="TerraListen, a feature by TerraSatch"><span class="brand-mark"><img src="/assets/terralisten-sasquatch.webp" alt="Satchy, the TerraSatch Sasquatch"></span><span class="brand-copy"><span class="brand-product" aria-label="TerraListen"><strong>TERRA</strong><b>LISTEN</b></span><small>A FEATURE BY <em>TERRASATCH</em></small></span></a><nav class="nav"><a href="/api/v1/reference">API Reference</a>__DOCS__<a href="/openapi.json">OpenAPI</a><a href="/admin">Admin</a></nav><span class="state" id="system-state">CHECKING</span></header>
+<header class="top"><a class="brand" href="https://www.terrasatch.com" aria-label="TerraSatch field intelligence"><span class="brand-wordmark"><img src="__BRAND_LOGO__" alt="TerraSatch field intelligence"></span></a><nav class="nav"><a href="/api/v1/reference">API Reference</a>__DOCS__<a href="/openapi.json">OpenAPI</a><a href="/admin">Admin</a></nav><span class="state" id="system-state">CHECKING</span></header>
 <main class="workspace"><section class="main"><section class="card hero"><div class="hero-head"><div><h1>TerraListen Radio Network</h1><p>Satchy is the TerraListen AI radio agent. The radio surface stays alive in standby, then shifts to registered Edge health when a signed-in operator has paired hardware reporting heartbeats.</p></div><div class="agent"><strong>SATCHY · AI AGENT</strong><span>Logical channel identity stays separate from physical RF/provider binding.</span></div></div><div class="caps"><div class="cap"><span>RX CAPTURE</span><b class="green">SUPPORTED</b></div><div class="cap"><span>TX ORCHESTRATION</span><b class="yellow">PROVIDER-GATED</b></div><div class="cap"><span>AI CHANNEL</span><b>SATCHY</b></div><div class="cap"><span>LISTEN STATE</span><b id="listen-state" class="orange">STANDBY</b></div></div><div class="signal" id="radio-signal" data-edge="standby"><div class="sig-top"><span>RADIO / PROVIDER LAYER</span><span class="orange">RX ↔ SATCHY ↔ TX</span></div><div class="bars">__BARS__</div><div class="listen-core"><span class="listen-ring"></span><span class="listen-ring two"></span><span class="listen-dot"></span><span class="listen-label" id="listen-label">LISTENING · WAITING FOR EDGE</span></div><div class="sig-bottom"><span id="signal-source">STANDBY HEARTBEAT</span><span>TX IS NEVER IMPLIED BY RX HARDWARE</span></div></div></section>
 <section class="card channel"><div class="chan-main"><h2>Satchy AI Radio Channel</h2><p>A logical TerraListen channel that each site can bind to its approved provider channel, frequency, modulation and response policy.</p><div class="grid"><div class="cell"><span>AGENT</span><b class="orange">Satchy</b></div><div class="cell"><span>ACTIVATION</span><b>“TerraSatch”</b></div><div class="cell"><span>LOGICAL CHANNEL</span><b>Per org / site</b></div><div class="cell"><span>RF BINDING</span><b>Provider configured</b></div><div class="cell"><span>REPLY POLICY</span><b>Dashboard / provider route</b></div><div class="cell"><span>RF TX</span><b class="yellow">Capability + approval</b></div></div></div><div class="flow"><h3>CONTROL PATH</h3><div class="step"><strong>LISTEN</strong><span>Edge reports actual receiver/provider health and capabilities.</span></div><div class="step"><strong>SATCHY</strong><span>Activation and logical-channel context attach to TerraListen.</span></div><div class="step"><strong>LEARN</strong><span>Transcript and TerraEngine preserve provenance.</span></div><div class="step"><strong>RESPOND</strong><span>Outbound routes remain provider-backed and operator-gated.</span></div></div></section></section>
 <aside class="rail">
@@ -48,7 +52,90 @@ def build_landing_page(*, environment: str, deployment: str, version: str, docs_
 })();
 </script>
 </body></html>"""
-    heights = (18,26,33,45,39,55,48,68,59,78,66,88,75,82,69,76,62,70,57,64,51,59,46,54,41,50,37,45,34,42,31,39,29,37,27,35,25,33,24,32,23,31,25,34,28,38,32,43,36,48,40,53,44,58,49,64,54,69,59,74,64,79,69,85,74,89,70,82,65,76,60,71,55,66,50,61,46,56,42,52,38,48)
+    heights = (
+        18,
+        26,
+        33,
+        45,
+        39,
+        55,
+        48,
+        68,
+        59,
+        78,
+        66,
+        88,
+        75,
+        82,
+        69,
+        76,
+        62,
+        70,
+        57,
+        64,
+        51,
+        59,
+        46,
+        54,
+        41,
+        50,
+        37,
+        45,
+        34,
+        42,
+        31,
+        39,
+        29,
+        37,
+        27,
+        35,
+        25,
+        33,
+        24,
+        32,
+        23,
+        31,
+        25,
+        34,
+        28,
+        38,
+        32,
+        43,
+        36,
+        48,
+        40,
+        53,
+        44,
+        58,
+        49,
+        64,
+        54,
+        69,
+        59,
+        74,
+        64,
+        79,
+        69,
+        85,
+        74,
+        89,
+        70,
+        82,
+        65,
+        76,
+        60,
+        71,
+        55,
+        66,
+        50,
+        61,
+        46,
+        56,
+        42,
+        52,
+        38,
+        48,
+    )
     bars = "".join(
         f'<i style="--h:{height}%;--d:-{(index % 17) * 0.09:.2f}s"></i>'
         for index, height in enumerate(heights)
@@ -59,6 +146,7 @@ def build_landing_page(*, environment: str, deployment: str, version: str, docs_
         "__VERSION__": escape(version),
         "__DOCS__": docs,
         "__BARS__": bars,
+        "__BRAND_LOGO__": TERRASATCH_LOGO_ASSET_URL,
     }
     for marker, value in replacements.items():
         html = html.replace(marker, value)

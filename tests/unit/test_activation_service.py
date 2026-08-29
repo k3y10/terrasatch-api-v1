@@ -7,20 +7,22 @@ from terrasatch.errors import InvalidConfiguration, TenantAccessDenied
 from terrasatch.radio.activation_service import validate_edge_ingest_activation
 from terrasatch.radio.schemas import ActivationMetadata, TransmissionCreateRequest
 
-
 ORG_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 API_KEY_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 SITE_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 OTHER_SITE_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 CHANNEL_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+DEFAULT_SITE = object()
 
 
 class FakeSession:
-    def __init__(self, device):
-        self.device = device
+    def __init__(self, device, site=DEFAULT_SITE):
+        self.results = [device]
+        if device is not None:
+            self.results.append(site)
 
     async def scalar(self, _statement):
-        return self.device
+        return self.results.pop(0)
 
 
 def _payload(*, site_id=SITE_ID, text="Routine radio traffic", channel_id=None, activation=None):
@@ -60,6 +62,39 @@ async def test_paired_edge_is_always_bound_to_its_assigned_site() -> None:
     with pytest.raises(TenantAccessDenied, match="paired Edge device"):
         await validate_edge_ingest_activation(
             FakeSession(_device(site_id=SITE_ID)),
+            organization_id=ORG_ID,
+            api_key_id=API_KEY_ID,
+            payload=_payload(site_id=OTHER_SITE_ID),
+        )
+
+
+@pytest.mark.asyncio
+async def test_paired_edge_accepts_its_enabled_assigned_site() -> None:
+    decision = await validate_edge_ingest_activation(
+        FakeSession(_device()),
+        organization_id=ORG_ID,
+        api_key_id=API_KEY_ID,
+        payload=_payload(),
+    )
+    assert decision.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_paired_edge_rejects_disabled_assigned_site() -> None:
+    with pytest.raises(TenantAccessDenied, match="site is disabled"):
+        await validate_edge_ingest_activation(
+            FakeSession(_device(), site=None),
+            organization_id=ORG_ID,
+            api_key_id=API_KEY_ID,
+            payload=_payload(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_paired_edge_rejects_assigned_site_unavailable_in_organization() -> None:
+    with pytest.raises(TenantAccessDenied, match="unavailable"):
+        await validate_edge_ingest_activation(
+            FakeSession(_device(site_id=OTHER_SITE_ID), site=None),
             organization_id=ORG_ID,
             api_key_id=API_KEY_ID,
             payload=_payload(site_id=OTHER_SITE_ID),

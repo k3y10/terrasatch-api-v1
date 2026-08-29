@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from html import escape
 
-from terrasatch.brand import SASQUATCH_ASSET_URL
+from terrasatch.brand import SATCHY_ASSET_URL
 from terrasatch.masterdata.service import InspectorResult
 
 
@@ -14,7 +14,7 @@ def _attr(value: object) -> str:
 
 
 def _layout(title: str, body: str) -> str:
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · TerraSatch</title>{_styles()}</head><body><aside><a class="brand" href="/admin"><img src="{escape(SASQUATCH_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>CONTROL PLANE</b></span></a><nav><a href="/admin">Operations</a><a href="/admin/data-sources">Data sources</a><a href="/admin/data-inspector">Data inspector</a><a href="/admin/members">Members & access</a></nav><small>LISTEN · WATCH · LEARN · ADAPT</small></aside><main>{body}</main></body></html>'''
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)} · TerraSatch</title>{_styles()}</head><body><aside><a class="brand" href="/admin"><img src="{escape(SATCHY_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>CONTROL PLANE</b></span></a><nav><a href="/admin">Operations</a><a href="/admin/data-sources">Data sources</a><a href="/admin/data-inspector">Data inspector</a><a href="/admin/members">Members & access</a></nav><small>LISTEN · WATCH · LEARN · ADAPT</small></aside><main>{body}</main></body></html>'''
 
 
 def _organization_select(organizations: list[object], selected: str, path: str) -> str:

@@ -33,7 +33,7 @@ Do not build a separate demo-only intelligence path. Simulator, recorded audio, 
 - provider-neutral TerraEngine with deterministic structured extraction
 - authenticated tenant-scoped WebSocket subscriptions
 - browser-based Edge pairing and tenant/site assignment
-- Edge device registry, scoped credential issuance, heartbeat, inventory, and remote configuration
+- Edge device registry, site-bound credentials, aggregated receiver telemetry, inventory, and remote configuration
 - live registered Edge fleet health and provider-aware RX/TX capability state
 - Satchy AI-channel configuration stored as Edge remote policy
 - organization member portal with tenant-scoped fleet visibility
@@ -41,7 +41,10 @@ Do not build a separate demo-only intelligence path. Simulator, recorded audio, 
 - configurable registration guardrails that pause new Edge/member registration without interrupting existing users or nodes
 - Docker/Compose deployment behind Caddy at `api.terrasatch.com`
 
-The dedicated field runtime lives in the separate `terrasatch-edge` repository. Physical validation has confirmed Linux/WSL detection of a NESDR SMArt v5 / RTL2838 receiver, a bounded IQ receive probe, production Edge pairing, heartbeat/inventory sync, text ingestion, transcript persistence, and TerraEngine event extraction. RF demodulated audio → STT remains the next field-side phase.
+The dedicated field runtime lives in the separate `terrasatch-edge` repository. Its vNext radio
+service keeps receive, local validation/transcription, and durable API delivery independent while
+preserving the established single-call demo. This API stores meaningful transmissions plus
+structured RF provenance; raw/rejected audio remains an Edge concern and is never persisted here.
 
 See [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) for the current roadmap and validation state.
 

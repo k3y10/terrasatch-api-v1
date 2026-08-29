@@ -15,7 +15,14 @@ from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.events.bus import publish_event
 from terrasatch.radio.activation_service import validate_edge_ingest_activation
-from terrasatch.radio.models import Agent, Callsign, Channel, OperationalEvent, Transcript, Transmission
+from terrasatch.radio.models import (
+    Agent,
+    Callsign,
+    Channel,
+    OperationalEvent,
+    Transcript,
+    Transmission,
+)
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
     AgentResponse,
@@ -33,6 +40,7 @@ from terrasatch.radio.schemas import (
     PaginatedEvents,
     PaginatedTranscripts,
     PaginatedTransmissions,
+    RfMetadata,
     TranscriptResponse,
     TransmissionCreateRequest,
     TransmissionIngestResponse,
@@ -135,6 +143,7 @@ def _transmission_response(item: Transmission) -> TransmissionResponse:
         ended_at=item.ended_at,
         received_at=item.received_at,
         created_at=item.created_at,
+        rf_metadata=RfMetadata.model_validate(getattr(item, "rf_metadata", {})),
     )
 
 
@@ -202,7 +211,9 @@ async def get_agents(
             enabled=enabled,
         ),
     )
-    return PaginatedAgents(items=[_agent_response(item) for item in items], limit=limit, offset=offset)
+    return PaginatedAgents(
+        items=[_agent_response(item) for item in items], limit=limit, offset=offset
+    )
 
 
 @router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
@@ -288,7 +299,9 @@ async def get_channels(
             enabled=enabled,
         ),
     )
-    return PaginatedChannels(items=[_channel_response(item) for item in items], limit=limit, offset=offset)
+    return PaginatedChannels(
+        items=[_channel_response(item) for item in items], limit=limit, offset=offset
+    )
 
 
 @router.post("/channels", response_model=ChannelResponse, status_code=status.HTTP_201_CREATED)
@@ -632,7 +645,9 @@ async def get_operational_events(
             callsign=callsign,
         ),
     )
-    return PaginatedEvents(items=[_event_response(item) for item in items], limit=limit, offset=offset)
+    return PaginatedEvents(
+        items=[_event_response(item) for item in items], limit=limit, offset=offset
+    )
 
 
 @router.get("/events/{event_id}", response_model=OperationalEventResponse)

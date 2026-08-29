@@ -51,7 +51,20 @@ The reference payload should include the Edge routes and the `edge:connect`, `re
 
 ## Current hardening boundary
 
-The paired device credential is tenant-scoped. The current `POST /api/v1/transmissions` implementation validates `edge:ingest` plus organization ownership, but does not yet force an Edge credential to ingest only into the `site_id` assigned to its `edge_device`.
+The paired device credential is tenant-scoped and site-bound. `POST /api/v1/transmissions`
+resolves the paired device from the authenticated API key, rejects disabled devices, rejects a
+different client-provided site, and verifies that the assigned site is still enabled in the same
+organization. Appropriately scoped non-Edge service/admin credentials retain the existing tenant
+behavior.
+
+Radio receiver heartbeats may include an aggregated `telemetry.radio` summary (state, counters,
+outbox depth, QA bytes, and last RF/valid timestamps). Rejected RF candidates are not stored as
+transmission rows.
+
+Transmission ingestion accepts optional `rf_metadata` JSON for physical receiver provenance,
+FRS channel/frequency, configured privacy-code context, duration, and measurements that the
+receiver can actually support. Unknown RSSI/SNR remains null; raw audio is never stored in
+PostgreSQL.
 
 Before multi-site customer deployment, add device/site binding enforcement to the ingestion endpoint.
 
