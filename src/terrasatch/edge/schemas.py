@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+MAX_EDGE_TELEMETRY_BYTES = 16 * 1024
+
+
+def _validate_telemetry_payload(value: dict[str, object]) -> dict[str, object]:
+    """Keep heartbeat telemetry compact while allowing forward-compatible namespaces."""
+
+    try:
+        encoded = json.dumps(
+            value,
+            separators=(",", ":"),
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("telemetry must be JSON-serializable") from exc
+    if len(encoded) > MAX_EDGE_TELEMETRY_BYTES:
+        raise ValueError(
+            f"telemetry must not exceed {MAX_EDGE_TELEMETRY_BYTES} serialized bytes"
+        )
+    return value
 
 
 class PairingStartRequest(BaseModel):
@@ -64,6 +86,11 @@ class EdgeHeartbeatRequest(BaseModel):
     hardware_inventory: list[dict[str, object]] = Field(default_factory=list, max_length=256)
     capabilities: list[str] = Field(default_factory=list, max_length=128)
     telemetry: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("telemetry")
+    @classmethod
+    def validate_telemetry(cls, value: dict[str, object]) -> dict[str, object]:
+        return _validate_telemetry_payload(value)
 
 
 class EdgeHeartbeatResponse(BaseModel):
