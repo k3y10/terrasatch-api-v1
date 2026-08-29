@@ -8,6 +8,7 @@ from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
@@ -44,7 +45,12 @@ from terrasatch.radio.schemas import (
 )
 
 
-async def _site_for_org(session: AsyncSession, *, organization_id: UUID, site_id: UUID) -> Site:
+async def _site_for_org(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID,
+) -> Site:
     site = await session.scalar(
         select(Site).where(
             Site.id == site_id,
@@ -156,7 +162,9 @@ async def list_agents(
     if enabled is not None:
         query = query.where(Agent.enabled.is_(enabled))
     return list(
-        await session.scalars(query.order_by(Agent.created_at.desc()).limit(limit).offset(offset))
+        await session.scalars(
+            query.order_by(Agent.created_at.desc()).limit(limit).offset(offset)
+        )
     )
 
 
@@ -259,7 +267,9 @@ async def list_channels(
     if enabled is not None:
         query = query.where(Channel.enabled.is_(enabled))
     return list(
-        await session.scalars(query.order_by(Channel.created_at.desc()).limit(limit).offset(offset))
+        await session.scalars(
+            query.order_by(Channel.created_at.desc()).limit(limit).offset(offset)
+        )
     )
 
 
@@ -391,7 +401,9 @@ async def list_callsigns(
         query = query.where(Callsign.team_id == team_id)
     if enabled is not None:
         query = query.where(Callsign.enabled.is_(enabled))
-    return list(await session.scalars(query.order_by(Callsign.name).limit(limit).offset(offset)))
+    return list(
+        await session.scalars(query.order_by(Callsign.name).limit(limit).offset(offset))
+    )
 
 
 async def get_callsign(
@@ -500,7 +512,8 @@ async def ingest_transmission(
     """Persist source + transcript + structured events in one transaction.
 
     Repeated ``source_message_id`` values for the same tenant return the previously persisted
-    records rather than generating duplicates.
+    records rather than generating duplicates. A savepoint also converts a concurrent duplicate
+    insert race into the same idempotent response without invalidating the outer request transaction.
     """
 
     source_message_id = payload.source_message_id.strip()
@@ -549,8 +562,21 @@ async def ingest_transmission(
         received_at=datetime.now(UTC),
         rf_metadata=payload.rf_metadata.model_dump(mode="json", exclude_none=False),
     )
-    session.add(transmission)
-    await session.flush()
+
+    try:
+        async with session.begin_nested():
+            session.add(transmission)
+            await session.flush()
+    except IntegrityError:
+        raced = await _existing_ingest(
+            session,
+            organization_id=organization_id,
+            source_message_id=source_message_id,
+        )
+        if raced is None:
+            raise
+        raced_transmission, raced_transcript, raced_events = raced
+        return raced_transmission, raced_transcript, raced_events, True
 
     started = perf_counter()
     transcript = Transcript(
