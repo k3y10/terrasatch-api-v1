@@ -1,9 +1,9 @@
 """Lightweight branded landing page for the public TerraSatch API host."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
 from html import escape
-
 
 _BRAND_LOGO_URL = "https://www.terrasatch.com/terralisten-sasquatch.png"
 _BRAND_LOGO_FALLBACK_URL = "/assets/terrasatch-logo.svg"

@@ -45,7 +45,9 @@ def _clean_optional_text(value: object) -> str | None:
     return cleaned or None
 
 
-def activation_policy_from_remote_config(remote_config: dict[str, object] | None) -> ActivationPolicy:
+def activation_policy_from_remote_config(
+    remote_config: dict[str, object] | None,
+) -> ActivationPolicy:
     """Build a generic activation policy from the existing Edge remote-config contract."""
 
     config = dict(remote_config or {})
@@ -123,7 +125,9 @@ def evaluate_activation(
         raise InvalidConfiguration("Activation enforcement is enabled without a phrase")
 
     if policy.logical_channel_id is not None and channel_id != policy.logical_channel_id:
-        raise InvalidConfiguration("Transmission channel does not match the Edge activation policy")
+        raise InvalidConfiguration(
+            "Transmission channel does not match the Edge activation policy"
+        )
 
     if evidence is not None:
         if evidence.detected is False:
@@ -131,17 +135,23 @@ def evaluate_activation(
         if evidence.phrase is not None:
             supplied = evidence.phrase.strip()
             if supplied.casefold() != phrase.casefold():
-                raise InvalidConfiguration("Activation evidence does not match the configured phrase")
+                raise InvalidConfiguration(
+                    "Activation evidence does not match the configured phrase"
+                )
         if (
             policy.provider_channel is not None
             and evidence.provider_channel is not None
             and evidence.provider_channel.strip().casefold()
             != policy.provider_channel.strip().casefold()
         ):
-            raise InvalidConfiguration("Provider channel does not match the Edge activation policy")
+            raise InvalidConfiguration(
+                "Provider channel does not match the Edge activation policy"
+            )
 
     if not _starts_with_phrase(normalized_text, phrase, case_sensitive=policy.case_sensitive):
-        raise InvalidConfiguration("Transmission did not begin with the configured activation phrase")
+        raise InvalidConfiguration(
+            "Transmission did not begin with the configured activation phrase"
+        )
 
     intelligence_text = strip_activation_prefix(normalized_text, phrase)
     if not intelligence_text:

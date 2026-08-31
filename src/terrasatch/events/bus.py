@@ -34,6 +34,8 @@ async def publish_event(
     }
     client = Redis.from_url(str(settings.redis_url), socket_connect_timeout=2, socket_timeout=2)
     try:
-        await client.publish(organization_channel(organization_id), json.dumps(message, default=str))
+        await client.publish(
+            organization_channel(organization_id), json.dumps(message, default=str)
+        )
     finally:
         await client.aclose()

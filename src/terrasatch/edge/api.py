@@ -7,15 +7,22 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_scope
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
-from terrasatch.edge.models import EdgeDevice
+from terrasatch.edge.command_service import (
+    acknowledge_command,
+    complete_command,
+    list_device_commands,
+)
+from terrasatch.edge.models import EdgeCommand, EdgeDevice
 from terrasatch.edge.schemas import (
     DeviceResponse,
+    EdgeCommandResponse,
+    EdgeCommandResultRequest,
     EdgeDeviceUpdateRequest,
     EdgeHeartbeatRequest,
     EdgeHeartbeatResponse,
@@ -71,6 +78,23 @@ def _device_response(device: EdgeDevice) -> DeviceResponse:
         last_seen_at=device.last_seen_at,
         created_at=device.created_at,
         updated_at=device.updated_at,
+    )
+
+
+def _command_response(command: EdgeCommand) -> EdgeCommandResponse:
+    return EdgeCommandResponse(
+        id=command.id,
+        organization_id=command.organization_id,
+        site_id=command.site_id,
+        edge_device_id=command.edge_device_id,
+        command_type=command.command_type,
+        payload=command.payload,
+        priority=command.priority,
+        status=command.status,
+        created_at=command.created_at,
+        expires_at=command.expires_at,
+        acknowledged_at=command.acknowledged_at,
+        completed_at=command.completed_at,
     )
 
 
@@ -209,3 +233,60 @@ async def get_edge_config(
         ),
     )
     return device.remote_config
+
+
+@router.get("/commands", response_model=list[EdgeCommandResponse])
+async def get_edge_commands(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("edge:connect"))],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[EdgeCommandResponse]:
+    commands = await _run_database(
+        request.app.state.settings,
+        lambda session: list_device_commands(
+            session,
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            limit=limit,
+        ),
+    )
+    return [_command_response(command) for command in commands]
+
+
+@router.post("/commands/{command_id}/ack", response_model=EdgeCommandResponse)
+async def post_edge_command_ack(
+    command_id: UUID,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("edge:connect"))],
+) -> EdgeCommandResponse:
+    command = await _run_database(
+        request.app.state.settings,
+        lambda session: acknowledge_command(
+            session,
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            command_id=command_id,
+        ),
+    )
+    return _command_response(command)
+
+
+@router.post("/commands/{command_id}/result", response_model=EdgeCommandResponse)
+async def post_edge_command_result(
+    command_id: UUID,
+    payload: EdgeCommandResultRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("edge:connect"))],
+) -> EdgeCommandResponse:
+    command = await _run_database(
+        request.app.state.settings,
+        lambda session: complete_command(
+            session,
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+            command_id=command_id,
+            result=payload.status,
+            detail=payload.detail,
+        ),
+    )
+    return _command_response(command)

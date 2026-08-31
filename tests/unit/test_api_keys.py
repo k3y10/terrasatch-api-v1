@@ -21,7 +21,7 @@ def test_generated_nonproduction_key_uses_test_prefix() -> None:
 
 
 def test_supported_api_scopes_are_normalized_and_sorted() -> None:
-    assert validate_api_scopes({"read:events", " admin ", "read:events"}) == [
+    assert validate_api_scopes({"read:events", " admin "}) == [
         "admin",
         "read:events",
     ]

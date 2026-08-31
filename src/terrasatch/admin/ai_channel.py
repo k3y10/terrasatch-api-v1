@@ -16,7 +16,18 @@ from terrasatch.edge.service import update_device
 from terrasatch.errors import InvalidConfiguration
 from terrasatch.radio.service import get_channel
 
-_DEFAULT_AI_CHANNEL: dict[str, object] = {
+_DEFAULT_ACTION_TYPES = (
+    "reply_radio",
+    "ask_clarification",
+    "create_observation",
+    "update_event",
+    "notify_team",
+    "generate_report",
+    "emergency_review",
+)
+_DEFAULT_APPROVER_ROLES = ("owner", "admin", "operator")
+
+DEFAULT_AI_CHANNEL: dict[str, object] = {
     "name": "Satchy AI Channel",
     "agent_name": "Satchy",
     "activation_phrase": "TerraSatch",
@@ -29,6 +40,14 @@ _DEFAULT_AI_CHANNEL: dict[str, object] = {
     "modulation": "fm",
     "reply_route": "dashboard",
     "rf_reply_enabled": False,
+    "response_mode": "suggest",
+    "allowed_action_types": list(_DEFAULT_ACTION_TYPES),
+    "authorized_approver_roles": list(_DEFAULT_APPROVER_ROLES),
+    "max_reply_seconds": 15,
+    "response_cooldown_seconds": 10,
+    "conversation_timeout_seconds": 300,
+    "emergency_detection_enabled": True,
+    "emergency_auto_broadcast": False,
 }
 
 _TX_CAPABILITIES = {"radio:transmit", "radio:tx", "tx", "transmit", "ptt"}
@@ -47,21 +66,64 @@ def ai_channel_config(device: EdgeDevice) -> dict[str, object]:
     radio_dict = dict(radio) if isinstance(radio, dict) else {}
     ai = radio_dict.get("ai_channel")
     ai_dict = dict(ai) if isinstance(ai, dict) else {}
-    return {**_DEFAULT_AI_CHANNEL, **ai_dict}
+    return {**DEFAULT_AI_CHANNEL, **ai_dict}
+
+
+def default_ai_channel_config() -> dict[str, object]:
+    """Return an isolated copy of the safe, suggest-only policy."""
+
+    return {
+        **DEFAULT_AI_CHANNEL,
+        "allowed_action_types": list(_DEFAULT_ACTION_TYPES),
+        "authorized_approver_roles": list(_DEFAULT_APPROVER_ROLES),
+    }
+
+
+def rf_reply_policy_allows(device: EdgeDevice) -> bool:
+    """Require both device capability and explicit API/AI-channel TX policy."""
+
+    raw_radio = (device.remote_config or {}).get("radio")
+    radio = dict(raw_radio) if isinstance(raw_radio, dict) else {}
+    ai = ai_channel_config(device)
+    return (
+        _supports_transmit(device)
+        and bool(radio.get("transmit_enabled", False))
+        and bool(ai.get("rf_reply_enabled", False))
+    )
 
 
 def ai_channel_lines(device: EdgeDevice) -> list[str]:
     ai = ai_channel_config(device)
+    allowed_actions = ai.get("allowed_action_types")
+    if not isinstance(allowed_actions, list):
+        allowed_actions = list(_DEFAULT_ACTION_TYPES)
+    approver_roles = ai.get("authorized_approver_roles")
+    if not isinstance(approver_roles, list):
+        approver_roles = list(_DEFAULT_APPROVER_ROLES)
     return [
         f"AI       {ai['name']}",
         f"AGENT    {ai['agent_name']}",
         f"TRIGGER  {ai['activation_phrase']}",
-        f"GATE     {'required' if ai['activation_required'] else 'off'} ({ai['activation_position']})",
+        (
+            f"GATE     {'required' if ai['activation_required'] else 'off'} "
+            f"({ai['activation_position']})"
+        ),
         f"CHANNEL  {ai['logical_channel_id'] or 'not bound'}",
         f"PROVIDER {ai['provider_channel'] or 'not bound'}",
         f"FREQ     {ai['frequency_hz'] or 'not configured'}",
         f"MOD      {ai['modulation']}",
         f"REPLY    {ai['reply_route']} (policy)",
+        f"MODE     {ai['response_mode']}",
+        f"ACTIONS  {', '.join(str(item) for item in allowed_actions)}",
+        f"APPROVERS {', '.join(str(item) for item in approver_roles)}",
+        (
+            f"TIMEOUT  conversation={ai['conversation_timeout_seconds']}s "
+            f"cooldown={ai['response_cooldown_seconds']}s"
+        ),
+        (
+            f"EMERGENCY review={'on' if ai['emergency_detection_enabled'] else 'off'} "
+            "/ auto-broadcast=off"
+        ),
         "EXEC     Edge/provider adapter required; core never autonomously transmits RF",
     ]
 

@@ -9,7 +9,6 @@ from terrasatch.auth.dependencies import Principal
 from terrasatch.config import Settings
 from terrasatch.radio.schemas import TransmissionCreateRequest
 
-
 ORG_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 API_KEY_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 SITE_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
@@ -40,7 +39,9 @@ class FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_activated_route_processes_stripped_copy_but_preserves_source_transcript(monkeypatch) -> None:
+async def test_activated_route_processes_stripped_copy_but_preserves_source_transcript(
+    monkeypatch,
+) -> None:
     session = FakeSession()
     captured: dict[str, object] = {}
     now = datetime.now(UTC)

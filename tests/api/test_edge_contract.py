@@ -32,6 +32,9 @@ async def test_openapi_exposes_edge_control_plane_routes() -> None:
     assert "get" in paths["/api/v1/edge/me"]
     assert "post" in paths["/api/v1/edge/heartbeat"]
     assert "get" in paths["/api/v1/edge/config"]
+    assert "get" in paths["/api/v1/edge/commands"]
+    assert "post" in paths["/api/v1/edge/commands/{command_id}/ack"]
+    assert "post" in paths["/api/v1/edge/commands/{command_id}/result"]
 
 
 @pytest.mark.asyncio
@@ -60,6 +63,9 @@ async def test_public_reference_lists_edge_control_plane() -> None:
     assert ("POST", "/api/v1/edge/pairings") in catalog
     assert ("POST", "/api/v1/edge/heartbeat") in catalog
     assert ("GET", "/api/v1/edge/config") in catalog
+    assert ("GET", "/api/v1/edge/commands") in catalog
+    assert ("POST", "/api/v1/edge/commands/{command_id}/ack") in catalog
+    assert ("POST", "/api/v1/edge/commands/{command_id}/result") in catalog
     assert "edge:connect" in payload["supported_scopes"]
     assert "read:edge" in payload["supported_scopes"]
     assert "write:edge" in payload["supported_scopes"]

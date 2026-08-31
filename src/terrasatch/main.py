@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from terrasatch import __version__
 from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
+from terrasatch.admin.satchy_routes import router as admin_satchy_router
 from terrasatch.api.control_plane import router as control_plane_router
 from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
@@ -243,6 +244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(api_v1)
     application.include_router(realtime_router)
     application.include_router(admin_router)
+    application.include_router(admin_satchy_router)
     application.include_router(admin_member_router)
     application.include_router(portal_router)
     return application

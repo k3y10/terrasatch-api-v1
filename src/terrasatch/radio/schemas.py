@@ -189,6 +189,16 @@ class TransmissionResponse(BaseModel):
     site_id: UUID
     agent_id: UUID | None
     channel_id: UUID | None
+    conversation_id: UUID | None = None
+    speaker_callsign_id: UUID | None = None
+    recipient_callsign_id: UUID | None = None
+    speaker_text: str | None = None
+    recipient_text: str | None = None
+    addressed_to_agent: bool = False
+    addressing_confidence: float | None = None
+    emergency_candidate: bool = False
+    emergency_confidence: float | None = None
+    emergency_reason: str | None = None
     source_type: str
     source_message_id: str
     started_at: datetime | None

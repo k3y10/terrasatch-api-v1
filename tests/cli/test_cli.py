@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -43,7 +44,10 @@ def test_dotenv_serializer_quotes_compose_interpolation_characters() -> None:
 def test_environment_upsert_preserves_scrypt_hash_literal(tmp_path: Path) -> None:
     destination = tmp_path / ".env"
     destination.write_text("TERRASATCH_ENV=production\nTERRASATCH_ADMIN_PASSWORD_HASH=old\n")
-    scrypt_hash = "scrypt$ln=14,r=8,p=1$F1T9mE0SXzce2pvNCR9qEQ$XPueOoJ5FI1PKBxonk0yjToMtJtSu3w5234GYOupQTo"
+    scrypt_hash = (
+        "scrypt$ln=14,r=8,p=1$F1T9mE0SXzce2pvNCR9qEQ$"
+        "XPueOoJ5FI1PKBxonk0yjToMtJtSu3w5234GYOupQTo"
+    )
 
     _upsert_environment_file(
         {
@@ -56,4 +60,5 @@ def test_environment_upsert_preserves_scrypt_hash_literal(tmp_path: Path) -> Non
     text = destination.read_text()
     assert f"TERRASATCH_ADMIN_PASSWORD_HASH='{scrypt_hash}'" in text
     assert "TERRASATCH_ADMIN_SESSION_SECRET=session-secret" in text
-    assert destination.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert destination.stat().st_mode & 0o777 == 0o600

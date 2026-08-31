@@ -10,15 +10,27 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from terrasatch.actions import models as action_models
 from terrasatch.auth import models as auth_models
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.edge import models as edge_models
 from terrasatch.identity import models as identity_models
 from terrasatch.masterdata import models as masterdata_models
+from terrasatch.organizations import models as organization_models
+from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 
-_ = (auth_models, edge_models, identity_models, masterdata_models, radio_models)
+_ = (
+    action_models,
+    auth_models,
+    edge_models,
+    identity_models,
+    masterdata_models,
+    organization_models,
+    outbound_models,
+    radio_models,
+)
 
 config = context.config
 
