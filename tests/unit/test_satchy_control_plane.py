@@ -303,6 +303,16 @@ async def test_approval_gate_and_simulated_edge_lifecycle_are_idempotent() -> No
         assert outbound.status == "edge_received"
         assert action.status == ActionStatus.EXECUTING.value
 
+        # A lost result POST must not strand acknowledged work. The same assigned
+        # device can poll it again and finish idempotently after reconnecting.
+        recoverable = await list_device_commands(
+            session,
+            organization_id=organization.id,
+            api_key_id=keys[0].id,
+        )
+        assert [item.id for item in recoverable] == [command.id]
+        assert recoverable[0].status == "acknowledged"
+
         first_result = await complete_command(
             session,
             organization_id=organization.id,

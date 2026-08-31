@@ -122,7 +122,10 @@ async def list_device_commands(
                 EdgeCommand.organization_id == organization_id,
                 EdgeCommand.site_id == device.site_id,
                 EdgeCommand.edge_device_id == device.id,
-                EdgeCommand.status.in_(("queued", "dispatched")),
+                # Keep acknowledged work visible until Edge reports a terminal result.
+                # This lets a device recover after it ACKs successfully but loses the
+                # network response while posting the result.
+                EdgeCommand.status.in_(("queued", "dispatched", "acknowledged")),
             )
             .order_by(EdgeCommand.priority, EdgeCommand.created_at)
             .limit(limit)
