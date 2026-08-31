@@ -95,3 +95,5 @@ def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> 
     assert "Members & access" in html
     assert "/admin/data-sources" in html
     assert "/admin/data-inspector" in html
+    assert "/admin/satchy" in html
+    assert "Satchy control plane" in html

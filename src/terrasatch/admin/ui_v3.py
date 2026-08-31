@@ -15,7 +15,7 @@ def render_dashboard(**kwargs: object) -> str:
     )
     html = html.replace(
         '<a href="#fleet">› Registered Edge health</a>',
-        '<a href="#fleet">› Registered Edge health</a><a href="/admin/data-sources">› Data sources</a><a href="/admin/data-inspector">› Data inspector</a>',
+        '<a href="#fleet">› Registered Edge health</a><a href="/admin/satchy">› Satchy control plane</a><a href="/admin/data-sources">› Data sources</a><a href="/admin/data-inspector">› Data inspector</a>',
         1,
     )
     return html

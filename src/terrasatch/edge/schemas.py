@@ -25,9 +25,7 @@ def _validate_telemetry_payload(value: dict[str, object]) -> dict[str, object]:
     except (TypeError, ValueError) as exc:
         raise ValueError("telemetry must be JSON-serializable") from exc
     if len(encoded) > MAX_EDGE_TELEMETRY_BYTES:
-        raise ValueError(
-            f"telemetry must not exceed {MAX_EDGE_TELEMETRY_BYTES} serialized bytes"
-        )
+        raise ValueError(f"telemetry must not exceed {MAX_EDGE_TELEMETRY_BYTES} serialized bytes")
     return value
 
 
@@ -103,3 +101,23 @@ class EdgeDeviceUpdateRequest(BaseModel):
     site_id: UUID | None = None
     enabled: bool | None = None
     remote_config: dict[str, object] | None = None
+
+
+class EdgeCommandResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    site_id: UUID
+    edge_device_id: UUID
+    command_type: str
+    payload: dict[str, object]
+    priority: int
+    status: str
+    created_at: datetime
+    expires_at: datetime | None
+    acknowledged_at: datetime | None
+    completed_at: datetime | None
+
+
+class EdgeCommandResultRequest(BaseModel):
+    status: Literal["simulated", "failed"]
+    detail: str | None = Field(default=None, max_length=2000)

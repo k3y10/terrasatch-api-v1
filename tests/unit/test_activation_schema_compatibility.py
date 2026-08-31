@@ -2,7 +2,6 @@ from uuid import UUID
 
 from terrasatch.radio.schemas import TransmissionCreateRequest
 
-
 SITE_ID = UUID("11111111-2222-3333-4444-555555555555")
 
 

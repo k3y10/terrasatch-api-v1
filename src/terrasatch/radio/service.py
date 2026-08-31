@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from terrasatch.actions.evaluation import process_transmission_control_plane
 from terrasatch.config import Settings
 from terrasatch.errors import (
     InvalidConfiguration,
@@ -513,7 +514,8 @@ async def ingest_transmission(
 
     Repeated ``source_message_id`` values for the same tenant return the previously persisted
     records rather than generating duplicates. A savepoint also converts a concurrent duplicate
-    insert race into the same idempotent response without invalidating the outer request transaction.
+    insert race into the same idempotent response without invalidating the outer
+    request transaction.
     """
 
     source_message_id = payload.source_message_id.strip()
@@ -625,6 +627,13 @@ async def ingest_transmission(
         session.add(event)
         events.append(event)
     await session.flush()
+    await process_transmission_control_plane(
+        session,
+        transmission=transmission,
+        text=normalized_text,
+        callsign_hint=payload.callsign,
+        operational_event=events[0] if events else None,
+    )
     return transmission, transcript, events, False
 
 

@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -75,6 +76,48 @@ class Callsign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class RadioConversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Deterministically grouped radio activity within a tenant site and channel."""
+
+    __tablename__ = "radio_conversations"
+    __table_args__ = (
+        Index(
+            "ix_radio_conversations_active_lookup",
+            "organization_id",
+            "site_id",
+            "channel_id",
+            "status",
+            "last_activity_at",
+        ),
+        Index(
+            "ix_radio_conversations_participants",
+            "organization_id",
+            "participant_fingerprint",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    channel_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("channels.id", ondelete="SET NULL"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="open", nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    primary_topic: Mapped[str | None] = mapped_column(String(255))
+    active_location: Mapped[str | None] = mapped_column(String(255))
+    operational_event_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("operational_events.id", ondelete="SET NULL"), index=True
+    )
+    participants: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    participant_fingerprint: Mapped[str] = mapped_column(String(512), nullable=False)
+
+
 class Transmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Immutable source-level record representing one received or submitted transmission."""
 
@@ -95,6 +138,22 @@ class Transmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     channel_id: Mapped[UUID | None] = mapped_column(ForeignKey("channels.id", ondelete="SET NULL"))
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("radio_conversations.id", ondelete="SET NULL"), index=True
+    )
+    speaker_callsign_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("callsigns.id", ondelete="SET NULL"), index=True
+    )
+    recipient_callsign_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("callsigns.id", ondelete="SET NULL"), index=True
+    )
+    speaker_text: Mapped[str | None] = mapped_column(String(255))
+    recipient_text: Mapped[str | None] = mapped_column(String(255))
+    addressed_to_agent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    addressing_confidence: Mapped[float | None] = mapped_column(Float)
+    emergency_candidate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    emergency_confidence: Mapped[float | None] = mapped_column(Float)
+    emergency_reason: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[str] = mapped_column(String(64), nullable=False)
     source_message_id: Mapped[str] = mapped_column(String(255), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

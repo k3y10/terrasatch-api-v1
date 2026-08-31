@@ -59,7 +59,9 @@ def select_receiver(
 
     if backend not in {"auto", "rtl", "hackrf"}:
         raise ValueError("backend must be auto, rtl, or hackrf")
-    candidates = devices if backend == "auto" else [item for item in devices if item.backend == backend]
+    candidates = (
+        devices if backend == "auto" else [item for item in devices if item.backend == backend]
+    )
     for item in candidates:
         if item.capture_ready:
             return item

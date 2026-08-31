@@ -165,8 +165,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["transcript_id"], ["transcripts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_operational_events_organization_id", "operational_events", ["organization_id"])
-    op.create_index("ix_operational_events_transmission_id", "operational_events", ["transmission_id"])
+    op.create_index(
+        "ix_operational_events_organization_id", "operational_events", ["organization_id"]
+    )
+    op.create_index(
+        "ix_operational_events_transmission_id", "operational_events", ["transmission_id"]
+    )
     op.create_index("ix_operational_events_transcript_id", "operational_events", ["transcript_id"])
     op.create_index("ix_operational_events_event_type", "operational_events", ["event_type"])
 

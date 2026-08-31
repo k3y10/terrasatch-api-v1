@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from typing import Annotated
 from uuid import UUID, uuid4
 
 import typer
@@ -41,7 +42,9 @@ agent_app = typer.Typer(help="Manage TerraSatch processing agents.", no_args_is_
 channel_app = typer.Typer(help="Manage logical radio channels.", no_args_is_help=True)
 callsign_app = typer.Typer(help="Manage radio callsigns.", no_args_is_help=True)
 event_app = typer.Typer(help="Inspect structured operational events.", no_args_is_help=True)
-simulate_app = typer.Typer(help="Run deterministic TerraSatch simulation inputs.", no_args_is_help=True)
+simulate_app = typer.Typer(
+    help="Run deterministic TerraSatch simulation inputs.", no_args_is_help=True
+)
 
 
 def register_radio_cli(root: typer.Typer) -> None:
@@ -194,7 +197,7 @@ def channel_create(
     name: str = typer.Option(..., "--name"),
     organization: str = typer.Option(..., "--organization"),
     site: str = typer.Option(..., "--site"),
-    agent_id: UUID | None = typer.Option(None, "--agent-id"),
+    agent_id: Annotated[UUID | None, typer.Option("--agent-id")] = None,
     profile: str = typer.Option("general", "--profile"),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -269,7 +272,7 @@ def callsign_add(
     name: str = typer.Option(..., "--name"),
     organization: str = typer.Option(..., "--organization"),
     site: str | None = typer.Option(None, "--site"),
-    alias: list[str] | None = typer.Option(None, "--alias"),
+    alias: Annotated[list[str] | None, typer.Option("--alias")] = None,
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a callsign and optional aliases."""

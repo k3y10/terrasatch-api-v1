@@ -10,7 +10,6 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _SUPPORTED_MODES = frozenset({"fm", "am", "wbfm"})
 
 
@@ -148,7 +147,10 @@ def capture_rtl_fm(config: RtlCaptureConfig, output: str | Path) -> Path:
         detail = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
         if exited_early and process.returncode not in (0, None):
             raise RuntimeError(
-                f"rtl_fm exited before the capture duration (code {process.returncode}). {detail}".strip()
+                (
+                    f"rtl_fm exited before the capture duration "
+                    f"(code {process.returncode}). {detail}"
+                ).strip()
             )
         if not payload:
             raise RuntimeError(f"rtl_fm produced no audio samples. {detail}".strip())

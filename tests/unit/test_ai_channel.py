@@ -21,6 +21,11 @@ def test_satchy_ai_channel_defaults_are_logical_and_non_transmitting() -> None:
     assert config["logical_channel_id"] is None
     assert config["reply_route"] == "dashboard"
     assert config["rf_reply_enabled"] is False
+    assert config["response_mode"] == "suggest"
+    assert "reply_radio" in config["allowed_action_types"]
+    assert "admin" in config["authorized_approver_roles"]
+    assert config["conversation_timeout_seconds"] == 300
+    assert config["emergency_auto_broadcast"] is False
 
 
 def test_satchy_ai_channel_preserves_remote_binding_policy() -> None:
