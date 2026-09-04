@@ -8,6 +8,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from terrasatch.actions.field_intent import (
+    classify_field_intent,
+    location_candidates,
+    workflow_context,
+)
 from terrasatch.actions.models import (
     ActionStatus,
     ActionType,
@@ -168,15 +173,39 @@ async def process_transmission_control_plane(
     action_type: ActionType | None = None
     proposed_message: str | None = None
     risk_level = "low"
+    workflow: dict[str, object] = {}
     if emergency:
         action_type = ActionType.EMERGENCY_REVIEW
         risk_level = "critical"
         interpretation = emergency_reason or "Possible emergency requires human review"
     elif addressing.addressed_to_agent:
-        action_type = ActionType.REPLY_RADIO
+        action_type = classify_field_intent(addressing.message_text)
         caller = addressing.speaker_text or "Caller"
-        proposed_message = f"{caller}, Satchy. Go ahead."
-        interpretation = f"{caller} is calling Satchy"
+        interpretation = f"{caller}: {action_type.value if action_type else 'passive capture'}"
+        if action_type == ActionType.REPLY_RADIO:
+            proposed_message = f"{caller}, Satchy. Go ahead."
+        elif action_type is not None:
+            workflow = await workflow_context(
+                session,
+                transmission=transmission,
+                addressing=addressing,
+                action_type=action_type,
+                operational_event=operational_event,
+            )
+            locations = location_candidates(
+                addressing.message_text,
+                dict(profile.location_aliases or {}) if profile else {},
+            )
+            if len(locations) > 1:
+                workflow["requested_action_type"] = action_type.value
+                workflow["location_candidates"] = locations
+                workflow["clarification_reason"] = "Multiple configured locations match"
+                action_type = ActionType.ASK_CLARIFICATION
+            elif workflow.get("requires_operator_identification"):
+                workflow["requested_action_type"] = action_type.value
+                workflow["clarification_reason"] = "Report requires a configured operator callsign"
+                action_type = ActionType.ASK_CLARIFICATION
+            interpretation = f"{caller}: {action_type.value}"
     else:
         interpretation = "Transmission is not explicitly addressed to Satchy"
 
@@ -191,6 +220,8 @@ async def process_transmission_control_plane(
         proposed_payload = {"type": action_type.value}
         if proposed_message is not None:
             proposed_payload["message"] = proposed_message
+        if workflow:
+            proposed_payload["workflow"] = workflow
 
     evaluation = SatchyEvaluation(
         organization_id=transmission.organization_id,
@@ -205,7 +236,12 @@ async def process_transmission_control_plane(
         emergency_candidate=emergency,
         emergency_confidence=emergency_confidence,
         emergency_reason=emergency_reason,
-        operational_context=_profile_context(profile),
+        operational_context={
+            **_profile_context(profile),
+            "addressing_pattern": addressing.pattern,
+            "message_text": addressing.message_text,
+            "intent": action_type.value if action_type else "passive_capture",
+        },
     )
     session.add(evaluation)
     await session.flush()
@@ -224,6 +260,7 @@ async def process_transmission_control_plane(
             reason=interpretation,
             proposed_message=proposed_message,
             structured_payload={
+                **workflow,
                 "emergency_candidate": emergency,
                 "emergency_auto_broadcast": False,
             },
