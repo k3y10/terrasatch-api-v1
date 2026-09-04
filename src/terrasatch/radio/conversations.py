@@ -54,6 +54,8 @@ async def _agent_names(
             select(Agent).where(
                 Agent.id == transmission.agent_id,
                 Agent.organization_id == transmission.organization_id,
+                Agent.site_id == transmission.site_id,
+                Agent.enabled.is_(True),
             )
         )
         if agent is not None:
@@ -114,6 +116,7 @@ async def associate_transmission(
         RadioConversation.status == "open",
         RadioConversation.participant_fingerprint == fingerprint,
         RadioConversation.last_activity_at >= cutoff,
+        RadioConversation.last_activity_at <= activity_at,
     )
     if transmission.channel_id is None:
         query = query.where(RadioConversation.channel_id.is_(None))

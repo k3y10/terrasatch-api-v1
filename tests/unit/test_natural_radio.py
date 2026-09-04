@@ -1,3 +1,5 @@
+from datetime import datetime
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -66,20 +68,24 @@ def test_prose_is_not_addressing(text):
 
 
 async def ingest(session, seed, text, **kwargs):
-    return await ingest_transmission(
-        session,
-        settings=Settings(intelligence_provider="deterministic"),
-        organization_id=seed["organization"].id,
-        payload=TransmissionCreateRequest(
-            site_id=seed["site"].id,
-            agent_id=seed["agent"].id,
-            channel_id=seed["channel"].id,
-            text=text,
-            source="test",
-            source_message_id=str(uuid4()),
-            **kwargs,
-        ),
-    )
+    received_at = kwargs.pop("received_at", None)
+    with patch("terrasatch.radio.service.datetime", wraps=datetime) as clock:
+        if received_at is not None:
+            clock.now.return_value = received_at
+        return await ingest_transmission(
+            session,
+            settings=Settings(intelligence_provider="deterministic"),
+            organization_id=seed["organization"].id,
+            payload=TransmissionCreateRequest(
+                site_id=seed["site"].id,
+                agent_id=seed["agent"].id,
+                channel_id=seed["channel"].id,
+                text=text,
+                source="test",
+                source_message_id=str(uuid4()),
+                **kwargs,
+            ),
+        )
 
 
 async def test_conversation_patterns_and_standalone_capture():
@@ -133,6 +139,91 @@ async def test_conversation_patterns_and_standalone_capture():
             )
             is None
         )
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+def test_colliding_aliases_do_not_choose_a_participant():
+    result = parse_radio_addressing(
+        "Shared to Base.",
+        callsigns=[
+            CallsignCandidate(uuid4(), "Patrol 1", ("Shared",)),
+            CallsignCandidate(uuid4(), "Patrol 2", ("Shared",)),
+            CallsignCandidate(uuid4(), "Base"),
+        ],
+    )
+    assert result.speaker_callsign_id is None
+    assert result.recipient_callsign_id is None
+    assert result.pattern == "unresolved"
+
+
+async def test_conversation_timeout_channel_and_site_isolation():
+    from datetime import UTC, timedelta
+    from types import SimpleNamespace
+
+    from terrasatch.identity.models import Organization, Site
+    from terrasatch.radio.models import Channel
+
+    engine, session, seed = await _seed_session()
+    try:
+        now = datetime(2026, 9, 4, 16, tzinfo=UTC)
+        first, _, _, _ = await ingest(session, seed, "Control Two calling Satchy.", received_at=now)
+        within, _, _, _ = await ingest(
+            session, seed, "Satchy, Control 2.", received_at=now + timedelta(seconds=299)
+        )
+        assert within.conversation_id == first.conversation_id
+        expired, _, _, _ = await ingest(
+            session, seed, "Control 2 to Satchy.", received_at=now + timedelta(seconds=600)
+        )
+        assert expired.conversation_id != first.conversation_id
+        older, _, _, _ = await ingest(
+            session, seed, "Satchy, Control 2.", received_at=now - timedelta(seconds=1)
+        )
+        assert older.conversation_id != first.conversation_id
+        channel = Channel(
+            organization_id=seed["organization"].id,
+            site_id=seed["site"].id,
+            name="Other",
+            slug="other",
+            enabled=True,
+        )
+        session.add(channel)
+        await session.flush()
+        other_channel, _, _, _ = await ingest(
+            session, {**seed, "channel": channel}, "Control 2 to Satchy.", received_at=now
+        )
+        assert other_channel.conversation_id != first.conversation_id
+        for other_org in [False, True]:
+            organization = seed["organization"]
+            if other_org:
+                organization = Organization(
+                    account_id=organization.account_id,
+                    name="Other organization",
+                    slug="other",
+                    enabled=True,
+                )
+                session.add(organization)
+                await session.flush()
+            site = Site(
+                organization_id=organization.id, name="Other site", slug=str(uuid4()), enabled=True
+            )
+            session.add(site)
+            await session.flush()
+            # Original site's Control Two alias must not resolve here.
+            isolated_seed = {
+                **seed,
+                "organization": organization,
+                "site": site,
+                "agent": SimpleNamespace(id=None),
+                "channel": SimpleNamespace(id=None),
+            }
+            isolated, _, _, _ = await ingest(
+                session, isolated_seed, "Control Two calling Satchy.", received_at=now
+            )
+            assert isolated.conversation_id != first.conversation_id
+            assert isolated.speaker_callsign_id is None
+            assert not isolated.addressed_to_agent
     finally:
         await session.close()
         await engine.dispose()

@@ -112,8 +112,10 @@ def parse_radio_addressing(
             speaker = _match(raw_speaker, callsigns, allow_prefix=False) if raw_speaker else None
             # Colliding aliases must not silently select a participant.
             if recipient is None and _normalized(raw_recipient) not in agents:
+                speaker = recipient = None
                 break
             if raw_speaker and speaker is None and _normalized(raw_speaker) not in agents:
+                speaker = recipient = None
                 break
             recipient_text = recipient.name if recipient else _clean(raw_recipient)
             speaker_text = speaker.name if speaker else raw_speaker
