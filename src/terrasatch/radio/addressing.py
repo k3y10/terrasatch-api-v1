@@ -24,6 +24,8 @@ class AddressingResolution:
     recipient_text: str | None
     addressed_to_agent: bool
     confidence: float
+    pattern: str = "unresolved"
+    message_text: str = ""
 
 
 def _clean(value: str) -> str:
@@ -59,18 +61,11 @@ def _match(
             prefixed = allow_prefix and normalized_fragment.startswith(f"{normalized_label} ")
             if exact or prefixed:
                 matches.append((len(normalized_label), candidate))
-    return max(matches, key=lambda item: item[0])[1] if matches else None
-
-
-def _agent_recipient(fragment: str, agent_names: set[str]) -> str | None:
-    normalized_fragment = _normalized(fragment)
-    for name in sorted(agent_names, key=len, reverse=True):
-        normalized_name = _normalized(name)
-        if normalized_fragment == normalized_name or normalized_fragment.startswith(
-            f"{normalized_name} "
-        ):
-            return _clean(name)
-    return None
+    if not matches:
+        return None
+    longest = max(length for length, _ in matches)
+    winners = {candidate.id: candidate for length, candidate in matches if length == longest}
+    return next(iter(winners.values())) if len(winners) == 1 else None
 
 
 def parse_radio_addressing(
@@ -81,55 +76,79 @@ def parse_radio_addressing(
     callsign_hint: str | None = None,
     emergency_terms: set[str] | None = None,
 ) -> AddressingResolution:
-    """Parse recipient-first radio order without delegating boundaries to an LLM."""
+    """Resolve only configured labels at explicit, deterministic radio boundaries."""
+    agents = {_normalized(name) for name in (agent_names or {"Satchy"}) if _clean(name)}
+    labels = {_clean(label) for c in callsigns for label in _labels(c) if _clean(label)}
+    labels.update(_clean(name) for name in (agent_names or {"Satchy"}) if _clean(name))
+    alternatives = "|".join(
+        re.escape(label) for label in sorted(labels, key=lambda x: (-len(x), x))
+    )
+    normalized = " ".join(text.split()).strip()
+    speaker = recipient = None
+    speaker_text = recipient_text = None
+    addressed = False
+    pattern_name = "unresolved"
+    message = normalized
 
-    configured_agents = {name for name in (agent_names or {"Satchy"}) if name.strip()}
-    fragments = [_clean(item) for item in re.split(r"[,;\n]+", text, maxsplit=2)]
-    first = fragments[0] if fragments else ""
-    second = _clean(fragments[1].split(".", maxsplit=1)[0]) if len(fragments) > 1 else ""
+    if alternatives:
+        label = f"(?:{alternatives})"
+        boundary = r"(?=$|[,.;:!?])"
+        patterns = [
+            ("to", rf"(?P<speaker>{label}) to (?P<recipient>{label}){boundary}"),
+            ("calling", rf"(?P<speaker>{label}) calling (?P<recipient>{label}){boundary}"),
+            ("this_is", rf"(?P<recipient>{label}),? this is (?P<speaker>{label}){boundary}"),
+            ("from", rf"(?P<recipient>{label}) from (?P<speaker>{label}){boundary}"),
+            ("for", rf"(?P<speaker>{label}) for (?P<recipient>{label}){boundary}"),
+            ("recipient_first", rf"(?P<recipient>{label})[,;] *(?P<speaker>{label}){boundary}"),
+            ("recipient_only", rf"(?P<recipient>{label}){boundary}"),
+        ]
+        for name, pattern in patterns:
+            match = re.match(pattern, normalized, re.I)
+            if match is None:
+                continue
+            raw_recipient = match.group("recipient")
+            recipient = _match(raw_recipient, callsigns, allow_prefix=False)
+            raw_speaker = match.groupdict().get("speaker")
+            speaker = _match(raw_speaker, callsigns, allow_prefix=False) if raw_speaker else None
+            # Colliding aliases must not silently select a participant.
+            if recipient is None and _normalized(raw_recipient) not in agents:
+                break
+            if raw_speaker and speaker is None and _normalized(raw_speaker) not in agents:
+                break
+            recipient_text = recipient.name if recipient else _clean(raw_recipient)
+            speaker_text = speaker.name if speaker else raw_speaker
+            addressed = _normalized(recipient_text) in agents or (
+                recipient is not None and any(_normalized(x) in agents for x in _labels(recipient))
+            )
+            pattern_name = name
+            message = normalized[match.end() :].lstrip(" ,.;:!?")
+            break
 
-    recipient = _match(first, callsigns, allow_prefix=True)
-    speaker = _match(second, callsigns, allow_prefix=False) if second else None
-    recipient_agent_name = _agent_recipient(first, configured_agents)
-    addressed_to_agent = recipient_agent_name is not None
-
-    recipient_text: str | None = None
-    if recipient is not None:
-        recipient_text = recipient.name
-    elif recipient_agent_name is not None:
-        recipient_text = recipient_agent_name
-    elif first:
-        recipient_text = first[:255]
-
-    speaker_text: str | None = speaker.name if speaker is not None else None
     if speaker_text is None and callsign_hint:
-        speaker_text = _clean(callsign_hint)[:255] or None
-    if speaker_text is None and second:
-        normalized_text = text.casefold()
-        is_emergency = any(
-            term.casefold() in normalized_text for term in (emergency_terms or set()) if term
-        )
-        if not is_emergency and len(second) <= 64:
-            speaker_text = second[:255]
-
-    if addressed_to_agent and recipient is not None and speaker is not None:
-        confidence = 0.94
-    elif addressed_to_agent and speaker_text:
-        confidence = 0.88
-    elif addressed_to_agent:
-        confidence = 0.82
-    elif recipient is not None and speaker is not None:
-        confidence = 0.80
-    elif recipient_text:
-        confidence = 0.55
-    else:
-        confidence = 0.20
-
+        speaker = _match(callsign_hint, callsigns, allow_prefix=False)
+        speaker_text = speaker.name if speaker else _clean(callsign_hint)[:255] or None
+        if pattern_name == "unresolved":
+            pattern_name = "callsign_hint"
+    confidence = (
+        0.94
+        if addressed and recipient and speaker
+        else 0.88
+        if addressed and speaker_text
+        else 0.82
+        if addressed
+        else 0.80
+        if recipient and speaker
+        else 0.55
+        if recipient_text or speaker_text
+        else 0.20
+    )
     return AddressingResolution(
-        speaker_callsign_id=speaker.id if speaker is not None else None,
-        recipient_callsign_id=recipient.id if recipient is not None else None,
+        speaker_callsign_id=speaker.id if speaker else None,
+        recipient_callsign_id=recipient.id if recipient else None,
         speaker_text=speaker_text,
         recipient_text=recipient_text,
-        addressed_to_agent=addressed_to_agent,
+        addressed_to_agent=addressed,
         confidence=confidence,
+        pattern=pattern_name,
+        message_text=message,
     )
