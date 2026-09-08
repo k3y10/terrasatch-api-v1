@@ -45,10 +45,10 @@ python -m pip check
 
 git diff --check
 
-printf '\n[1/7] Ruff\n'
+printf '\n[1/8] Ruff\n'
 ruff check src tests
 
-printf '\n[2/7] Compile/import smoke\n'
+printf '\n[2/8] Compile/import smoke\n'
 python -m compileall -q src tests
 python - <<'PY'
 import terrasatch
@@ -67,10 +67,10 @@ print(f"Spatial resolver: {SpatialResolver.__name__}")
 print(f"Transmission contract: {TransmissionCreateRequest.__name__}")
 PY
 
-printf '\n[3/7] Complete repository regression suite\n'
+printf '\n[3/8] Complete repository regression suite\n'
 pytest
 
-printf '\n[4/7] Satchy intelligence/STT contract coverage gate (>=80%%)\n'
+printf '\n[4/8] Satchy intelligence/STT contract coverage gate (>=80%%)\n'
 pytest \
   tests/unit/test_intelligence.py \
   tests/unit/test_ollama_provider.py \
@@ -86,10 +86,18 @@ pytest \
 
 printf '\nNote: full-package coverage is not used as the 0.3 release gate because legacy admin/UI/CLI\nmodules predate the intelligence work and were not previously covered to the repository-wide 80%%\ntarget. The complete regression suite above still runs every repository test; the coverage gate\napplies to the TerraEngine/model/spatial/STT-contract surface introduced or materially changed.\n'
 
-printf '\n[5/7] Migration graph smoke\n'
+printf '\n[5/8] Edge command lifecycle coverage gate (>=80%%)\n'
+COVERAGE_FILE="$QA_CACHE_ROOT/api-command-lifecycle.coverage" pytest \
+  --cov=terrasatch.edge.command_service \
+  --cov=terrasatch.edge.schemas \
+  --cov=terrasatch.actions.state \
+  --cov-report=term-missing \
+  --cov-fail-under=80
+
+printf '\n[6/8] Migration graph smoke\n'
 alembic heads
 
-printf '\n[6/7] CLI/OpenAPI import smoke\n'
+printf '\n[7/8] CLI/OpenAPI import smoke\n'
 terrasatch --help >/dev/null
 python - <<'PY'
 from terrasatch.config import Settings
@@ -107,7 +115,7 @@ if missing:
 print("OpenAPI smoke OK")
 PY
 
-printf '\n[7/7] Deterministic fallback smoke\n'
+printf '\n[8/8] Deterministic fallback smoke\n'
 python - <<'PY'
 import asyncio
 from terrasatch.config import Settings
@@ -128,3 +136,4 @@ asyncio.run(main())
 PY
 
 printf '\nPASS: TerraSatch API full local QA completed successfully.\n'
+

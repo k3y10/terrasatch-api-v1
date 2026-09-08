@@ -57,10 +57,14 @@ def transition_action(
     if expires_at is not None and expires_at.utcoffset() is None:
         expires_at = expires_at.replace(tzinfo=UTC)
     if expires_at is not None and expires_at <= changed_at:
-        if target != ActionStatus.EXPIRED:
+        reporting_started_operation = current == ActionStatus.EXECUTING and target in {
+            ActionStatus.COMPLETED, ActionStatus.FAILED,
+        }
+        if target != ActionStatus.EXPIRED and not reporting_started_operation:
             raise InvalidConfiguration("Expired Satchy actions cannot advance")
     action.status = target.value
     if target == ActionStatus.APPROVED:
         action.approved_at = changed_at
     if target in {ActionStatus.COMPLETED, ActionStatus.FAILED}:
         action.executed_at = changed_at
+

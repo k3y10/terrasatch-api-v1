@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.models import ActionStatus, SatchyAction
 from terrasatch.actions.state import transition_action
+from terrasatch.admin.ai_channel import rf_reply_policy_allows
 from terrasatch.edge.models import EdgeCommand
 from terrasatch.edge.service import get_device_for_api_key
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
@@ -133,7 +134,7 @@ async def list_device_commands(
     )
     available: list[EdgeCommand] = []
     for command in commands:
-        if _deadline_passed(command.expires_at, now):
+        if command.status != "acknowledged" and _deadline_passed(command.expires_at, now):
             await _expire_command(session, command, now)
             continue
         if command.status == "queued":
@@ -171,6 +172,13 @@ async def acknowledge_command(
             f"Edge command in status '{command.status}' cannot be acknowledged"
         )
 
+    if (command.payload or {}).get("reply_route") == "rf":
+        device = await get_device_for_api_key(
+            session, organization_id=organization_id, api_key_id=api_key_id,
+        )
+        if not rf_reply_policy_allows(device):
+            raise InvalidConfiguration("RF reply policy was revoked before acknowledgement")
+
     command.status = "acknowledged"
     command.acknowledged_at = command.acknowledged_at or now
     outbound, action = await _linked_records(session, command=command)
@@ -205,10 +213,11 @@ async def complete_command(
         for_update=True,
     )
     now = datetime.now(UTC)
-    _ensure_not_expired(command, now)
-    if result not in {"simulated", "failed"}:
-        raise InvalidConfiguration("Edge command result must be 'simulated' or 'failed'")
-    if command.status == "completed":
+    if result not in {"simulated", "transmitted", "failed"}:
+        raise InvalidConfiguration("Unsupported Edge command result")
+    # A result is evidence about an already acknowledged operation. Accept late
+    # results and identical retries; expiration must never force an RF replay.
+    if command.status in {"completed", "failed"}:
         previous = str((command.payload or {}).get("result", "simulated"))
         if previous != result:
             raise InvalidConfiguration("Completed Edge command result cannot be changed")
@@ -218,16 +227,28 @@ async def complete_command(
 
     outbound, action = await _linked_records(session, command=command)
     payload = dict(command.payload or {})
+    if result == "transmitted" and (
+        command.command_type != "radio_reply"
+        or payload.get("simulate_only") is not False
+        or payload.get("reply_route") != "rf"
+        or outbound is None or outbound.reply_route != "rf"
+        or action is None or ActionStatus(action.status) != ActionStatus.EXECUTING
+    ):
+        raise InvalidConfiguration("Only acknowledged approved RF actions can report transmitted")
+    if result == "simulated" and payload.get("simulate_only") is not True:
+        raise InvalidConfiguration("RF execution cannot be reported as simulated")
     payload["result"] = result
     if detail:
         payload["result_detail"] = detail[:2000]
     command.payload = payload
     command.completed_at = now
 
-    if result == "simulated":
+    if result in {"simulated", "transmitted"}:
         command.status = "completed"
         if outbound is not None:
-            outbound.status = OutboundStatus.SIMULATED.value
+            outbound.status = result
+            if result == "transmitted":
+                outbound.transmitted_at = now
         if action is not None and ActionStatus(action.status) == ActionStatus.EXECUTING:
             transition_action(action, ActionStatus.COMPLETED, now=now)
     else:
@@ -239,3 +260,4 @@ async def complete_command(
             transition_action(action, ActionStatus.FAILED, now=now)
     await session.flush()
     return command
+
