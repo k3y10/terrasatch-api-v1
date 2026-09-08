@@ -82,6 +82,12 @@ def _device_response(device: EdgeDevice) -> DeviceResponse:
 
 
 def _command_response(command: EdgeCommand) -> EdgeCommandResponse:
+    def utc(value: datetime | None) -> datetime | None:
+        # Stored timestamps represent UTC even on drivers that return naive values.
+        return (
+            value.replace(tzinfo=UTC) if value is not None and value.utcoffset() is None else value
+        )
+
     return EdgeCommandResponse(
         id=command.id,
         organization_id=command.organization_id,
@@ -91,10 +97,10 @@ def _command_response(command: EdgeCommand) -> EdgeCommandResponse:
         payload=command.payload,
         priority=command.priority,
         status=command.status,
-        created_at=command.created_at,
-        expires_at=command.expires_at,
-        acknowledged_at=command.acknowledged_at,
-        completed_at=command.completed_at,
+        created_at=utc(command.created_at),
+        expires_at=utc(command.expires_at),
+        acknowledged_at=utc(command.acknowledged_at),
+        completed_at=utc(command.completed_at),
     )
 
 
@@ -233,6 +239,22 @@ async def get_edge_config(
         ),
     )
     return device.remote_config
+
+
+@router.get("/command-capabilities", response_model=dict[str, object])
+async def get_command_capabilities(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_scope("edge:connect"))],
+) -> dict[str, object]:
+    await _run_database(
+        request.app.state.settings,
+        lambda session: get_device_for_api_key(
+            session,
+            organization_id=principal.organization_id,
+            api_key_id=principal.api_key_id,
+        ),
+    )
+    return {"version": 1, "result_statuses": ["simulated", "transmitted", "failed"]}
 
 
 @router.get("/commands", response_model=list[EdgeCommandResponse])
