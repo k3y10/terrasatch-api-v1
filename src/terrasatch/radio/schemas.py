@@ -109,6 +109,20 @@ class ActivationMetadata(BaseModel):
         return normalized or None
 
 
+class RepeaterMetadata(BaseModel):
+    """Untrusted discovery provenance, never a source of tenant or TX authorization."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    provider: str | None = Field(default=None, max_length=64)
+    provider_id: str | None = Field(default=None, max_length=128)
+    name: str | None = Field(default=None, max_length=200)
+    output_frequency_hz: int | None = Field(default=None, gt=0)
+    input_frequency_hz: int | None = Field(default=None, gt=0)
+    offset_hz: int | None = None
+    location_text: str | None = Field(default=None, max_length=300)
+    last_verified_at: str | None = Field(default=None, max_length=40)
+
+
 class RfMetadata(BaseModel):
     """Physical receiver provenance; unavailable measurements remain null."""
 
@@ -118,6 +132,11 @@ class RfMetadata(BaseModel):
     receiver_name: str | None = Field(default=None, max_length=255)
     sdr_index: int | None = Field(default=None, ge=0)
     sdr_serial: str | None = Field(default=None, max_length=255)
+    modulation: str | None = Field(default=None, max_length=32)
+    target_id: str | None = Field(default=None, max_length=100)
+    target_name: str | None = Field(default=None, max_length=200)
+    source_type: str | None = Field(default=None, max_length=64)
+    repeater: RepeaterMetadata | None = None
     radio_profile: str | None = Field(default=None, max_length=100)
     channel: int | None = Field(default=None, ge=1)
     frequency_hz: int | None = Field(default=None, gt=0)
