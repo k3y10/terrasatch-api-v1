@@ -1,0 +1,222 @@
+"""TerraSatch self-service billing, activation, and Stripe webhook endpoints."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import Annotated, TypeVar
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from terrasatch.auth.dependencies import Principal, require_any_scope
+from terrasatch.billing.plans import get_plan
+from terrasatch.billing.schemas import (
+    ActivationRequest,
+    ActivationResponse,
+    BillingPlanResponse,
+    CheckoutRequest,
+    CheckoutSessionResponse,
+    CustomerPortalResponse,
+    SubscriptionResponse,
+    WebhookResponse,
+)
+from terrasatch.billing.service import (
+    activate_owner,
+    create_signup,
+    get_stripe_customer_id,
+    get_subscription_for_organization,
+    mark_checkout_created,
+    process_verified_event,
+    public_plans,
+)
+from terrasatch.billing.stripe_gateway import StripeGateway
+from terrasatch.config import Settings
+from terrasatch.database.session import create_session_factory
+from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
+
+router = APIRouter(prefix="/billing", tags=["billing"])
+Result = TypeVar("Result")
+
+
+async def _run_database(
+    settings: Settings,
+    operation: Callable[[AsyncSession], Awaitable[Result]],
+) -> Result:
+    session_factory = create_session_factory(settings)
+    async with session_factory() as session:
+        try:
+            result = await operation(session)
+            await session.commit()
+            return result
+        except Exception:
+            await session.rollback()
+            raise
+
+
+def _gateway(settings: Settings) -> StripeGateway:
+    return StripeGateway(settings)
+
+
+@router.get("/plans", response_model=list[BillingPlanResponse])
+async def get_billing_plans() -> list[BillingPlanResponse]:
+    """Return customer-safe plan and entitlement definitions without Stripe IDs."""
+
+    return [BillingPlanResponse.model_validate(plan) for plan in public_plans()]
+
+
+@router.post(
+    "/checkout",
+    response_model=CheckoutSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_billing_checkout(
+    payload: CheckoutRequest,
+    request: Request,
+) -> CheckoutSessionResponse:
+    """Create a 30-day subscription trial in Stripe Checkout without trusting price IDs."""
+
+    settings: Settings = request.app.state.settings
+    stripe = _gateway(settings)
+    plan = get_plan(payload.plan_code)
+    recurring_amount = plan.amount_cents(payload.billing_interval)
+    if recurring_amount is None:
+        raise InvalidConfiguration("The selected plan is not available for self-service checkout")
+
+    session_factory = create_session_factory(settings)
+    async with session_factory() as database:
+        try:
+            signup = await create_signup(database, payload=payload, settings=settings)
+            checkout = await stripe.create_checkout(
+                signup_id=str(signup.id),
+                email=signup.email,
+                plan=plan,
+                interval=payload.billing_interval,
+                expires_at=signup.expires_at,
+            )
+            await mark_checkout_created(
+                database,
+                signup_id=signup.id,
+                checkout_session_id=checkout.session_id,
+                checkout_expires_at=checkout.expires_at,
+            )
+            await database.commit()
+        except Exception:
+            await database.rollback()
+            raise
+
+    return CheckoutSessionResponse(
+        signup_id=signup.id,
+        checkout_session_id=checkout.session_id,
+        checkout_url=checkout.url,
+        expires_at=checkout.expires_at,
+        plan_code=payload.plan_code,
+        billing_interval=payload.billing_interval,
+        trial_days=plan.trial_days,
+        recurring_amount_cents=recurring_amount,
+    )
+
+
+@router.get("/subscription", response_model=SubscriptionResponse)
+async def get_billing_subscription(
+    request: Request,
+    principal: Annotated[
+        Principal,
+        Depends(require_any_scope("read:billing", "write:billing")),
+    ],
+) -> SubscriptionResponse:
+    """Return the authenticated organization's TerraSatch subscription and entitlements."""
+
+    return await _run_database(
+        request.app.state.settings,
+        lambda session: get_subscription_for_organization(
+            session,
+            organization_id=principal.organization_id,
+        ),
+    )
+
+
+@router.post("/portal", response_model=CustomerPortalResponse)
+async def post_billing_portal(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_any_scope("write:billing"))],
+) -> CustomerPortalResponse:
+    """Create a short-lived Stripe Customer Portal session for this organization."""
+
+    settings: Settings = request.app.state.settings
+    customer_id = await _run_database(
+        settings,
+        lambda session: get_stripe_customer_id(
+            session,
+            organization_id=principal.organization_id,
+        ),
+    )
+    url = await _gateway(settings).create_customer_portal(stripe_customer_id=customer_id)
+    return CustomerPortalResponse(url=url)
+
+
+@router.post("/activate", response_model=ActivationResponse)
+async def post_billing_activation(
+    payload: ActivationRequest,
+    request: Request,
+) -> ActivationResponse:
+    """Consume a single-use activation token and set the initial portal password."""
+
+    organization_id = await _run_database(
+        request.app.state.settings,
+        lambda session: activate_owner(
+            session,
+            token=payload.token,
+            password=payload.password,
+        ),
+    )
+    return ActivationResponse(activated=True, organization_id=organization_id)
+
+
+@router.post("/stripe/webhook", response_model=WebhookResponse)
+async def post_stripe_webhook(
+    request: Request,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
+) -> WebhookResponse:
+    """Verify and apply Stripe lifecycle events with a persistent idempotency ledger."""
+
+    if not stripe_signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe-Signature header required",
+        )
+    settings: Settings = request.app.state.settings
+    stripe = _gateway(settings)
+    raw_payload = await request.body()
+    event = stripe.construct_event(payload=raw_payload, signature=stripe_signature)
+    if bool(event.get("livemode", False)):
+        raise ProviderUnavailable(
+            "Live Stripe events are disabled while TerraSatch billing is in test rollout"
+        )
+
+    event_type = str(event.get("type") or "")
+    subscription_snapshot = None
+    if event_type == "checkout.session.completed":
+        data = event.get("data")
+        checkout = data.get("object") if isinstance(data, dict) else None
+        subscription_id = None
+        if isinstance(checkout, dict):
+            subscription = checkout.get("subscription")
+            if isinstance(subscription, str):
+                subscription_id = subscription
+            elif isinstance(subscription, dict) and subscription.get("id"):
+                subscription_id = str(subscription["id"])
+        if not subscription_id:
+            raise InvalidConfiguration("Completed Checkout is missing a subscription")
+        subscription_snapshot = await stripe.retrieve_subscription(subscription_id)
+
+    result = await _run_database(
+        settings,
+        lambda session: process_verified_event(
+            session,
+            event=event,
+            raw_payload=raw_payload,
+            settings=settings,
+            subscription_snapshot=subscription_snapshot,
+        ),
+    )
+    return WebhookResponse(received=True, duplicate=result.duplicate)
