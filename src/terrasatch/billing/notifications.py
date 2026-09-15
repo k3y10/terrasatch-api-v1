@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -124,10 +125,8 @@ async def deliver_billing_email(
 
     activation_url = None
     if activation_token:
-        separator = "&" if "?" in settings.billing_activation_url else "?"
-        activation_url = (
-            f"{settings.billing_activation_url}{separator}token={activation_token}"
-        )
+        base_url = str(settings.billing_activation_url).split("#", 1)[0]
+        activation_url = f"{base_url}#token={quote(activation_token, safe='')}"
 
     payload = {
         "eventId": event_id,
