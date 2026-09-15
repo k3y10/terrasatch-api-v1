@@ -211,9 +211,9 @@ async def post_stripe_webhook(
     stripe = _gateway(settings)
     raw_payload = await request.body()
     event = stripe.construct_event(payload=raw_payload, signature=stripe_signature)
-    if bool(event.get("livemode", False)):
+    if bool(event.get("livemode", False)) and not settings.billing_allow_livemode:
         raise ProviderUnavailable(
-            "Live Stripe events are disabled while TerraSatch billing is in test rollout"
+            "Live Stripe events are disabled until TerraSatch explicitly enables live billing"
         )
 
     event_id = str(event.get("id") or "")
