@@ -9,6 +9,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_any_scope
+from terrasatch.billing.notifications import (
+    deliver_billing_email,
+    get_billing_email_context,
+    notification_kind,
+)
 from terrasatch.billing.plans import get_plan
 from terrasatch.billing.schemas import (
     ActivationRequest,
@@ -177,7 +182,7 @@ async def post_stripe_webhook(
     request: Request,
     stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
 ) -> WebhookResponse:
-    """Verify and apply Stripe lifecycle events with a persistent idempotency ledger."""
+    """Verify and apply Stripe lifecycle events with transactional email retry safety."""
 
     if not stripe_signature:
         raise HTTPException(
@@ -193,7 +198,11 @@ async def post_stripe_webhook(
             "Live Stripe events are disabled while TerraSatch billing is in test rollout"
         )
 
+    event_id = str(event.get("id") or "")
     event_type = str(event.get("type") or "")
+    if not event_id:
+        raise InvalidConfiguration("Stripe webhook event is missing an ID")
+
     subscription_snapshot = None
     if event_type == "checkout.session.completed":
         data = event.get("data")
@@ -209,14 +218,37 @@ async def post_stripe_webhook(
             raise InvalidConfiguration("Completed Checkout is missing a subscription")
         subscription_snapshot = await stripe.retrieve_subscription(subscription_id)
 
-    result = await _run_database(
-        settings,
-        lambda session: process_verified_event(
-            session,
-            event=event,
-            raw_payload=raw_payload,
-            settings=settings,
-            subscription_snapshot=subscription_snapshot,
-        ),
-    )
+    session_factory = create_session_factory(settings)
+    async with session_factory() as database:
+        try:
+            result = await process_verified_event(
+                database,
+                event=event,
+                raw_payload=raw_payload,
+                settings=settings,
+                subscription_snapshot=subscription_snapshot,
+            )
+            if not result.duplicate and result.organization_id is not None:
+                context = await get_billing_email_context(
+                    database,
+                    organization_id=result.organization_id,
+                )
+                kind = notification_kind(
+                    stripe_event_type=event_type,
+                    activation_token=result.activation_token,
+                    context=context,
+                )
+                if context is not None and kind is not None:
+                    await deliver_billing_email(
+                        settings=settings,
+                        event_id=event_id,
+                        kind=kind,
+                        context=context,
+                        activation_token=result.activation_token,
+                    )
+            await database.commit()
+        except Exception:
+            await database.rollback()
+            raise
+
     return WebhookResponse(received=True, duplicate=result.duplicate)
