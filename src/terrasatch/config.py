@@ -37,7 +37,11 @@ class Settings(BaseSettings):
 
     environment: Environment = Field(
         default=Environment.LOCAL,
-        validation_alias=AliasChoices("TERRASATCH_ENV", "TERRASATCH_ENVIRONMENT"),
+        validation_alias=AliasChoices(
+            "environment",
+            "TERRASATCH_ENV",
+            "TERRASATCH_ENVIRONMENT",
+        ),
     )
     deployment_name: str = Field(default="local", min_length=1, max_length=64)
     build_sha: str = Field(default="unknown", min_length=1, max_length=64)
@@ -88,11 +92,19 @@ class Settings(BaseSettings):
     billing_email_webhook_secret: SecretStr | None = None
     stripe_secret_key: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("TERRASATCH_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY"),
+        validation_alias=AliasChoices(
+            "stripe_secret_key",
+            "TERRASATCH_STRIPE_SECRET_KEY",
+            "STRIPE_SECRET_KEY",
+        ),
     )
     stripe_webhook_secret: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("TERRASATCH_STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET"),
+        validation_alias=AliasChoices(
+            "stripe_webhook_secret",
+            "TERRASATCH_STRIPE_WEBHOOK_SECRET",
+            "STRIPE_WEBHOOK_SECRET",
+        ),
     )
 
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
