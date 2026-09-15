@@ -72,23 +72,27 @@ class PlanDefinition:
         }
 
 
+# Pricing mirrors the TerraSatch pitch-deck / financial-model base assumptions:
+# Individual $49/mo, Team $500/mo, Annual Site $50K/yr, Enterprise $125K/yr.
+# The larger annual contracts remain scoped rather than self-service because their
+# final value depends on sites, integrations, retention, security, and support.
 PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     PlanCode.FIELD: PlanDefinition(
         code=PlanCode.FIELD,
-        name="Field",
-        description="For small professional field teams and early operational deployments.",
-        monthly_amount_cents=9_900,
-        annual_amount_cents=99_000,
+        name="Individual",
+        description="For one field professional using TerraListen as a personal operational record.",
+        monthly_amount_cents=4_900,
+        annual_amount_cents=None,
         trial_days=30,
         self_service=True,
         recommended=False,
-        monthly_lookup_key="terrasatch_field_monthly_v1",
-        annual_lookup_key="terrasatch_field_annual_v1",
+        monthly_lookup_key="terrasatch_individual_monthly_v1",
+        annual_lookup_key=None,
         entitlements=Entitlements(
             max_sites=1,
-            max_members=3,
-            max_edge_devices=2,
-            max_channels=4,
+            max_members=1,
+            max_edge_devices=1,
+            max_channels=1,
             included_processing_hours=15,
             retention_days=14,
             api_access=False,
@@ -98,14 +102,14 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     PlanCode.TEAM: PlanDefinition(
         code=PlanCode.TEAM,
         name="Team",
-        description="For active teams that need shared TerraListen workflows and reporting.",
-        monthly_amount_cents=34_900,
-        annual_amount_cents=349_000,
+        description="For a working crew sharing radios, channels, maps, logs, and operational context.",
+        monthly_amount_cents=50_000,
+        annual_amount_cents=None,
         trial_days=30,
         self_service=True,
         recommended=True,
         monthly_lookup_key="terrasatch_team_monthly_v1",
-        annual_lookup_key="terrasatch_team_annual_v1",
+        annual_lookup_key=None,
         entitlements=Entitlements(
             max_sites=1,
             max_members=10,
@@ -119,17 +123,17 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     ),
     PlanCode.OPERATIONS: PlanDefinition(
         code=PlanCode.OPERATIONS,
-        name="Operations",
-        description="For multi-team operational programs that need broader capacity and support.",
-        monthly_amount_cents=99_900,
-        annual_amount_cents=999_000,
-        trial_days=30,
-        self_service=True,
+        name="Annual Site",
+        description="Recurring site, team, or department license after the workflow is proven.",
+        monthly_amount_cents=None,
+        annual_amount_cents=5_000_000,
+        trial_days=0,
+        self_service=False,
         recommended=False,
-        monthly_lookup_key="terrasatch_operations_monthly_v1",
-        annual_lookup_key="terrasatch_operations_annual_v1",
+        monthly_lookup_key=None,
+        annual_lookup_key=None,
         entitlements=Entitlements(
-            max_sites=3,
+            max_sites=1,
             max_members=30,
             max_edge_devices=20,
             max_channels=40,
@@ -141,10 +145,10 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     ),
     PlanCode.ENTERPRISE: PlanDefinition(
         code=PlanCode.ENTERPRISE,
-        name="Organization",
-        description="Custom annual scope for multi-site, high-assurance, or integrated deployments.",
+        name="Enterprise",
+        description="Higher-touch multi-site, integrated, private-hosting, security, and support deployments.",
         monthly_amount_cents=None,
-        annual_amount_cents=None,
+        annual_amount_cents=12_500_000,
         trial_days=0,
         self_service=False,
         recommended=False,
