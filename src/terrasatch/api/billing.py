@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_any_scope
-from terrasatch.billing.models import BillingSignup
 from terrasatch.billing.notifications import (
     deliver_billing_email,
     get_billing_email_context,
@@ -64,20 +61,6 @@ async def _run_database(
             raise
 
 
-async def _expire_stale_checkout_attempts(session: AsyncSession, *, email: str) -> None:
-    """Allow a new Checkout after an abandoned pending/session attempt actually expires."""
-
-    await session.execute(
-        update(BillingSignup)
-        .where(
-            BillingSignup.email == email,
-            BillingSignup.status.in_(["pending", "checkout_created"]),
-            BillingSignup.expires_at <= datetime.now(UTC),
-        )
-        .values(status="expired")
-    )
-
-
 def _gateway(settings: Settings) -> StripeGateway:
     return StripeGateway(settings)
 
@@ -113,28 +96,29 @@ async def post_billing_checkout(
         email=payload.email,
     )
 
-    session_factory = create_session_factory(settings)
-    async with session_factory() as database:
-        try:
-            await _expire_stale_checkout_attempts(database, email=payload.email)
-            signup = await create_signup(database, payload=payload, settings=settings)
-            checkout = await stripe.create_checkout(
-                signup_id=str(signup.id),
-                email=signup.email,
-                plan=plan,
-                interval=payload.billing_interval,
-                expires_at=signup.expires_at,
-            )
-            await mark_checkout_created(
-                database,
-                signup_id=signup.id,
-                checkout_session_id=checkout.session_id,
-                checkout_expires_at=checkout.expires_at,
-            )
-            await database.commit()
-        except Exception:
-            await database.rollback()
-            raise
+    # Persist/resume the signup intent before making the external Stripe request.
+    # If Stripe succeeds but the later local write fails, a retry reuses this
+    # signup ID and therefore the same Stripe idempotency key/session.
+    signup = await _run_database(
+        settings,
+        lambda session: create_signup(session, payload=payload, settings=settings),
+    )
+    checkout = await stripe.create_checkout(
+        signup_id=str(signup.id),
+        email=signup.email,
+        plan=plan,
+        interval=payload.billing_interval,
+        expires_at=signup.expires_at,
+    )
+    await _run_database(
+        settings,
+        lambda session: mark_checkout_created(
+            session,
+            signup_id=signup.id,
+            checkout_session_id=checkout.session_id,
+            checkout_expires_at=checkout.expires_at,
+        ),
+    )
 
     return CheckoutSessionResponse(
         signup_id=signup.id,
