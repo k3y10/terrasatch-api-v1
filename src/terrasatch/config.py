@@ -59,6 +59,8 @@ class Settings(BaseSettings):
 
     # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
+    # Live-mode Stripe webhooks remain a separate explicit production safety gate.
+    billing_allow_livemode: bool = False
     billing_grace_days: int = Field(default=7, ge=1, le=30)
     billing_checkout_ttl_minutes: int = Field(default=120, ge=30, le=1440)
     billing_activation_ttl_hours: int = Field(default=24, ge=1, le=168)
@@ -68,7 +70,7 @@ class Settings(BaseSettings):
         max_length=1000,
     )
     billing_cancel_url: str = Field(
-        default="https://terrasatch.com/#pricing",
+        default="https://terrasatch.com/#cost",
         min_length=10,
         max_length=1000,
     )
