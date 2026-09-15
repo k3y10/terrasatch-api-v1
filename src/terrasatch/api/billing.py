@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_any_scope
@@ -21,6 +21,7 @@ from terrasatch.billing.schemas import (
     BillingPlanResponse,
     CheckoutRequest,
     CheckoutSessionResponse,
+    CheckoutStatusResponse,
     CustomerPortalResponse,
     SubscriptionResponse,
     WebhookResponse,
@@ -34,6 +35,7 @@ from terrasatch.billing.service import (
     process_verified_event,
     public_plans,
 )
+from terrasatch.billing.status import get_checkout_status
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
@@ -118,6 +120,22 @@ async def post_billing_checkout(
         billing_interval=payload.billing_interval,
         trial_days=plan.trial_days,
         recurring_amount_cents=recurring_amount,
+    )
+
+
+@router.get("/checkout/status", response_model=CheckoutStatusResponse)
+async def get_billing_checkout_status(
+    request: Request,
+    session_id: Annotated[str, Query(min_length=10, max_length=255)],
+) -> CheckoutStatusResponse:
+    """Confirm local webhook provisioning after Stripe redirects the browser back."""
+
+    return await _run_database(
+        request.app.state.settings,
+        lambda session: get_checkout_status(
+            session,
+            checkout_session_id=session_id,
+        ),
     )
 
 
