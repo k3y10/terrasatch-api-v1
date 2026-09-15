@@ -54,7 +54,13 @@ class CheckoutRequest(BaseModel):
     def normalize_email(cls, value: str) -> str:
         normalized = value.strip().casefold()
         local, separator, domain = normalized.partition("@")
-        if not separator or not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        if (
+            not separator
+            or not local
+            or "." not in domain
+            or domain.startswith(".")
+            or domain.endswith(".")
+        ):
             raise ValueError("A valid email address is required")
         return normalized
 
@@ -69,6 +75,18 @@ class CheckoutSessionResponse(BaseModel):
     trial_days: int
     amount_due_today_cents: Literal[0] = 0
     recurring_amount_cents: int
+
+
+class CheckoutStatusResponse(BaseModel):
+    state: Literal["processing", "ready", "expired"]
+    plan_code: PlanCode
+    billing_interval: BillingInterval
+    recurring_amount_cents: int
+    subscription_status: str | None
+    service_access: Literal["full", "grace", "restricted", "legacy"] | None
+    trial_ends_at: datetime | None
+    current_period_end: datetime | None
+    activation_required: bool
 
 
 class SubscriptionResponse(BaseModel):
