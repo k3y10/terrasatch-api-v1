@@ -91,9 +91,12 @@ async def create_site(
     name: str,
     organization_selector: str | None = None,
 ) -> Site:
-    """Create a site under the explicitly resolved organization."""
+    """Create a site under the resolved organization and enforce managed plan limits."""
 
     organization = await resolve_organization(session, organization_selector)
+    from terrasatch.billing.entitlements import enforce_site_slot
+
+    await enforce_site_slot(session, organization_id=organization.id)
     slug = slugify(name)
     existing = await session.scalar(
         select(Site).where(Site.organization_id == organization.id, Site.slug == slug)
