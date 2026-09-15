@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from terrasatch.actions import models as action_models
 from terrasatch.auth import models as auth_models
+from terrasatch.billing import models as billing_models
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.edge import models as edge_models
@@ -24,6 +25,7 @@ from terrasatch.radio import models as radio_models
 _ = (
     action_models,
     auth_models,
+    billing_models,
     edge_models,
     identity_models,
     masterdata_models,
