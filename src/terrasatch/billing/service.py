@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import hash_admin_password
@@ -159,7 +159,7 @@ async def create_signup(
     payload: CheckoutRequest,
     settings: Settings,
 ) -> BillingSignup:
-    """Create one bounded pre-Checkout record and block repeated self-service trials."""
+    """Create or resume one bounded pre-Checkout record and block repeated trials."""
 
     plan = get_plan(payload.plan_code)
     if not plan.self_service:
@@ -171,22 +171,62 @@ async def create_signup(
             "An account already exists for this email. Sign in or contact TerraSatch to manage billing."
         )
 
+    now = datetime.now(UTC)
+    await session.execute(
+        update(BillingSignup)
+        .where(
+            BillingSignup.email == payload.email,
+            BillingSignup.status.in_(["pending", "checkout_created"]),
+            BillingSignup.expires_at <= now,
+        )
+        .values(status="expired")
+    )
+
+    completed = await session.scalar(
+        select(BillingSignup)
+        .where(
+            BillingSignup.email == payload.email,
+            BillingSignup.status == "completed",
+        )
+        .order_by(BillingSignup.created_at.desc())
+        .limit(1)
+    )
+    if completed is not None:
+        raise ResourceConflict(
+            "A TerraSatch trial already exists for this email.",
+            details={"signup_id": str(completed.id), "status": completed.status},
+        )
+
     existing_signup = await session.scalar(
         select(BillingSignup)
         .where(
             BillingSignup.email == payload.email,
-            BillingSignup.status.in_(["pending", "checkout_created", "completed"]),
+            BillingSignup.status.in_(["pending", "checkout_created"]),
+            BillingSignup.expires_at > now,
         )
         .order_by(BillingSignup.created_at.desc())
         .limit(1)
     )
     if existing_signup is not None:
-        raise ResourceConflict(
-            "A TerraSatch trial or checkout already exists for this email.",
-            details={"signup_id": str(existing_signup.id), "status": existing_signup.status},
+        same_attempt = (
+            existing_signup.organization_name == payload.organization_name
+            and existing_signup.plan_code == payload.plan_code.value
+            and existing_signup.billing_interval == payload.billing_interval.value
         )
+        if not same_attempt:
+            raise ResourceConflict(
+                "An active TerraSatch Checkout already exists for this email. Finish or let it expire before changing the subscription selection.",
+                details={
+                    "signup_id": str(existing_signup.id),
+                    "status": existing_signup.status,
+                    "expires_at": _as_utc(existing_signup.expires_at).isoformat()
+                    if _as_utc(existing_signup.expires_at)
+                    else None,
+                },
+            )
+        return existing_signup
 
-    expires_at = datetime.now(UTC) + timedelta(minutes=settings.billing_checkout_ttl_minutes)
+    expires_at = now + timedelta(minutes=settings.billing_checkout_ttl_minutes)
     signup = BillingSignup(
         email=payload.email,
         display_name=payload.display_name,
@@ -211,6 +251,8 @@ async def mark_checkout_created(
     signup = await session.get(BillingSignup, signup_id)
     if signup is None:
         raise ResourceNotFound("Billing signup was not found")
+    if signup.status == "completed":
+        return signup
     signup.stripe_checkout_session_id = checkout_session_id
     signup.status = "checkout_created"
     signup.expires_at = checkout_expires_at
