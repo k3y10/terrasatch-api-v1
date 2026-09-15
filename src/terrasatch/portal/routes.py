@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.device_status import device_status_payload, fleet_summary
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token
+from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
+from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.service import list_devices
@@ -20,7 +22,9 @@ from terrasatch.identity.access import (
     authenticate_user,
     get_user_organization_access,
     list_user_access,
+    role_allows,
 )
+from terrasatch.identity.models import MembershipRole
 from terrasatch.organizations.service import list_sites
 from terrasatch.portal.ui import render_portal, render_portal_login
 
@@ -163,6 +167,13 @@ async def portal_dashboard(
     )
     devices = [device_status_payload(device) for device in edge_devices]
     summary = fleet_summary(devices)
+    subscription = await _run_database(
+        settings,
+        lambda session: get_subscription_for_organization(
+            session,
+            organization_id=selected.organization_id,
+        ),
+    )
 
     return HTMLResponse(
         render_portal(
@@ -175,9 +186,51 @@ async def portal_dashboard(
             sites=sites,
             devices=devices,
             summary=summary,
+            billing=subscription.model_dump(mode="json"),
+            billing_manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
             csrf_token=issue_csrf_token(request.session),
         )
     )
+
+
+@router.post("/portal/billing", include_in_schema=False, response_model=None)
+async def portal_billing(
+    request: Request,
+    organization: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Open Stripe Customer Portal only for an authorized organization admin/owner."""
+
+    settings: Settings = request.app.state.settings
+    user_id = _require_user(request, settings)
+    _verify_csrf(request, csrf_token)
+    try:
+        organization_id = UUID(organization)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid organization") from error
+
+    selected = await _run_database(
+        settings,
+        lambda session: get_user_organization_access(
+            session,
+            user_id=user_id,
+            organization_id=organization_id,
+        ),
+    )
+    if not role_allows(selected.role, MembershipRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization admin or owner access is required to manage billing",
+        )
+    customer_id = await _run_database(
+        settings,
+        lambda session: get_stripe_customer_id(
+            session,
+            organization_id=organization_id,
+        ),
+    )
+    url = await StripeGateway(settings).create_customer_portal(stripe_customer_id=customer_id)
+    return RedirectResponse(url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/portal/fleet-status", include_in_schema=False, response_model=None)
