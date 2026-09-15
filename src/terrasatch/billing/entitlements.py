@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.billing.service import get_subscription_for_organization
 from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import ResourceConflict
-from terrasatch.identity.models import Membership
+from terrasatch.identity.models import Membership, Site
 from terrasatch.radio.models import Channel
-from terrasatch.identity.models import Site
 
 
 def _limit_error(*, resource: str, current: int, limit: int, plan: str | None) -> ResourceConflict:
