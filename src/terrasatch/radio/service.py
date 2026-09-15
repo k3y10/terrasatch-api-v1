@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.evaluation import process_transmission_control_plane
+from terrasatch.billing.entitlements import enforce_channel_slot
 from terrasatch.config import Settings
 from terrasatch.errors import (
     InvalidConfiguration,
@@ -234,6 +235,7 @@ async def create_channel(
     )
     if existing is not None:
         raise ResourceConflict(f"Channel slug '{slug}' already exists")
+    await enforce_channel_slot(session, organization_id=organization_id)
     channel = Channel(
         organization_id=organization_id,
         site_id=payload.site_id,
@@ -326,6 +328,8 @@ async def update_channel(
         channel.agent_id = payload.agent_id
     if payload.profile is not None:
         channel.profile = payload.profile.strip()
+    if payload.enabled is True and not channel.enabled:
+        await enforce_channel_slot(session, organization_id=organization_id)
     if payload.enabled is not None:
         channel.enabled = payload.enabled
     await session.flush()
