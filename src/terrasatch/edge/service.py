@@ -244,6 +244,10 @@ async def update_device(
         device.site_id = payload.site_id
     if payload.name is not None:
         device.name = payload.name.strip()
+    if payload.enabled is True and not device.enabled:
+        from terrasatch.billing.entitlements import enforce_edge_slot
+
+        await enforce_edge_slot(session, organization_id=organization_id)
     if payload.enabled is not None:
         device.enabled = payload.enabled
     if payload.remote_config is not None:
