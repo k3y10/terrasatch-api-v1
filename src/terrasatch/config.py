@@ -56,7 +56,43 @@ class Settings(BaseSettings):
     intelligence_fallback_to_deterministic: bool = True
     storage_provider: str = "local_filesystem"
     uac_archive_path: str | None = None
+
+    # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
+    billing_grace_days: int = Field(default=7, ge=1, le=30)
+    billing_checkout_ttl_minutes: int = Field(default=120, ge=30, le=1440)
+    billing_activation_ttl_hours: int = Field(default=24, ge=1, le=168)
+    billing_success_url: str = Field(
+        default="https://terrasatch.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_cancel_url: str = Field(
+        default="https://terrasatch.com/#pricing",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_portal_return_url: str = Field(
+        default="https://api.terrasatch.com/portal",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_activation_url: str = Field(
+        default="https://terrasatch.com/activate",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_email_webhook_url: AnyHttpUrl | None = None
+    billing_email_webhook_secret: SecretStr | None = None
+    stripe_secret_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TERRASATCH_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY"),
+    )
+    stripe_webhook_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TERRASATCH_STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET"),
+    )
+
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
     max_portal_users: int = Field(default=250, ge=1, le=1_000_000)
     admin_email: str | None = None
@@ -98,6 +134,12 @@ class Settings(BaseSettings):
         """Only expose browser administration when all required secrets are configured."""
 
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
+
+    @property
+    def billing_is_configured(self) -> bool:
+        """Return true only when billing is enabled and Stripe secrets are present."""
+
+        return bool(self.billing_enabled and self.stripe_secret_key and self.stripe_webhook_secret)
 
 
 @lru_cache
