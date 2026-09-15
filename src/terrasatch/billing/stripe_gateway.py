@@ -53,7 +53,7 @@ class StripeGateway:
         path: str,
         *,
         params: list[tuple[str, str]] | dict[str, str] | None = None,
-        data: list[tuple[str, str]] | dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         headers = dict(self._headers)
@@ -121,26 +121,23 @@ class StripeGateway:
             "plan_code": plan.code.value,
             "billing_interval": interval.value,
         }
-        data: list[tuple[str, str]] = [
-            ("mode", "subscription"),
-            ("line_items[0][price]", price_id),
-            ("line_items[0][quantity]", "1"),
-            ("customer_email", email),
-            ("client_reference_id", signup_id),
-            ("payment_method_collection", "always"),
-            ("success_url", str(self.settings.billing_success_url)),
-            ("cancel_url", str(self.settings.billing_cancel_url)),
-            ("expires_at", str(int(expires_at.timestamp()))),
-            ("integration_identifier", f"terrasatch_{identifier_suffix}"),
-            ("subscription_data[trial_period_days]", str(plan.trial_days)),
-            (
-                "subscription_data[trial_settings][end_behavior][missing_payment_method]",
-                "cancel",
-            ),
-        ]
+        data = {
+            "mode": "subscription",
+            "line_items[0][price]": price_id,
+            "line_items[0][quantity]": "1",
+            "customer_email": email,
+            "client_reference_id": signup_id,
+            "payment_method_collection": "always",
+            "success_url": str(self.settings.billing_success_url),
+            "cancel_url": str(self.settings.billing_cancel_url),
+            "expires_at": str(int(expires_at.timestamp())),
+            "integration_identifier": f"terrasatch_{identifier_suffix}",
+            "subscription_data[trial_period_days]": str(plan.trial_days),
+            "subscription_data[trial_settings][end_behavior][missing_payment_method]": "cancel",
+        }
         for key, value in metadata.items():
-            data.append((f"metadata[{key}]", value))
-            data.append((f"subscription_data[metadata][{key}]", value))
+            data[f"metadata[{key}]"] = value
+            data[f"subscription_data[metadata][{key}]"] = value
 
         session = await self._request_json(
             "POST",
