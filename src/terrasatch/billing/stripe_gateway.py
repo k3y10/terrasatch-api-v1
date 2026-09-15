@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import secrets
-import string
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -113,7 +111,6 @@ class StripeGateway:
         expires_at: datetime,
     ) -> StripeCheckoutResult:
         price_id = await self.resolve_price_id(plan, interval)
-        identifier_suffix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(8))
         metadata = {
             "product": "terrasatch",
             "billing_version": "v1",
@@ -131,7 +128,6 @@ class StripeGateway:
             "success_url": str(self.settings.billing_success_url),
             "cancel_url": str(self.settings.billing_cancel_url),
             "expires_at": str(int(expires_at.timestamp())),
-            "integration_identifier": f"terrasatch_{identifier_suffix}",
             "subscription_data[trial_period_days]": str(plan.trial_days),
             "subscription_data[trial_settings][end_behavior][missing_payment_method]": "cancel",
         }
