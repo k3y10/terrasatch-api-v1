@@ -1,44 +1,47 @@
-name: Billing branch validation
+name: Billing PR validation
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/subscription-billing
+      - main
+    paths:
+      - ".github/workflows/billing-branch-validation.yml"
+      - ".env.example"
+      - "migrations/**"
+      - "src/terrasatch/api/billing.py"
+      - "src/terrasatch/billing/**"
+      - "src/terrasatch/config.py"
+      - "src/terrasatch/edge/**"
+      - "src/terrasatch/identity/**"
+      - "src/terrasatch/organizations/**"
+      - "src/terrasatch/portal/**"
+      - "src/terrasatch/radio/**"
+      - "tests/api/test_billing_contract.py"
+      - "tests/unit/test_billing_*.py"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout billing branch
+      - name: Checkout pull request
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          ref: feat/subscription-billing
-          fetch-depth: 0
+          python-version: "3.12"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
-      - name: Regenerate dependency lock
-        run: uv lock
-
-      - name: Commit updated lockfile
-        shell: bash
-        run: |
-          if git diff --quiet -- uv.lock; then
-            echo "uv.lock is already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock
-          git commit -m "Lock Stripe billing dependency"
-          git push origin HEAD:feat/subscription-billing
+      - name: Verify frozen dependency lock
+        run: uv lock --check
 
       - name: Install locked development dependencies
         run: uv sync --extra dev --frozen
