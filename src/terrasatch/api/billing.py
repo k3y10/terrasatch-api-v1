@@ -18,6 +18,7 @@ from terrasatch.billing.notifications import (
     notification_kind,
 )
 from terrasatch.billing.plans import get_plan
+from terrasatch.billing.rate_limit import enforce_checkout_rate_limit
 from terrasatch.billing.schemas import (
     ActivationRequest,
     ActivationResponse,
@@ -105,6 +106,12 @@ async def post_billing_checkout(
     recurring_amount = plan.amount_cents(payload.billing_interval)
     if recurring_amount is None:
         raise InvalidConfiguration("The selected plan is not available for self-service checkout")
+
+    await enforce_checkout_rate_limit(
+        settings,
+        client_host=request.client.host if request.client is not None else None,
+        email=payload.email,
+    )
 
     session_factory = create_session_factory(settings)
     async with session_factory() as database:
