@@ -6,18 +6,23 @@ from terrasatch.billing.plans import (
 )
 
 
-def test_self_service_plan_prices_and_trial_are_stable() -> None:
-    field = get_plan(PlanCode.FIELD)
+def test_pitch_deck_subscription_prices_are_stable() -> None:
+    individual = get_plan(PlanCode.FIELD)
     team = get_plan(PlanCode.TEAM)
-    operations = get_plan(PlanCode.OPERATIONS)
+    site = get_plan(PlanCode.OPERATIONS)
+    enterprise = get_plan(PlanCode.ENTERPRISE)
 
-    assert field.amount_cents(BillingInterval.MONTHLY) == 9_900
-    assert field.amount_cents(BillingInterval.ANNUAL) == 99_000
-    assert team.amount_cents(BillingInterval.MONTHLY) == 34_900
-    assert team.amount_cents(BillingInterval.ANNUAL) == 349_000
-    assert operations.amount_cents(BillingInterval.MONTHLY) == 99_900
-    assert operations.amount_cents(BillingInterval.ANNUAL) == 999_000
-    assert {field.trial_days, team.trial_days, operations.trial_days} == {30}
+    assert individual.name == "Individual"
+    assert individual.amount_cents(BillingInterval.MONTHLY) == 4_900
+    assert individual.amount_cents(BillingInterval.ANNUAL) is None
+    assert team.amount_cents(BillingInterval.MONTHLY) == 50_000
+    assert team.amount_cents(BillingInterval.ANNUAL) is None
+    assert site.amount_cents(BillingInterval.MONTHLY) is None
+    assert site.amount_cents(BillingInterval.ANNUAL) == 5_000_000
+    assert enterprise.amount_cents(BillingInterval.ANNUAL) == 12_500_000
+    assert {individual.trial_days, team.trial_days} == {30}
+    assert site.trial_days == 0
+    assert enterprise.trial_days == 0
 
 
 def test_team_plan_is_recommended_and_has_expected_entitlements() -> None:
@@ -33,11 +38,24 @@ def test_team_plan_is_recommended_and_has_expected_entitlements() -> None:
     assert team.entitlements.api_access is True
 
 
-def test_enterprise_is_not_self_service() -> None:
+def test_individual_matches_single_operator_pitch_model() -> None:
+    individual = get_plan(PlanCode.FIELD)
+
+    assert individual.self_service is True
+    assert individual.entitlements.max_members == 1
+    assert individual.entitlements.max_edge_devices == 1
+    assert individual.entitlements.max_channels == 1
+    assert individual.lookup_key(BillingInterval.MONTHLY) == "terrasatch_individual_monthly_v1"
+    assert individual.lookup_key(BillingInterval.ANNUAL) is None
+
+
+def test_site_and_enterprise_are_scoped_not_self_service() -> None:
+    site = get_plan(PlanCode.OPERATIONS)
     enterprise = get_plan(PlanCode.ENTERPRISE)
 
+    assert site.self_service is False
+    assert site.lookup_key(BillingInterval.ANNUAL) is None
     assert enterprise.self_service is False
-    assert enterprise.amount_cents(BillingInterval.MONTHLY) is None
     assert enterprise.lookup_key(BillingInterval.ANNUAL) is None
 
 
