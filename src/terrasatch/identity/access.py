@@ -173,6 +173,20 @@ async def create_or_update_organization_member(
         raise InvalidConfiguration(str(error)) from error
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
+    membership = None
+    if user is not None:
+        membership = await session.scalar(
+            select(Membership).where(
+                Membership.organization_id == organization_id,
+                Membership.user_id == user.id,
+            )
+        )
+
+    if membership is None or not membership.enabled:
+        from terrasatch.billing.entitlements import enforce_member_slot
+
+        await enforce_member_slot(session, organization_id=organization_id)
+
     already_counted = user is not None and await _user_counts_toward_capacity(session, user)
     if not already_counted and settings is not None:
         registered_users = await count_portal_users(session)
@@ -200,12 +214,6 @@ async def create_or_update_organization_member(
         user.password_hash = password_hash
         user.enabled = True
 
-    membership = await session.scalar(
-        select(Membership).where(
-            Membership.organization_id == organization_id,
-            Membership.user_id == user.id,
-        )
-    )
     if membership is None:
         membership = Membership(
             organization_id=organization_id,
