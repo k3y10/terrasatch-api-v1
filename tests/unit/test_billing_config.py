@@ -7,6 +7,9 @@ def test_billing_secrets_can_be_supplied_by_field_name_for_internal_configuratio
     settings = Settings(
         environment="production",
         billing_enabled=True,
+        billing_email_webhook_url="https://example.com/api/billing-email",
+        billing_email_webhook_secret=SecretStr("test-email-secret"),
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
         stripe_webhook_secret=SecretStr("whsec_terrasatch"),
     )

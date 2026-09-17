@@ -19,6 +19,23 @@ _STRIPE_API_BASE = "https://api.stripe.com/v1"
 _WEBHOOK_TOLERANCE_SECONDS = 300
 
 
+def validate_price(price: object, plan: PlanDefinition, interval: BillingInterval) -> None:
+    if not isinstance(price, dict):
+        raise InvalidConfiguration("Subscription price must be expanded")
+    recurring = price.get("recurring") or {}
+    expected_interval = "month" if interval == BillingInterval.MONTHLY else "year"
+    if (
+        not plan.self_service
+        or not price.get("id")
+        or price.get("lookup_key") != plan.lookup_key(interval)
+        or price.get("unit_amount") != plan.amount_cents(interval)
+        or price.get("currency") != "usd"
+        or recurring.get("interval") != expected_interval
+        or recurring.get("interval_count") != 1
+    ):
+        raise InvalidConfiguration("Stripe price does not match the TerraSatch plan")
+
+
 @dataclass(frozen=True, slots=True)
 class StripeCheckoutResult:
     session_id: str
@@ -37,6 +54,8 @@ class StripeGateway:
             raise ProviderUnavailable("Stripe billing credentials are not configured")
         self.settings = settings
         self.secret_key = settings.stripe_secret_key.get_secret_value()
+        if self.secret_key.startswith(("sk_live_", "rk_live_")) and not settings.billing_allow_livemode:
+            raise ProviderUnavailable("Live billing is disabled")
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -72,6 +91,8 @@ class StripeGateway:
             raise ProviderUnavailable("Stripe API request failed") from error
         if not isinstance(payload, dict):
             raise ProviderUnavailable("Stripe API returned an invalid response")
+        if payload.get("livemode") is True and not self.settings.billing_allow_livemode:
+            raise ProviderUnavailable("Live billing is disabled")
         return payload
 
     async def resolve_price_id(
@@ -81,7 +102,9 @@ class StripeGateway:
     ) -> str:
         lookup_key = plan.lookup_key(interval)
         if not plan.self_service or not lookup_key:
-            raise InvalidConfiguration("The selected plan is not available for self-service checkout")
+            raise InvalidConfiguration(
+                "The selected plan is not available for self-service checkout"
+            )
 
         payload = await self._request_json(
             "GET",
@@ -99,6 +122,7 @@ class StripeGateway:
                 "Stripe price catalog is not configured for this TerraSatch plan",
                 details={"lookup_key": lookup_key, "matches": len(matches)},
             )
+        validate_price(matches[0], plan, interval)
         return str(matches[0]["id"])
 
     async def create_checkout(
@@ -110,6 +134,13 @@ class StripeGateway:
         interval: BillingInterval,
         expires_at: datetime,
     ) -> StripeCheckoutResult:
+        if not self.settings.billing_is_configured:
+            raise ProviderUnavailable("Billing activation and email configuration is incomplete")
+        if (
+            self.secret_key.startswith(("sk_live_", "rk_live_"))
+            and not self.settings.billing_allow_livemode
+        ):
+            raise ProviderUnavailable("Live billing is disabled")
         price_id = await self.resolve_price_id(plan, interval)
         metadata = {
             "product": "terrasatch",
@@ -156,6 +187,11 @@ class StripeGateway:
             expires_at=checkout_expires_at,
             price_id=price_id,
         )
+
+    async def retrieve_checkout(self, session_id: str) -> dict[str, Any]:
+        if not session_id.startswith("cs_") or not all(c.isalnum() or c == "_" for c in session_id):
+            raise InvalidConfiguration("Invalid Checkout session ID")
+        return await self._request_json("GET", f"/checkout/sessions/{session_id}")
 
     async def create_customer_portal(self, *, stripe_customer_id: str) -> str:
         session = await self._request_json(

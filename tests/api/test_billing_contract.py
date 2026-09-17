@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from terrasatch.config import Settings
 from terrasatch.main import create_app
@@ -13,6 +14,35 @@ def make_settings() -> Settings:
         cors_origins=[],
         billing_enabled=False,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan_code", ["operations", "enterprise"])
+async def test_scoped_plans_cannot_create_checkout(plan_code) -> None:
+    settings = make_settings().model_copy(
+        update={
+            "billing_enabled": True,
+            "stripe_secret_key": SecretStr("test-only"),
+            "stripe_webhook_secret": SecretStr("test-only"),
+            "billing_email_webhook_url": "https://example.com/email",
+            "billing_email_webhook_secret": SecretStr("test-only"),
+            "billing_activation_signing_secret": SecretStr("test-only"),
+        }
+    )
+    transport = httpx.ASGITransport(app=create_app(settings))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/billing/checkout",
+            json={
+                "display_name": "Test Operator",
+                "email": "operator@example.com",
+                "organization_name": "Test Operations",
+                "plan_code": plan_code,
+                "billing_interval": "monthly",
+            },
+        )
+    assert response.status_code == 400
+    assert "not available for self-service" in response.text
 
 
 @pytest.mark.asyncio
@@ -47,7 +77,7 @@ async def test_plan_catalog_is_public_and_hides_stripe_ids() -> None:
     assert [plan["code"] for plan in payload] == ["field", "team", "operations", "enterprise"]
     assert payload[1]["recommended"] is True
     assert payload[1]["trial_days"] == 30
-    assert payload[1]["monthly_amount_cents"] == 34_900
+    assert payload[1]["monthly_amount_cents"] == 39_900
     serialized = response.text.casefold()
     assert "lookup_key" not in serialized
     assert "price_" not in serialized

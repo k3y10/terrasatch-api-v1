@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from terrasatch import __version__
+from terrasatch.admin.data_routes import router as data_admin_router
+from terrasatch.admin.edge_routes import router as edge_admin_router
 from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.admin.satchy_routes import router as admin_satchy_router
@@ -42,6 +44,7 @@ from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
 from terrasatch.observability.request_id import RequestIdMiddleware
 from terrasatch.portal.routes import router as portal_router
+from terrasatch.workspace.routes import router as workspace_router
 
 logger = structlog.get_logger(__name__)
 _BRAND_LOGO_PATH = Path(__file__).resolve().parent / "static" / "terrasatch-logo.svg"
@@ -246,9 +249,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(api_v1)
     application.include_router(realtime_router)
     application.include_router(admin_router)
+    application.include_router(data_admin_router)
+    application.include_router(edge_admin_router)
     application.include_router(admin_satchy_router)
     application.include_router(admin_member_router)
     application.include_router(portal_router)
+    application.include_router(workspace_router)
     return application
 
 

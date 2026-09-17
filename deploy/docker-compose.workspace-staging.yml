@@ -1,0 +1,82 @@
+name: terrasatch-workspace-staging
+
+x-runtime: &runtime
+  image: terrasatch-workspace-staging:local
+  build:
+    context: ..
+  env_file: ../.env.staging
+  environment:
+    TERRASATCH_ENV: staging
+    TERRASATCH_DEPLOYMENT_NAME: workspace-staging
+    TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:?Set staging database password}@postgres:5432/terrasatch_staging
+    TERRASATCH_REDIS_URL: redis://redis:6379/0
+    TERRASATCH_BILLING_ALLOW_LIVEMODE: "false"
+    TERRASATCH_INTELLIGENCE_PROVIDER: ollama
+    TERRASATCH_INTELLIGENCE_FALLBACK_TO_DETERMINISTIC: "false"
+    TERRASATCH_OLLAMA_BASE_URL: http://ollama:11434
+    TERRASATCH_OLLAMA_MODEL: qwen3:1.7b
+    TERRASATCH_INTELLIGENCE_TIMEOUT_SECONDS: "40"
+  restart: unless-stopped
+  mem_limit: 384m
+  cpus: 0.15
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: imresamu/postgis:16-3.6.1-alpine3.22@sha256:8fcc73f4afd381738dea98a0b0b17212c4d46f59f1eec40808e40710fd66dfda
+    environment:
+      POSTGRES_DB: terrasatch_staging
+      POSTGRES_USER: terrasatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set staging database password}
+    volumes:
+      - staging_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U terrasatch -d terrasatch_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 384m
+    cpus: 0.1
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, "yes", --maxmemory, 64mb, --maxmemory-policy, noeviction]
+    volumes:
+      - staging_redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 128m
+    cpus: 0.05
+    restart: unless-stopped
+  api:
+    <<: *runtime
+    ports:
+      - "127.0.0.1:8012:8000"
+  worker:
+    <<: *runtime
+    command: [terrasatch, worker]
+    cpus: 0.05
+  ollama:
+    image: ollama/ollama:0.34.1
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: "4096"
+      OLLAMA_KEEP_ALIVE: "5m"
+    volumes:
+      - staging_models:/root/.ollama
+    mem_limit: 2304m
+    cpus: 0.25
+    restart: unless-stopped
+
+volumes:
+  staging_postgres:
+  staging_redis:
+  staging_models:

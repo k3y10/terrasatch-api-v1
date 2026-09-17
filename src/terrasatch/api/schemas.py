@@ -46,7 +46,7 @@ class ComponentStatus(BaseModel):
 class ApiCatalogEntry(BaseModel):
     method: str
     path: str
-    authorization: Literal["public", "bearer_api_key", "admin_session"]
+    authorization: Literal["public", "bearer_api_key", "admin_session", "stripe_webhook", "portal_session"]
     summary: str | None = None
 
 

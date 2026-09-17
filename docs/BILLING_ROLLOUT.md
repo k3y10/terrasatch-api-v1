@@ -1,95 +1,38 @@
-# TerraSatch subscription billing rollout
+# TerraSatch subscription rollout — preview only
 
-This document describes the safe rollout order for the self-service TerraSatch subscription system.
+Do not merge, promote, enable live billing, or modify Stripe under the current pricing request.
 
-## Safety defaults
+## Catalog
 
-- `TERRASATCH_BILLING_ENABLED=false` by default.
-- `TERRASATCH_BILLING_ALLOW_LIVEMODE=false` is a second, independent production gate.
-- Existing pilot and legacy organizations are not converted into managed subscriptions automatically.
-- Existing Edge heartbeat, radio ingest, preserved source traffic, and operational history are not disabled when billing becomes restricted.
-- Managed-plan restrictions apply to new configuration and reactivation of capacity-limited resources.
-- Stripe remains the system of record for payment methods. TerraSatch never stores card data.
-- Stripe product/price IDs are resolved server-side from stable lookup keys. Browser clients never submit Stripe Price IDs.
+`src/terrasatch/billing/plans.py` exposes `/api/v1/billing/plans`. Keep it aligned with the website's `src/lib/plan-catalog.ts`; the website retains pricing when the API is unavailable.
 
-## Subscription catalog
+| Plan | Public monthly price | Checkout | Planned lookup key |
+| --- | --- | --- | --- |
+| Individual | $24 | 30-day card-required trial, when enabled | `terrasatch_individual_monthly_v2` |
+| Team | $399 | 30-day card-required trial, when enabled | `terrasatch_team_monthly_v2` |
+| Operations | From $1,999 | Sales/scoped only | None |
+| Enterprise | Custom | Sales/scoped only | None |
 
-The canonical catalog lives in `src/terrasatch/billing/plans.py` and is exposed publicly at:
+Annual values are null. Optional annual discounts remain proposals. Old pitch-model prices are internal financial assumptions, not public minimums. The v2 keys deliberately differ from the already-created $49/$500 v1 sandbox prices; do not reuse or transfer the old lookup keys. Do not automatically migrate existing subscriptions.
 
-`GET /api/v1/billing/plans`
+## Gates and deployment order
 
-The website consumes this endpoint instead of maintaining an independent pricing table.
+1. Keep billing disabled and live mode false. Keep both PRs draft.
+2. Build from the billing branch in an isolated staging directory/database; never migrate production for a preview. Apply migrations through 0013 and run API and worker from the same version.
+3. Configure a protected Preview origin and staging-only server credentials. Identify the public staging webhook origin before creating endpoints. No default production URL is acceptable for a sandbox acceptance run.
+4. After explicit renewed Stripe authorization, verify account `acct_1Txb0QPwzxCRGRdh`, test mode, and create the matching v2 catalog. Configure customer portal cancellation/payment methods; plan switching needs separate backend validation.
+5. Use a restricted Stripe key stored server-side and the matching webhook signing secret. Readiness also requires billing email URL/shared secret and activation signing secret. Never print credentials or commit environment files.
+6. Verify Resend's sending domain and Preview-only `RESEND_API_KEY`, `TERRASATCH_BILLING_EMAIL_SECRET`, `TERRASATCH_BILLING_FROM`; the shared secret must match API `TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET`. Use the Preview email endpoint, success, cancellation and activation URLs.
+7. Exercise Individual and Team signup → Checkout → signed webhook → committed subscription/outbox → inbox activation → workspace login → customer portal. Card required, $0 today, billing after 30 days unless canceled. Operations/Enterprise must reject checkout.
+8. Test duplicate/concurrent/out-of-order webhooks, payment failures, cancellation, DB rollback, email retries, expired/consumed activation links, tenant isolation and CORS. Add password-reset/resend and email delivery-event handling before public release.
+9. Confirm unit economics, retention semantics, support/hardware scope, tax registration/collection, subscription migration, and release base before requesting any production rollout.
 
-Self-service plans currently use a 30-day trial and collect a payment method through Stripe Checkout before the trial begins.
+Webhook event set: checkout.session.completed; customer.subscription.created/updated/deleted/trial_will_end; invoice.paid; invoice.payment_failed. Fresh subscription state and stale invoice ordering still need review. Live gate must remain false.
 
-## Required Stripe test-mode setup
+## Implemented safeguards and limits
 
-Use the TerraSatch Stripe account only. Do not configure TerraSatch products in the QuakWrap Stripe account.
+Source/card data stays in its owning system: Stripe owns payment methods; TerraSatch owns tenant state and authorization. Browser inputs cannot select arbitrary Price IDs. Lookup key, amount, currency, cadence and subscription quantity are validated. Pending valid checkout is reused; near-expiry refresh remains an explicit retry conflict.
 
-Create one recurring monthly and annual Price for each self-service plan using these lookup keys:
+Email intents commit with billing state. Worker retries reconstruct the same activation token and stop ambiguous deliveries before Resend deduplication expires. Provider acceptance is not proof of inbox delivery. Reconciliation, expiry/resend handling and password reset remain open.
 
-| Plan | Monthly lookup key | Annual lookup key |
-| --- | --- | --- |
-| Field | `terrasatch_field_monthly_v1` | `terrasatch_field_annual_v1` |
-| Team | `terrasatch_team_monthly_v1` | `terrasatch_team_annual_v1` |
-| Operations | `terrasatch_operations_monthly_v1` | `terrasatch_operations_annual_v1` |
-
-Configure Stripe Customer Portal for subscription cancellation and payment-method management.
-
-Create a test-mode webhook endpoint pointing to:
-
-`https://api.terrasatch.com/api/v1/billing/stripe/webhook`
-
-Subscribe it to at least:
-
-- `checkout.session.completed`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
-- `customer.subscription.trial_will_end`
-- `invoice.paid`
-- `invoice.payment_failed`
-
-Store the test secret key and webhook signing secret only in the API deployment environment.
-
-## Required Resend/Vercel setup
-
-Verify the TerraSatch sending domain in Resend before enabling lifecycle email.
-
-Configure these Vercel server-only variables on the website project:
-
-- `RESEND_API_KEY`
-- `TERRASATCH_BILLING_EMAIL_SECRET`
-- `TERRASATCH_BILLING_FROM`
-
-Configure matching API variables:
-
-- `TERRASATCH_BILLING_EMAIL_WEBHOOK_URL=https://terrasatch.com/api/billing-email`
-- `TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET=<same random secret used by Vercel>`
-
-Activation tokens are delivered in the URL fragment (`#token=...`) so they are not included in the normal HTTP request URL sent to Vercel.
-
-## Recommended rollout order
-
-1. Merge and deploy the API with billing disabled.
-2. Run migration `0011_subscription_billing` and confirm API health.
-3. Configure the TerraSatch Stripe account in test mode.
-4. Configure Resend/Vercel server-only environment variables.
-5. Enable `TERRASATCH_BILLING_ENABLED=true` while keeping `TERRASATCH_BILLING_ALLOW_LIVEMODE=false`.
-6. Exercise Field, Team, and Operations Checkout flows in Stripe test mode.
-7. Verify account provisioning, activation email, portal login, Edge service payload, Customer Portal, cancellation, payment failure grace, and webhook replay idempotency.
-8. Merge/deploy the website subscription UI after the API test deployment is confirmed.
-9. Complete tax, terms, refund/cancellation, support, and production billing review.
-10. Only after the production review, add live Stripe credentials and explicitly set `TERRASATCH_BILLING_ALLOW_LIVEMODE=true`.
-
-## Entitlement enforcement in this release
-
-Server-enforced managed-plan limits cover:
-
-- enabled sites
-- enabled organization memberships
-- enabled Edge devices
-- enabled monitored channels
-- restricted subscription state blocking new configuration
-
-Processing-hour allowances and historical-retention values are represented in the catalog but are not usage-metered or automatically pruned in this release. They must not be treated as automated usage billing or destructive retention policy until a dedicated metering/retention implementation is reviewed.
+Sites, memberships, devices and channels have managed-plan checks. Processing-hour/retention allowances are not metered or pruned automatically. No new Satchy Agent or drone add-on entitlement is enforced yet; proposed 2/5 included agents require a tenant-scoped registry, measured costs and atomic activation limits first. Never claim those add-ons are currently deliverable.

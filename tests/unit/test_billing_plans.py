@@ -6,20 +6,20 @@ from terrasatch.billing.plans import (
 )
 
 
-def test_pitch_deck_subscription_prices_are_stable() -> None:
+def test_public_subscription_prices_are_stable() -> None:
     individual = get_plan(PlanCode.FIELD)
     team = get_plan(PlanCode.TEAM)
     site = get_plan(PlanCode.OPERATIONS)
     enterprise = get_plan(PlanCode.ENTERPRISE)
 
     assert individual.name == "Individual"
-    assert individual.amount_cents(BillingInterval.MONTHLY) == 4_900
+    assert individual.amount_cents(BillingInterval.MONTHLY) == 2_400
     assert individual.amount_cents(BillingInterval.ANNUAL) is None
-    assert team.amount_cents(BillingInterval.MONTHLY) == 50_000
+    assert team.amount_cents(BillingInterval.MONTHLY) == 39_900
     assert team.amount_cents(BillingInterval.ANNUAL) is None
-    assert site.amount_cents(BillingInterval.MONTHLY) is None
-    assert site.amount_cents(BillingInterval.ANNUAL) == 5_000_000
-    assert enterprise.amount_cents(BillingInterval.ANNUAL) == 12_500_000
+    assert site.amount_cents(BillingInterval.MONTHLY) == 199_900
+    assert site.amount_cents(BillingInterval.ANNUAL) is None
+    assert enterprise.amount_cents(BillingInterval.ANNUAL) is None
     assert {individual.trial_days, team.trial_days} == {30}
     assert site.trial_days == 0
     assert enterprise.trial_days == 0
@@ -38,14 +38,14 @@ def test_team_plan_is_recommended_and_has_expected_entitlements() -> None:
     assert team.entitlements.api_access is True
 
 
-def test_individual_matches_single_operator_pitch_model() -> None:
+def test_individual_supports_one_personal_connection() -> None:
     individual = get_plan(PlanCode.FIELD)
 
     assert individual.self_service is True
     assert individual.entitlements.max_members == 1
     assert individual.entitlements.max_edge_devices == 1
     assert individual.entitlements.max_channels == 1
-    assert individual.lookup_key(BillingInterval.MONTHLY) == "terrasatch_individual_monthly_v1"
+    assert individual.lookup_key(BillingInterval.MONTHLY) == "terrasatch_individual_monthly_v2"
     assert individual.lookup_key(BillingInterval.ANNUAL) is None
 
 

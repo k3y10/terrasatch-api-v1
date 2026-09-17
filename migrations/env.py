@@ -10,6 +10,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from terrasatch.workspace import models as workspace_models
 from terrasatch.actions import models as action_models
 from terrasatch.auth import models as auth_models
 from terrasatch.billing import models as billing_models
@@ -23,6 +24,7 @@ from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 
 _ = (
+    workspace_models,
     action_models,
     auth_models,
     billing_models,

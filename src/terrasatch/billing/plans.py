@@ -72,21 +72,20 @@ class PlanDefinition:
         }
 
 
-# Pricing mirrors the TerraSatch pitch-deck / financial-model base assumptions:
-# Individual $49/mo, Team $500/mo, Annual Site $50K/yr, Enterprise $125K/yr.
-# The larger annual contracts remain scoped rather than self-service because their
-# final value depends on sites, integrations, retention, security, and support.
+# Public pricing evaluation: $24/month Individual, $399/month Team,
+# Operations from $1,999/month, Enterprise custom. Optional annual offers
+# and agent add-ons remain proposals; scoped plans cannot enter Checkout.
 PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     PlanCode.FIELD: PlanDefinition(
         code=PlanCode.FIELD,
         name="Individual",
-        description="For one field professional using TerraListen as a personal operational record.",
-        monthly_amount_cents=4_900,
+        description="Personal Satchy for one person in the field.",
+        monthly_amount_cents=2_400,
         annual_amount_cents=None,
         trial_days=30,
         self_service=True,
         recommended=False,
-        monthly_lookup_key="terrasatch_individual_monthly_v1",
+        monthly_lookup_key="terrasatch_individual_monthly_v2",
         annual_lookup_key=None,
         entitlements=Entitlements(
             max_sites=1,
@@ -103,12 +102,12 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
         code=PlanCode.TEAM,
         name="Team",
         description="For a working crew sharing radios, channels, maps, logs, and operational context.",
-        monthly_amount_cents=50_000,
+        monthly_amount_cents=39_900,
         annual_amount_cents=None,
         trial_days=30,
         self_service=True,
         recommended=True,
-        monthly_lookup_key="terrasatch_team_monthly_v1",
+        monthly_lookup_key="terrasatch_team_monthly_v2",
         annual_lookup_key=None,
         entitlements=Entitlements(
             max_sites=1,
@@ -123,10 +122,10 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     ),
     PlanCode.OPERATIONS: PlanDefinition(
         code=PlanCode.OPERATIONS,
-        name="Annual Site",
-        description="Recurring site, team, or department license after the workflow is proven.",
-        monthly_amount_cents=None,
-        annual_amount_cents=5_000_000,
+        name="Operations",
+        description="From $1,999/month for a scoped site or department deployment.",
+        monthly_amount_cents=199_900,
+        annual_amount_cents=None,
         trial_days=0,
         self_service=False,
         recommended=False,
@@ -148,7 +147,7 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
         name="Enterprise",
         description="Higher-touch multi-site, integrated, private-hosting, security, and support deployments.",
         monthly_amount_cents=None,
-        annual_amount_cents=12_500_000,
+        annual_amount_cents=None,
         trial_days=0,
         self_service=False,
         recommended=False,

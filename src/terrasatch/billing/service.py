@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import secrets
+import hmac
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import hash_admin_password
@@ -32,7 +32,6 @@ from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
 from terrasatch.organizations.service import slugify
-
 
 _ACTIVE_ACCESS_STATUSES = frozenset({"trialing", "active"})
 _RESTRICTED_STATUSES = frozenset(
@@ -74,6 +73,17 @@ def _timestamp(value: object) -> datetime | None:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def recover_activation_token(settings: Settings, activation_id: UUID) -> str:
+    secret = settings.billing_activation_signing_secret
+    if secret is None:
+        raise InvalidConfiguration("Activation signing secret is not configured")
+    return hmac.new(
+        secret.get_secret_value().encode(),
+        f"terrasatch-activation-v1:{activation_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _event_payload_hash(payload: bytes) -> str:
@@ -308,8 +318,10 @@ async def _ensure_activation(
     if existing is not None:
         return None
 
-    token = secrets.token_urlsafe(48)
+    activation_id = uuid4()
+    token = recover_activation_token(settings, activation_id)
     activation = BillingActivation(
+        id=activation_id,
         user_id=user.id,
         organization_id=organization_id,
         token_hash=_token_hash(token),
@@ -360,9 +372,7 @@ async def _provision_signup(
 
     existing_user = await session.scalar(select(User).where(User.email == signup.email))
     if existing_user is not None:
-        raise ResourceConflict(
-            "This billing signup email is already bound to a TerraSatch user."
-        )
+        raise ResourceConflict("This billing signup email is already bound to a TerraSatch user.")
 
     account = Account(name=signup.organization_name, enabled=True)
     session.add(account)
@@ -431,8 +441,15 @@ def _validated_subscription_identity(
         plan_code = PlanCode(metadata["plan_code"])
         interval = BillingInterval(metadata["billing_interval"])
     except (KeyError, ValueError) as error:
-        raise InvalidConfiguration("Stripe subscription metadata is not a TerraSatch billing record") from error
-    get_plan(plan_code)
+        raise InvalidConfiguration(
+            "Stripe subscription metadata is not a TerraSatch billing record"
+        ) from error
+    from terrasatch.billing.stripe_gateway import validate_price
+
+    items = snapshot.get("items", {}).get("data", [])
+    if len(items) != 1 or items[0].get("quantity") != 1:
+        raise InvalidConfiguration("Subscription must contain exactly one plan at quantity one")
+    validate_price(items[0].get("price"), get_plan(plan_code), interval)
     return subscription_id, customer_id, plan_code, interval
 
 
@@ -445,6 +462,8 @@ async def sync_subscription_snapshot(
     subscription_id, customer_id, plan_code, interval = _validated_subscription_identity(snapshot)
     metadata = _subscription_metadata(snapshot)
     signup = await _find_signup(session, signup_id=metadata.get("signup_id"))
+    if signup.plan_code != plan_code.value or signup.billing_interval != interval.value:
+        raise InvalidConfiguration("Subscription does not match the original signup plan")
     provisioned = await _provision_signup(
         session,
         signup=signup,
@@ -584,6 +603,10 @@ async def process_verified_event(
     event_type = str(event.get("type") or "")
     if not event_id or not event_type:
         raise InvalidConfiguration("Stripe webhook event is missing an ID or type")
+    # Serialize lifecycle events across workers before provisioning or checking the ledger.
+    # This low-volume billing lock is transaction-scoped and automatically released.
+    if session.bind.dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(73429101)"))
     existing = await session.get(StripeEvent, event_id)
     if existing is not None:
         return WebhookProcessingResult(duplicate=True, event_type=event_type)
@@ -744,11 +767,13 @@ async def activate_owner(
 ) -> UUID:
     now = datetime.now(UTC)
     activation = await session.scalar(
-        select(BillingActivation).where(
+        select(BillingActivation)
+        .where(
             BillingActivation.token_hash == _token_hash(token),
             BillingActivation.consumed_at.is_(None),
             BillingActivation.expires_at > now,
         )
+        .with_for_update()
     )
     if activation is None:
         raise ResourceNotFound("Activation token is invalid, expired, or already used")

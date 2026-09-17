@@ -10,12 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_any_scope
 from terrasatch.billing.notifications import (
-    deliver_billing_email,
     get_billing_email_context,
     notification_kind,
 )
+from terrasatch.billing.outbox import enqueue_email
 from terrasatch.billing.plans import get_plan
-from terrasatch.billing.rate_limit import enforce_checkout_rate_limit
+from terrasatch.billing.rate_limit import enforce_checkout_rate_limit, enforce_public_rate_limit
 from terrasatch.billing.schemas import (
     ActivationRequest,
     ActivationResponse,
@@ -85,9 +85,11 @@ async def post_billing_checkout(
 
     settings: Settings = request.app.state.settings
     stripe = _gateway(settings)
+    if not settings.billing_is_configured:
+        raise ProviderUnavailable("Billing activation and email configuration is incomplete")
     plan = get_plan(payload.plan_code)
     recurring_amount = plan.amount_cents(payload.billing_interval)
-    if recurring_amount is None:
+    if not plan.self_service or recurring_amount is None:
         raise InvalidConfiguration("The selected plan is not available for self-service checkout")
 
     await enforce_checkout_rate_limit(
@@ -103,6 +105,29 @@ async def post_billing_checkout(
         settings,
         lambda session: create_signup(session, payload=payload, settings=settings),
     )
+    if signup.stripe_checkout_session_id:
+        from datetime import UTC, datetime
+
+        existing = await stripe.retrieve_checkout(signup.stripe_checkout_session_id)
+        if (
+            existing.get("status") == "open"
+            and existing.get("url")
+            and int(existing.get("expires_at", 0)) > datetime.now(UTC).timestamp() + 60
+        ):
+            return CheckoutSessionResponse(
+                signup_id=signup.id,
+                checkout_session_id=existing["id"],
+                checkout_url=existing["url"],
+                expires_at=datetime.fromtimestamp(existing["expires_at"], UTC),
+                plan_code=payload.plan_code,
+                billing_interval=payload.billing_interval,
+                trial_days=plan.trial_days,
+                recurring_amount_cents=recurring_amount,
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="Checkout is completed or expiring. Check its status or wait for expiry before retrying.",
+        )
     checkout = await stripe.create_checkout(
         signup_id=str(signup.id),
         email=signup.email,
@@ -139,6 +164,12 @@ async def get_billing_checkout_status(
 ) -> CheckoutStatusResponse:
     """Confirm local webhook provisioning after Stripe redirects the browser back."""
 
+    await enforce_public_rate_limit(
+        request.app.state.settings,
+        category="billing-status",
+        identifier=request.client.host if request.client else "unknown",
+        limit=120,
+    )
     return await _run_database(
         request.app.state.settings,
         lambda session: get_checkout_status(
@@ -193,6 +224,13 @@ async def post_billing_activation(
 ) -> ActivationResponse:
     """Consume a single-use activation token and set the initial portal password."""
 
+    await enforce_public_rate_limit(
+        request.app.state.settings,
+        category="activation",
+        identifier=request.client.host if request.client else "unknown",
+        limit=10,
+        window=3600,
+    )
     organization_id = await _run_database(
         request.app.state.settings,
         lambda session: activate_owner(
@@ -266,8 +304,8 @@ async def post_stripe_webhook(
                     context=context,
                 )
                 if context is not None and kind is not None:
-                    await deliver_billing_email(
-                        settings=settings,
+                    await enqueue_email(
+                        database,
                         event_id=event_id,
                         kind=kind,
                         context=context,

@@ -49,3 +49,22 @@ async def enforce_checkout_rate_limit(
             "Too many billing attempts. Try again later.",
             details={"retry_after_seconds": _WINDOW_SECONDS},
         )
+
+
+async def enforce_public_rate_limit(settings, *, category, identifier, limit=30, window=60):
+    """Fixed window with atomic expiry; fail closed when the shared limiter is down."""
+    key = f"terrasatch:public:{category}:{_digest(identifier or 'unknown')}"
+    redis = Redis.from_url(str(settings.redis_url), socket_timeout=3, socket_connect_timeout=3)
+    try:
+        count = await redis.eval(
+            "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
+            1,
+            key,
+            window,
+        )
+    except RedisError as error:
+        raise ProviderUnavailable("Request limiter is unavailable") from error
+    finally:
+        await redis.aclose()
+    if int(count) > limit:
+        raise RateLimitExceeded("Too many requests. Try again later.")

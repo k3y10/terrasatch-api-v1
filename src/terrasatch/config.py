@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     deployment_name: str = Field(default="local", min_length=1, max_length=64)
     build_sha: str = Field(default="unknown", min_length=1, max_length=64)
     api_base_url: AnyHttpUrl = "http://localhost:8000"
-    database_url: PostgresDsn = "postgresql+asyncpg://terrasatch:terrasatch@localhost:5432/terrasatch"
+    database_url: PostgresDsn = (
+        "postgresql+asyncpg://terrasatch:terrasatch@localhost:5432/terrasatch"
+    )
     redis_url: RedisDsn = "redis://localhost:6379/0"
     log_level: str = "INFO"
     log_format: str = "json"
@@ -90,6 +92,7 @@ class Settings(BaseSettings):
     )
     billing_email_webhook_url: AnyHttpUrl | None = None
     billing_email_webhook_secret: SecretStr | None = None
+    billing_activation_signing_secret: SecretStr | None = None
     stripe_secret_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -151,9 +154,16 @@ class Settings(BaseSettings):
 
     @property
     def billing_is_configured(self) -> bool:
-        """Return true only when billing is enabled and Stripe secrets are present."""
+        """Require Stripe, activation signing and transactional email before checkout."""
 
-        return bool(self.billing_enabled and self.stripe_secret_key and self.stripe_webhook_secret)
+        return bool(
+            self.billing_enabled
+            and self.stripe_secret_key
+            and self.stripe_webhook_secret
+            and self.billing_email_webhook_url
+            and self.billing_email_webhook_secret
+            and self.billing_activation_signing_secret
+        )
 
 
 @lru_cache

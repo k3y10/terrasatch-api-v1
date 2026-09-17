@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
@@ -124,3 +124,20 @@ class StripeEvent(TimestampMixin, Base):
     livemode: Mapped[bool] = mapped_column(Boolean, nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BillingEmailOutbox(TimestampMixin, Base):
+    """Commit-safe email intent. No plaintext activation credentials are stored."""
+
+    __tablename__ = "billing_email_outbox"
+    event_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    context: Mapped[dict] = mapped_column(JSON, nullable=False)
+    activation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("billing_activations.id", ondelete="RESTRICT"), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    first_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(100))
