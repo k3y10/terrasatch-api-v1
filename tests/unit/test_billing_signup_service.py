@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.billing.models import BillingSignup
 from terrasatch.billing.schemas import CheckoutRequest
-from terrasatch.billing.service import create_signup
+from terrasatch.billing.service import _provision_signup, create_signup
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.errors import ResourceConflict
+from terrasatch.identity.models import Site
 
 
 def make_settings() -> Settings:
@@ -29,6 +31,31 @@ def checkout_request(*, plan_code: str = "team") -> CheckoutRequest:
         plan_code=plan_code,
         billing_interval="monthly",
     )
+
+
+@pytest.mark.asyncio
+async def test_signup_provisions_one_usable_site_and_retry_does_not_duplicate():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    configured = Settings(billing_activation_signing_secret="test-only-activation-secret")
+    async with sessions() as session:
+        signup = await create_signup(session, payload=checkout_request(), settings=configured)
+        first = await _provision_signup(
+            session, signup=signup, stripe_customer_id="cus_site_test", settings=configured
+        )
+        await session.commit()
+        repeated = await _provision_signup(
+            session, signup=signup, stripe_customer_id="cus_site_test", settings=configured
+        )
+        await session.commit()
+        sites = list(await session.scalars(select(Site)))
+        assert repeated.organization_id == first.organization_id
+        assert len(sites) == 1
+        assert sites[0].organization_id == first.organization_id
+        assert sites[0].enabled and sites[0].name == signup.organization_name
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

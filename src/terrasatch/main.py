@@ -88,7 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             secret_key=session_secret.get_secret_value(),
             max_age=configured_settings.admin_session_max_age_seconds,
             same_site="lax",
-            https_only=configured_settings.is_production,
+            https_only=configured_settings.environment in {"staging", "production"},
         )
     application.add_middleware(
         CORSMiddleware,

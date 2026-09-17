@@ -30,7 +30,7 @@ from terrasatch.billing.plans import (
 from terrasatch.billing.schemas import CheckoutRequest, SubscriptionResponse
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
-from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
+from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, User
 from terrasatch.organizations.service import slugify
 
 _ACTIVE_ACCESS_STATUSES = frozenset({"trialing", "active"})
@@ -388,6 +388,17 @@ async def _provision_signup(
     )
     session.add(organization)
     await session.flush()
+
+    # An operational container, not an invented geographic location. Create it in
+    # the same transaction as the account so the first field note can be saved.
+    session.add(
+        Site(
+            organization_id=organization.id,
+            name=signup.organization_name,
+            slug="primary",
+            enabled=True,
+        )
+    )
 
     user = User(
         email=signup.email,

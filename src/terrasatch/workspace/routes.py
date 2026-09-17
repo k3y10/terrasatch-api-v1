@@ -373,11 +373,13 @@ async def create_observation(organization_id: UUID, payload: Observation, reques
         user, membership = await access(request, session, organization_id)
         await writable(session, membership)
         site = await session.scalar(
-            select(Site).where(
+            select(Site)
+            .where(
                 Site.id == payload.site_id,
                 Site.organization_id == organization_id,
                 Site.enabled.is_(True),
             )
+            .with_for_update()
         )
         if site is None:
             raise HTTPException(404, "Site not found")
