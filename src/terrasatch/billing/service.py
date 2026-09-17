@@ -178,7 +178,8 @@ async def create_signup(
     existing_user = await session.scalar(select(User).where(User.email == payload.email))
     if existing_user is not None:
         raise ResourceConflict(
-            "An account already exists for this email. Sign in or contact TerraSatch to manage billing."
+            "An account already exists for this email. "
+            "Sign in or contact TerraSatch to manage billing."
         )
 
     now = datetime.now(UTC)
@@ -225,7 +226,8 @@ async def create_signup(
         )
         if not same_attempt:
             raise ResourceConflict(
-                "An active TerraSatch Checkout already exists for this email. Finish or let it expire before changing the subscription selection.",
+                "An active TerraSatch Checkout already exists for this email. "
+                "Finish or let it expire before changing the subscription selection.",
                 details={
                     "signup_id": str(existing_signup.id),
                     "status": existing_signup.status,

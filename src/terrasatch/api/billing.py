@@ -46,7 +46,7 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 Result = TypeVar("Result")
 
 
-async def _run_database(
+async def _run_database[Result](
     settings: Settings,
     operation: Callable[[AsyncSession], Awaitable[Result]],
 ) -> Result:
@@ -126,7 +126,10 @@ async def post_billing_checkout(
             )
         raise HTTPException(
             status_code=409,
-            detail="Checkout is completed or expiring. Check its status or wait for expiry before retrying.",
+            detail=(
+                "Checkout is completed or expiring. "
+                "Check its status or wait for expiry before retrying."
+            ),
         )
     checkout = await stripe.create_checkout(
         signup_id=str(signup.id),

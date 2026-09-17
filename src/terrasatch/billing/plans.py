@@ -101,7 +101,9 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     PlanCode.TEAM: PlanDefinition(
         code=PlanCode.TEAM,
         name="Team",
-        description="For a working crew sharing radios, channels, maps, logs, and operational context.",
+        description=(
+            "For a working crew sharing radios, channels, maps, logs, and operational context."
+        ),
         monthly_amount_cents=39_900,
         annual_amount_cents=None,
         trial_days=30,
@@ -145,7 +147,10 @@ PLAN_CATALOG: dict[PlanCode, PlanDefinition] = {
     PlanCode.ENTERPRISE: PlanDefinition(
         code=PlanCode.ENTERPRISE,
         name="Enterprise",
-        description="Higher-touch multi-site, integrated, private-hosting, security, and support deployments.",
+        description=(
+            "Higher-touch multi-site, integrated, private-hosting, security, "
+            "and support deployments."
+        ),
         monthly_amount_cents=None,
         annual_amount_cents=None,
         trial_days=0,

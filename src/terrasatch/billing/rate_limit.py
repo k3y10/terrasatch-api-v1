@@ -57,7 +57,8 @@ async def enforce_public_rate_limit(settings, *, category, identifier, limit=30,
     redis = Redis.from_url(str(settings.redis_url), socket_timeout=3, socket_connect_timeout=3)
     try:
         count = await redis.eval(
-            "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
+            "local n=redis.call('INCR',KEYS[1]); "
+            "if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
             1,
             key,
             window,

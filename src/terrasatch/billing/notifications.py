@@ -83,7 +83,9 @@ async def get_billing_email_context(
         trial_ends_at=subscription.trial_ends_at if subscription is not None else None,
         current_period_end=subscription.current_period_end if subscription is not None else None,
         grace_ends_at=subscription.grace_ends_at if subscription is not None else None,
-        cancel_at_period_end=subscription.cancel_at_period_end if subscription is not None else False,
+        cancel_at_period_end=(
+            subscription.cancel_at_period_end if subscription is not None else False
+        ),
     )
 
 

@@ -54,7 +54,10 @@ class StripeGateway:
             raise ProviderUnavailable("Stripe billing credentials are not configured")
         self.settings = settings
         self.secret_key = settings.stripe_secret_key.get_secret_value()
-        if self.secret_key.startswith(("sk_live_", "rk_live_")) and not settings.billing_allow_livemode:
+        if (
+            self.secret_key.startswith(("sk_live_", "rk_live_"))
+            and not settings.billing_allow_livemode
+        ):
             raise ProviderUnavailable("Live billing is disabled")
 
     @property

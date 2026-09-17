@@ -30,7 +30,8 @@ async def _managed_entitlements(session: AsyncSession, organization_id: UUID):
         return subscription, None
     if subscription.service_access == "restricted":
         raise ResourceConflict(
-            "This TerraSatch subscription is restricted. Existing operational data remains available, but new configuration is paused until billing is resolved.",
+            "This TerraSatch subscription is restricted. Existing operational data remains "
+            "available, but new configuration is paused until billing is resolved.",
             details={
                 "billing_status": subscription.status,
                 "service_access": subscription.service_access,
