@@ -211,12 +211,20 @@ async def test_staging_billing_callback_pages_are_self_contained() -> None:
     assert "workspace/billing/checkout/status" in success.text
     assert "workspace/billing/checkout/activation" in success.text
     assert "data.state === \"ready\"" in success.text
+    assert "Create access &amp; open workspace" in success.text
+    assert 'fetch("/api/v1/workspace/login"' in success.text
+    assert 'location.replace("/portal")' in success.text
+    assert 'href="/api/v1/workspace/billing/activate#token="' not in success.text
+    assert success.headers["cache-control"] == "no-store"
     assert cancel.status_code == 200
-    assert "Checkout canceled" in cancel.text
+    assert "No changes were made." in cancel.text
+    assert "Return to plans" in cancel.text
     assert portal_return.status_code == 200
     assert "Billing settings updated" in portal_return.text
+    assert 'href="/portal"' in portal_return.text
     assert activate.status_code == 200
     assert "workspace/billing/activate" in activate.text
+    assert "Create your TerraSatch password" in activate.text
 
 
 @pytest.mark.asyncio
