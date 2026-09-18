@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """Signature verification and reconciliation for Resend delivery webhooks."""
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def verify_resend_webhook(
         raise InvalidConfiguration("Resend webhook timestamp is outside the allowed window")
 
     signed_content = (
-        f"{webhook_id}.{timestamp_text}.".encode("utf-8") + raw_payload
+        f"{webhook_id}.{timestamp_text}.".encode() + raw_payload
     )
     expected = base64.b64encode(
         hmac.new(
