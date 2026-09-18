@@ -27,7 +27,7 @@ from terrasatch.identity.access import (
     role_allows,
 )
 from terrasatch.identity.models import MembershipRole, Site, User
-from terrasatch.portal.routes import _enabled, _require_user, _verify_csrf
+from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
@@ -131,7 +131,7 @@ async def session_info(request: Request, response: Response):
         )
         user = await session.get(User, user_id)
         if user is None or not user.enabled:
-            request.session.clear()
+            _clear_portal_auth(request)
             raise HTTPException(401, "Sign in required")
         memberships = await list_user_access(session, user_id=user_id)
         return {
