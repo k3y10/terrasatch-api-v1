@@ -243,7 +243,11 @@ class Settings(BaseSettings):
     def billing_resend_is_configured(self) -> bool:
         """Return whether Oracle can send transactional email directly through Resend."""
 
-        return bool(self.resend_api_key and self.billing_from)
+        if not self.resend_api_key or not self.billing_from:
+            return False
+        if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
+            return "@terrasatch.com" in self.billing_from.casefold()
+        return True
 
     @property
     def resend_webhook_is_configured(self) -> bool:
