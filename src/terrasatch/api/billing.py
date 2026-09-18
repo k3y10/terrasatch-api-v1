@@ -19,6 +19,10 @@ from terrasatch.billing.notifications import (
 from terrasatch.billing.outbox import enqueue_email
 from terrasatch.billing.plans import get_plan
 from terrasatch.billing.rate_limit import enforce_checkout_rate_limit, enforce_public_rate_limit
+from terrasatch.billing.resend_webhook import (
+    reconcile_resend_webhook,
+    verify_resend_webhook,
+)
 from terrasatch.billing.schemas import (
     ActivationRequest,
     ActivationResponse,
@@ -27,6 +31,7 @@ from terrasatch.billing.schemas import (
     CheckoutSessionResponse,
     CheckoutStatusResponse,
     CustomerPortalResponse,
+    EmailProviderWebhookResponse,
     SubscriptionResponse,
     WebhookResponse,
 )
@@ -68,6 +73,61 @@ async def _run_database[Result](
 
 def _gateway(settings: Settings) -> StripeGateway:
     return StripeGateway(settings)
+
+
+async def _process_resend_webhook_request(
+    request: Request,
+) -> EmailProviderWebhookResponse:
+    settings: Settings = request.app.state.settings
+    if settings.resend_webhook_secret is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    raw_payload = await request.body()
+    if len(raw_payload) > 64_000:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Webhook payload is too large",
+        )
+    try:
+        event, webhook_id = verify_resend_webhook(
+            raw_payload=raw_payload,
+            headers=request.headers,
+            secret=settings.resend_webhook_secret,
+        )
+    except InvalidConfiguration as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Resend webhook",
+        ) from error
+
+    result = await _run_database(
+        settings,
+        lambda session: reconcile_resend_webhook(
+            session,
+            event=event,
+            webhook_id=webhook_id,
+        ),
+    )
+    return EmailProviderWebhookResponse(
+        matched=result.matched,
+        duplicate=result.duplicate,
+    )
+
+
+@router.post("/resend/webhook", response_model=EmailProviderWebhookResponse)
+async def post_resend_webhook(request: Request) -> EmailProviderWebhookResponse:
+    """Reconcile signed Resend delivery/bounce events with the billing outbox."""
+
+    return await _process_resend_webhook_request(request)
+
+
+@staging_router.post("/resend/webhook", response_model=EmailProviderWebhookResponse)
+async def post_staging_resend_webhook(
+    request: Request,
+) -> EmailProviderWebhookResponse:
+    """Expose the same signed Resend reconciliation route on isolated staging."""
+
+    return await _process_resend_webhook_request(request)
 
 
 @router.get("/plans", response_model=list[BillingPlanResponse])
