@@ -7,7 +7,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from terrasatch.admin.security import verify_admin_password
+from terrasatch.admin.security import hash_admin_password, verify_admin_password
 from terrasatch.billing.service import recover_or_refresh_activation_for_email
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
@@ -33,7 +33,7 @@ def settings() -> Settings:
     )
 
 
-async def seed_account(session):
+async def seed_account(session, *, with_password: bool = True):
     account = Account(id=uuid4(), name="Recovery Test")
     organization = Organization(
         id=uuid4(),
@@ -45,6 +45,12 @@ async def seed_account(session):
         id=uuid4(),
         email="owner@example.com",
         display_name="Owner",
+        password_hash=(
+            hash_admin_password("existing-password-123")
+            if with_password
+            else None
+        ),
+        credential_version=1 if with_password else 0,
     )
     membership = Membership(
         id=uuid4(),
@@ -81,7 +87,7 @@ async def test_password_reset_is_single_use_and_replaces_password() -> None:
             password="new-password-123",
         )
         assert reset_user.id == user.id
-        assert reset_user.credential_version == 1
+        assert reset_user.credential_version == 2
         assert verify_admin_password("new-password-123", reset_user.password_hash or "")
         await session.commit()
 
@@ -129,7 +135,7 @@ async def test_activation_resend_reuses_valid_activation() -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as session:
-        organization, user = await seed_account(session)
+        organization, user = await seed_account(session, with_password=False)
         first = await recover_or_refresh_activation_for_email(
             session,
             email=user.email,
