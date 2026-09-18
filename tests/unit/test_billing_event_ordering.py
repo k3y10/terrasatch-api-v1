@@ -11,6 +11,7 @@ from terrasatch.billing.models import BillingCustomer, BillingSignup, Subscripti
 from terrasatch.billing.service import (
     _mark_invoice_failed,
     _mark_invoice_paid,
+    _sync_checkout_completed,
     sync_subscription_snapshot,
 )
 from terrasatch.config import Settings
@@ -218,5 +219,53 @@ async def test_stale_invoice_events_cannot_reverse_newer_payment_state() -> None
         assert applied is True
         assert subscription.status == "active"
         assert subscription.last_invoice_event_created == 400
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_checkout_snapshot_establishes_subscription_ordering_watermark() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        signup, subscription = await seed_billing_state(session)
+        subscription.last_subscription_event_created = None
+
+        result = await _sync_checkout_completed(
+            session,
+            checkout={
+                "id": "cs_ordering",
+                "customer": "cus_ordering",
+                "client_reference_id": str(signup.id),
+                "customer_details": {"email": signup.email},
+            },
+            subscription_snapshot=subscription_snapshot(
+                signup.id,
+                status="active",
+                cancel_at_period_end=False,
+            ),
+            settings=settings(),
+            event_created=250,
+        )
+
+        assert result.state_applied is True
+        assert subscription.last_subscription_event_created == 250
+
+        stale = await sync_subscription_snapshot(
+            session,
+            snapshot=subscription_snapshot(
+                signup.id,
+                status="canceled",
+                cancel_at_period_end=True,
+            ),
+            settings=settings(),
+            event_created=200,
+        )
+        assert stale.state_applied is False
+        assert subscription.status == "active"
+        assert subscription.cancel_at_period_end is False
 
     await engine.dispose()
