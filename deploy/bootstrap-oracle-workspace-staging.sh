@@ -208,15 +208,11 @@ else
   printf 'Stripe provider mode: hosted Payment Links + Caddy IP-restricted sandbox webhooks\n'
 fi
 printf 'Live billing: disabled\n'
-if [[ -n "${TERRASATCH_RESEND_API_KEY:-}" && -n "${TERRASATCH_BILLING_FROM:-}" ]]; then
-  [[ "${TERRASATCH_BILLING_FROM,,}" == *"@terrasatch.com"* ]] ||
-    die "Direct Resend sender must use the verified terrasatch.com domain."
-  printf 'Transactional email: direct Resend configured\n'
-elif [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_URL:-}" && -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
-  printf 'Transactional email: protected Vercel fallback configured\n'
-else
-  die "Transactional email must be configured before staging billing can be ready."
-fi
+[[ -n "${TERRASATCH_RESEND_API_KEY:-}" && -n "${TERRASATCH_BILLING_FROM:-}" ]] ||
+  die "Direct Oracle-to-Resend email must be configured before staging billing can be ready."
+[[ "${TERRASATCH_BILLING_FROM,,}" == *"@terrasatch.com"* ]] ||
+  die "Direct Resend sender must use the verified terrasatch.com domain."
+printf 'Transactional email: direct Resend configured\n'
 [[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]] ||
   die "Signed Resend delivery reconciliation must be configured before staging billing can be ready."
 printf 'Resend delivery reconciliation: configured\n'
