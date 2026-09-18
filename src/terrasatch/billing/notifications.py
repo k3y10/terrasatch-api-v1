@@ -402,10 +402,16 @@ async def _deliver_via_webhook(
                 json=payload,
             )
         response.raise_for_status()
+        data = response.json()
     except (httpx.HTTPError, ValueError) as error:
         raise ProviderUnavailable("TerraSatch billing email webhook delivery failed") from error
 
-    return BillingEmailDeliveryReceipt(provider="vercel_webhook", message_id=None)
+    message_id = str(data.get("messageId") or "").strip() if isinstance(data, dict) else ""
+    provider = "vercel_resend" if message_id else "vercel_webhook"
+    return BillingEmailDeliveryReceipt(
+        provider=provider,
+        message_id=message_id[:255] or None,
+    )
 
 
 async def deliver_billing_email(
