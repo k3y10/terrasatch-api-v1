@@ -187,3 +187,32 @@ async def test_workspace_webhook_alias_is_exposed_only_in_staging() -> None:
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_staging_billing_callback_pages_are_self_contained() -> None:
+    settings = Settings(
+        environment="staging",
+        deployment_name="billing-staging-callback-test",
+        api_base_url="https://staging-api.terrasatch.com",
+        cors_origins=[],
+        billing_enabled=False,
+    )
+    application = create_app(settings)
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        success = await client.get("/api/v1/workspace/billing/success")
+        cancel = await client.get("/api/v1/workspace/billing/cancel")
+        portal_return = await client.get("/api/v1/workspace/billing/portal-return")
+        activate = await client.get("/api/v1/workspace/billing/activate")
+
+    assert success.status_code == 200
+    assert "workspace/billing/checkout/status" in success.text
+    assert "data.state === \"ready\"" in success.text
+    assert cancel.status_code == 200
+    assert "Checkout canceled" in cancel.text
+    assert portal_return.status_code == 200
+    assert "Billing settings updated" in portal_return.text
+    assert activate.status_code == 200
+    assert "workspace/billing/activate" in activate.text
