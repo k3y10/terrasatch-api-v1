@@ -215,6 +215,16 @@ class StripeGateway:
             raise InvalidConfiguration("Stripe subscription ID is invalid")
         return await self._request_json("GET", f"/subscriptions/{subscription_id}")
 
+    async def retrieve_event(self, event_id: str) -> dict[str, Any]:
+        """Retrieve one Stripe event for staging verification and reconciliation."""
+
+        if (
+            not event_id.startswith("evt_")
+            or not all(character.isalnum() or character == "_" for character in event_id)
+        ):
+            raise InvalidConfiguration("Stripe event ID is invalid")
+        return await self._request_json("GET", f"/events/{event_id}")
+
     def construct_event(self, *, payload: bytes, signature: str) -> dict[str, Any]:
         """Verify Stripe's signed webhook payload without introducing a second HTTP SDK."""
 
