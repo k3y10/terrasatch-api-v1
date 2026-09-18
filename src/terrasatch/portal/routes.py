@@ -534,8 +534,11 @@ async def portal_fleet_status(
     organization: str = "",
 ) -> JSONResponse:
     settings: Settings = request.app.state.settings
-    user_id = _require_user(request, settings)
-    access = await _run_database(settings, lambda session: list_user_access(session, user_id=user_id))
+    user_id = await _require_user(request, settings)
+    access = await _run_database(
+        settings,
+        lambda session: list_user_access(session, user_id=user_id),
+    )
     if not access:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization access")
 
