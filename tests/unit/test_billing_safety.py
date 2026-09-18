@@ -179,8 +179,9 @@ def test_price_integrity_rejects_wrong_amount_currency_key_and_cadence(patch):
         "stripe_webhook_secret",
     ],
 )
-def test_readiness_requires_every_dependency(missing):
+def test_production_readiness_requires_every_dependency(missing):
     values = dict(
+        environment="production",
         billing_enabled=True,
         billing_email_webhook_url="https://example.com/email",
         billing_email_webhook_secret="test",
