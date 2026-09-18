@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.admin.security import hash_admin_password
@@ -65,6 +66,8 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             environment="local",
             admin_session_secret="test-only-session-secret",
             intelligence_provider="ollama",
+            billing_enabled=True,
+            stripe_secret_key=SecretStr("sk_test_workspace_portal"),
         )
     )
     async with httpx.AsyncClient(
