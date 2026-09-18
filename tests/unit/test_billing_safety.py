@@ -171,8 +171,8 @@ def test_price_integrity_rejects_wrong_amount_currency_key_and_cadence(patch):
 @pytest.mark.parametrize(
     "missing",
     [
-        "billing_email_webhook_url",
-        "billing_email_webhook_secret",
+        "resend_api_key",
+        "billing_from",
         "billing_activation_signing_secret",
         "resend_webhook_secret",
         "stripe_secret_key",
@@ -183,8 +183,8 @@ def test_production_readiness_requires_every_dependency(missing):
     values = dict(
         environment="production",
         billing_enabled=True,
-        billing_email_webhook_url="https://example.com/email",
-        billing_email_webhook_secret="test",
+        resend_api_key="re_test_terrasatch",
+        billing_from="TerraSatch Billing <billing@terrasatch.com>",
         billing_activation_signing_secret="test",
         resend_webhook_secret="whsec_dGVzdA==",
         stripe_secret_key="test",
