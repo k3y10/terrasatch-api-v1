@@ -923,6 +923,7 @@ async def activate_owner(
         raise ResourceNotFound("Activation user was not found")
     try:
         user.password_hash = hash_admin_password(password)
+        user.credential_version += 1
     except ValueError as error:
         raise InvalidConfiguration(str(error)) from error
     activation.consumed_at = now
