@@ -140,4 +140,6 @@ class BillingEmailOutbox(TimestampMixin, Base):
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     first_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivery_provider: Mapped[str | None] = mapped_column(String(64))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
     last_error: Mapped[str | None] = mapped_column(String(100))
