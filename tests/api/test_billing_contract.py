@@ -209,6 +209,7 @@ async def test_staging_billing_callback_pages_are_self_contained() -> None:
 
     assert success.status_code == 200
     assert "workspace/billing/checkout/status" in success.text
+    assert "workspace/billing/checkout/activation" in success.text
     assert "data.state === \"ready\"" in success.text
     assert cancel.status_code == 200
     assert "Checkout canceled" in cancel.text
