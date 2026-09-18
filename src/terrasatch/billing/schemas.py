@@ -120,3 +120,9 @@ class ActivationResponse(BaseModel):
 class WebhookResponse(BaseModel):
     received: bool = True
     duplicate: bool = False
+
+
+class EmailProviderWebhookResponse(BaseModel):
+    received: bool = True
+    matched: bool = False
+    duplicate: bool = False
