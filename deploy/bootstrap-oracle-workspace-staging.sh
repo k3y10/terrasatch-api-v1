@@ -358,6 +358,19 @@ webhook_public_code="$(curl --silent --output /dev/null --write-out '%{http_code
 printf 'public webhook from non-Stripe IP: %s (expected 403)\n' "$webhook_public_code"
 [[ "$webhook_public_code" == "403" ]] || die "Staging webhook is not restricted to Stripe source IPs."
 
+resend_webhook_code="$(
+  curl --silent --output /dev/null --write-out '%{http_code}'     -X POST     -H 'Content-Type: application/json'     -d '{}'     https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook || true
+)"
+if [[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]]; then
+  printf 'public Resend webhook unsigned request: %s (expected 400)\n' "$resend_webhook_code"
+  [[ "$resend_webhook_code" == "400" ]] ||
+    die "Configured Resend webhook did not reject an unsigned request."
+else
+  printf 'public Resend webhook while unconfigured: %s (expected 404)\n' "$resend_webhook_code"
+  [[ "$resend_webhook_code" == "404" ]] ||
+    die "Unconfigured Resend webhook should remain disabled."
+fi
+
 checkout_smoke_email="staging-smoke-$(date +%s)@example.com"
 checkout_smoke="$(
   curl --fail --silent --show-error     -H 'Content-Type: application/json'     -d "{\"display_name\":\"Staging Smoke\",\"email\":\"$checkout_smoke_email\",\"organization_name\":\"TerraSatch Staging Smoke\",\"plan_code\":\"field\",\"billing_interval\":\"monthly\"}"     https://staging-api.terrasatch.com/api/v1/workspace/billing/checkout
