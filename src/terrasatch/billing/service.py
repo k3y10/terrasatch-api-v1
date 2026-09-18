@@ -838,6 +838,68 @@ async def recover_pending_activation_token_for_checkout(
     return token, signup.email
 
 
+async def recover_or_refresh_activation_for_email(
+    session: AsyncSession,
+    *,
+    email: str,
+    settings: Settings,
+) -> tuple[str, UUID] | None:
+    """Return a valid owner activation token without disclosing account existence."""
+
+    normalized = email.strip().casefold()
+    user = await session.scalar(
+        select(User).where(User.email == normalized, User.enabled.is_(True))
+    )
+    if user is None or user.password_hash:
+        return None
+
+    membership = await session.scalar(
+        select(Membership)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Membership.user_id == user.id,
+            Membership.role == MembershipRole.OWNER,
+            Membership.enabled.is_(True),
+            Organization.enabled.is_(True),
+        )
+        .order_by(Membership.created_at)
+        .limit(1)
+    )
+    if membership is None:
+        return None
+
+    now = datetime.now(UTC)
+    activation = await session.scalar(
+        select(BillingActivation)
+        .where(
+            BillingActivation.user_id == user.id,
+            BillingActivation.organization_id == membership.organization_id,
+            BillingActivation.consumed_at.is_(None),
+            BillingActivation.expires_at > now,
+        )
+        .order_by(BillingActivation.created_at.desc())
+        .limit(1)
+    )
+    if activation is None:
+        activation_id = uuid4()
+        token = recover_activation_token(settings, activation_id)
+        activation = BillingActivation(
+            id=activation_id,
+            user_id=user.id,
+            organization_id=membership.organization_id,
+            token_hash=_token_hash(token),
+            expires_at=now + timedelta(hours=settings.billing_activation_ttl_hours),
+        )
+        session.add(activation)
+        await session.flush()
+        return token, membership.organization_id
+
+    token = recover_activation_token(settings, activation.id)
+    if _token_hash(token) != activation.token_hash:
+        raise InvalidConfiguration("Activation signing secret does not match account state")
+    return token, membership.organization_id
+
+
 async def activate_owner(
     session: AsyncSession,
     *,
