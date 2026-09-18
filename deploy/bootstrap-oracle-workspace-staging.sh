@@ -209,17 +209,17 @@ else
 fi
 printf 'Live billing: disabled\n'
 if [[ -n "${TERRASATCH_RESEND_API_KEY:-}" && -n "${TERRASATCH_BILLING_FROM:-}" ]]; then
+  [[ "${TERRASATCH_BILLING_FROM,,}" == *"@terrasatch.com"* ]] ||
+    die "Direct Resend sender must use the verified terrasatch.com domain."
   printf 'Transactional email: direct Resend configured\n'
-  if [[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]]; then
-    printf 'Resend delivery reconciliation: configured\n'
-  else
-    printf 'Resend delivery reconciliation: not configured\n'
-  fi
-elif [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
-  printf 'Transactional email: Vercel fallback configured\n'
+elif [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_URL:-}" && -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
+  printf 'Transactional email: protected Vercel fallback configured\n'
 else
-  printf 'Transactional email: not configured (allowed in isolated staging; activation fallback enabled)\n'
+  die "Transactional email must be configured before staging billing can be ready."
 fi
+[[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]] ||
+  die "Signed Resend delivery reconciliation must be configured before staging billing can be ready."
+printf 'Resend delivery reconciliation: configured\n'
 printf 'Required sandbox secrets: present (values suppressed)\n'
 
 say "Running dependency lock validation, Ruff, and full pytest suite"
@@ -368,32 +368,11 @@ printf 'public webhook from non-Stripe IP: %s (expected 403)\n' "$webhook_public
 resend_webhook_code="$(
   curl --silent --output /dev/null --write-out '%{http_code}'     -X POST     -H 'Content-Type: application/json'     -d '{}'     https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook || true
 )"
-if [[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]]; then
-  printf 'public Resend webhook unsigned request: %s (expected 400)\n' "$resend_webhook_code"
-  [[ "$resend_webhook_code" == "400" ]] ||
-    die "Configured Resend webhook did not reject an unsigned request."
-else
-  printf 'public Resend webhook while unconfigured: %s (expected 404)\n' "$resend_webhook_code"
-  [[ "$resend_webhook_code" == "404" ]] ||
-    die "Unconfigured Resend webhook should remain disabled."
-fi
+printf 'public Resend webhook unsigned request: %s (expected 400)\n' "$resend_webhook_code"
+[[ "$resend_webhook_code" == "400" ]] ||
+  die "Configured Resend webhook did not reject an unsigned request."
 
-checkout_smoke_email="staging-smoke-$(date +%s)@example.com"
-checkout_smoke="$(
-  curl --fail --silent --show-error     -H 'Content-Type: application/json'     -d "{\"display_name\":\"Staging Smoke\",\"email\":\"$checkout_smoke_email\",\"organization_name\":\"TerraSatch Staging Smoke\",\"plan_code\":\"field\",\"billing_interval\":\"monthly\"}"     https://staging-api.terrasatch.com/api/v1/workspace/billing/checkout
-)"
-python3 - "$checkout_smoke" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-url = str(payload.get("checkout_url") or "")
-if not url.startswith("https://buy.stripe.com/test_"):
-    raise SystemExit("Staging checkout did not return a Stripe sandbox Payment Link")
-if "client_reference_id=" not in url or "locked_prefilled_email=" not in url:
-    raise SystemExit("Staging checkout URL is missing reconciliation parameters")
-print("public staging checkout: 201-equivalent response with Stripe sandbox Payment Link")
-PY
-
+printf 'Synthetic checkout creation: skipped (deployment verification is non-destructive)\n'
 public_root_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/health || true)"
 printf 'public non-workspace route /health: %s (expected 404)\n' "$public_root_code"
 [[ "$public_root_code" == "404" ]] || die "Staging Caddy is exposing more than /api/v1/workspace/*."
