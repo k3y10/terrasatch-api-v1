@@ -112,7 +112,9 @@ async def post_billing_checkout(
 
     if settings.staging_payment_links_are_configured and settings.stripe_secret_key is None:
         if payload.billing_interval.value != "monthly":
-            raise InvalidConfiguration("Staging Payment Link checkout currently supports monthly plans")
+            raise InvalidConfiguration(
+                "Staging Payment Link checkout currently supports monthly plans"
+            )
         if payload.plan_code.value == "field":
             payment_link_url = settings.billing_staging_individual_payment_link_url
         elif payload.plan_code.value == "team":
@@ -325,7 +327,9 @@ def _validate_staging_payment_link_event(
             or str(metadata.get("plan_code") or "") != expected_plan
             or str(metadata.get("billing_interval") or "") != "monthly"
         ):
-            raise InvalidConfiguration("Checkout Session is not an approved TerraSatch staging Payment Link")
+            raise InvalidConfiguration(
+                "Checkout Session is not an approved TerraSatch staging Payment Link"
+            )
 
     if event_type.startswith("customer.subscription."):
         metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
@@ -592,14 +596,16 @@ async function check() {
         const activation = await activationResponse.json();
         if (activation.token) {
           const link = document.createElement("a");
-          link.href = "/api/v1/workspace/billing/activate#token=" + encodeURIComponent(activation.token);
+          link.href = "/api/v1/workspace/billing/activate#token=" +
+            encodeURIComponent(activation.token);
           link.textContent = "Activate staging account";
           target.textContent = "Subscription webhook processed. Account provisioning is complete. ";
           target.appendChild(link);
           return;
         }
       }
-      target.textContent = "Subscription webhook processed. Account provisioning is complete; activation is required.";
+      target.textContent =
+        "Subscription webhook processed. Account provisioning is complete; activation is required.";
       return;
     }
     target.textContent = "Subscription webhook processed. Account provisioning is complete.";
