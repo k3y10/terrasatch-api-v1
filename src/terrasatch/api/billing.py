@@ -520,6 +520,7 @@ async def _process_stripe_webhook(
             )
             if (
                 not result.duplicate
+                and result.state_applied
                 and result.organization_id is not None
                 and settings.billing_email_is_configured
             ):
