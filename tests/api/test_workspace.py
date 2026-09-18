@@ -38,6 +38,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             display_name="Test member",
             enabled=True,
             password_hash=hash_admin_password("Strong-test-password-2026!"),
+            credential_version=1,
         )
         session.add(user)
         await session.flush()
@@ -52,7 +53,11 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         site_id = site.id
         organization_id, user_id = org.id, user.id
     app = create_app(
-        Settings(admin_session_secret="test-only-session-secret", intelligence_provider="ollama")
+        Settings(
+            environment="local",
+            admin_session_secret="test-only-session-secret",
+            intelligence_provider="ollama",
+        )
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://testserver"
