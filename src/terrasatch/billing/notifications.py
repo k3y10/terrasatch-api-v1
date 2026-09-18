@@ -448,14 +448,19 @@ def build_billing_email(
             text=(
                 f"Hi {context.display_name or 'there'},\n\n"
                 "Your TerraSatch workspace is ready. "
-                f"{'Finish setup: ' + activation_url if activation_url else 'Open TerraSatch to finish setup.'}\n\n"
+                (
+                    f"Finish setup: {activation_url}\n\n"
+                    if activation_url
+                    else "Open TerraSatch to finish setup.\n\n"
+                )
                 "If you did not request this message, you can ignore it."
             ),
             html=_shell(
                 subject,
                 (
                     f"<p>Hi {name},</p>"
-                    f"<p>Your TerraSatch workspace for <strong>{organization}</strong> is ready.</p>"
+                    "<p>Your TerraSatch workspace for "
+                    f"<strong>{organization}</strong> is ready.</p>"
                     f"{action}"
                     "<p>If you did not request this message, you can ignore it.</p>"
                 ),
