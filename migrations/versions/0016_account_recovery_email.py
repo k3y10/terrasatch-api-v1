@@ -14,6 +14,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column(
+        "users",
+        sa.Column("credential_version", sa.Integer(), server_default="0", nullable=False),
+    )
     op.create_table(
         "password_reset_intents",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -65,3 +69,4 @@ def downgrade() -> None:
     op.drop_column("billing_email_outbox", "password_reset_id")
     op.drop_index("ix_password_reset_intents_user_id", table_name="password_reset_intents")
     op.drop_table("password_reset_intents")
+    op.drop_column("users", "credential_version")
