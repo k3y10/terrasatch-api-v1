@@ -5,6 +5,7 @@ STAGING_DIR="${TERRASATCH_STAGING_DIR:-/home/ubuntu/terrasatch-workspace-staging
 ENV_FILE="${TERRASATCH_STAGING_ENV_FILE:-$STAGING_DIR/.env.staging}"
 COMPOSE_FILE="${TERRASATCH_STAGING_COMPOSE_FILE:-$STAGING_DIR/deploy/docker-compose.workspace-staging.yml}"
 RESEND_WEBHOOK_URL="https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook"
+RESEND_WEBHOOK_ID="${TERRASATCH_RESEND_WEBHOOK_ID:-76225e17-36a9-4dc9-95a4-b28094a26d4d}"
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -20,16 +21,42 @@ chmod 600 "$ENV_FILE"
 say "Configure direct TerraSatch staging email through Resend"
 printf 'Secrets are read without terminal echo and are never printed.\n'
 
-read -r -s -p "Resend API key (re_...): " resend_api_key
+read -r -s -p "Resend sending API key (re_...): " resend_api_key
 printf '\n'
-[[ -n "$resend_api_key" ]] || die "Resend API key is required."
-[[ "$resend_api_key" == re_* ]] || die "Resend API key must use the expected re_ prefix."
+[[ -n "$resend_api_key" ]] || die "Resend sending API key is required."
+[[ "$resend_api_key" == re_* ]] || die "Resend sending API key must use the expected re_ prefix."
 
-read -r -s -p "Resend webhook signing secret (whsec_..., leave blank if webhook is not created yet): " resend_webhook_secret
+read -r -s -p "Resend admin API key (Full Access, re_...): " resend_admin_api_key
 printf '\n'
-if [[ -n "$resend_webhook_secret" && "$resend_webhook_secret" != whsec_* ]]; then
-  die "Resend webhook signing secret must use the expected whsec_ prefix."
-fi
+[[ -n "$resend_admin_api_key" ]] || die "Resend admin API key is required for webhook setup."
+[[ "$resend_admin_api_key" == re_* ]] ||
+  die "Resend admin API key must use the expected re_ prefix."
+
+say "Rotating the staging Resend webhook signing secret"
+rotate_response="$(
+  curl --silent --show-error --fail-with-body \
+    -X POST \
+    -H "Authorization: Bearer $resend_admin_api_key" \
+    -H 'Content-Type: application/json' \
+    "https://api.resend.com/webhooks/$RESEND_WEBHOOK_ID/signing-secret/rotate"
+)" || die "Resend rejected the admin key or webhook signing-secret rotation."
+
+resend_webhook_secret="$(
+  python3 - "$rotate_response" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+secret = str(payload.get("signing_secret") or "").strip()
+if not secret.startswith("whsec_"):
+    raise SystemExit("Resend rotation response did not include a webhook signing secret")
+print(secret)
+PY
+)"
+unset rotate_response
+[[ "$resend_webhook_secret" == whsec_* ]] ||
+  die "Resend webhook signing-secret rotation did not return the expected secret."
+printf 'Resend webhook signing secret rotated and captured without printing it.\n'
 
 default_from='TerraSatch Billing <billing@terrasatch.com>'
 read -r -p "Billing From [$default_from]: " billing_from
@@ -53,7 +80,7 @@ PY
 tmp_env="$(mktemp)"
 cleanup() {
   rm -f "$tmp_env"
-  unset resend_api_key resend_webhook_secret billing_from billing_reply_to
+  unset resend_api_key resend_admin_api_key resend_webhook_secret billing_from billing_reply_to
 }
 trap cleanup EXIT
 
@@ -146,5 +173,7 @@ else
 fi
 
 say "RESEND STAGING CONFIGURATION PASSED"
-printf 'Webhook URL to configure in Resend: %s\n' "$RESEND_WEBHOOK_URL"
+printf 'Resend webhook: %s\n' "$RESEND_WEBHOOK_ID"
+printf 'Webhook URL: %s\n' "$RESEND_WEBHOOK_URL"
+printf 'Admin key was used only for setup and was not persisted.\n'
 printf 'Live Stripe billing remains disabled.\n'
