@@ -24,7 +24,7 @@ async def test_portal_login_is_available_with_browser_session_secret() -> None:
         response = await client.get("/portal/login")
 
     assert response.status_code == 200
-    assert "ORGANIZATION PORTAL" in response.text
+    assert "FIELD WORKSPACE" in response.text
     assert "individual TerraSatch account" in response.text
     assert 'name="csrf_token"' in response.text
 
