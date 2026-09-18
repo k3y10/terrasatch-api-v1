@@ -179,7 +179,6 @@ export TERRASATCH_STRIPE_SECRET_KEY TERRASATCH_STRIPE_WEBHOOK_SECRET
 
 required=(
   POSTGRES_PASSWORD
-  TERRASATCH_STRIPE_SECRET_KEY
   TERRASATCH_BILLING_ACTIVATION_SIGNING_SECRET
 )
 missing=()
@@ -189,23 +188,25 @@ done
 if [[ "${#missing[@]}" -gt 0 ]]; then
   printf 'Missing staging variables (values were not printed):\n' >&2
   printf '  %s\n' "${missing[@]}" >&2
-  if printf '%s\n' "${missing[@]}" | grep -qx 'TERRASATCH_STRIPE_SECRET_KEY'; then
-    printf '\nNo existing TerraSatch sandbox key was found in server env files, Docker environments, or Stripe CLI config.\n' >&2
-    printf 'A server-side Stripe test credential for account %s is required for API-created Checkout sessions.\n' "$EXPECTED_STRIPE_ACCOUNT" >&2
-  fi
   exit 1
 fi
 
-case "$TERRASATCH_STRIPE_SECRET_KEY" in
-  sk_test_*|rk_test_*) ;;
-  *) die "TERRASATCH_STRIPE_SECRET_KEY is not a Stripe test-mode key." ;;
-esac
+if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
+  case "$TERRASATCH_STRIPE_SECRET_KEY" in
+    sk_test_*|rk_test_*) ;;
+    *) die "Configured Stripe credential is not a test-mode key." ;;
+  esac
+fi
 if [[ "${TERRASATCH_BILLING_ALLOW_LIVEMODE:-false}" == "true" ]]; then
   die "TERRASATCH_BILLING_ALLOW_LIVEMODE must not be true in staging."
 fi
 
 say "Sandbox environment safety checks passed"
-printf 'Stripe key mode: test\n'
+if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
+  printf 'Stripe provider mode: test API key + sandbox webhooks\n'
+else
+  printf 'Stripe provider mode: hosted Payment Links + Caddy IP-restricted sandbox webhooks\n'
+fi
 printf 'Live billing: disabled\n'
 if [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
   printf 'Transactional email: configured\n'
@@ -221,21 +222,50 @@ uv sync --extra dev --frozen
 uv run ruff check src tests
 uv run pytest
 
-say "Ensuring isolated staging Caddy host exists"
-if ! sudo grep -qF 'staging-api.terrasatch.com {' "$CADDYFILE"; then
-  backup="$CADDYFILE.backup.$(date -u +%Y%m%dT%H%M%SZ)"
-  sudo cp "$CADDYFILE" "$backup"
-  printf '\n' | sudo tee -a "$CADDYFILE" >/dev/null
-  sudo cat "$staging_dir/deploy/examples/Caddyfile.workspace-staging" |
-    sudo tee -a "$CADDYFILE" >/dev/null
-  if ! sudo caddy validate --config "$CADDYFILE"; then
-    sudo cp "$backup" "$CADDYFILE"
-    die "Caddy validation failed; original Caddyfile restored."
-  fi
-  sudo systemctl reload caddy
-else
-  sudo caddy validate --config "$CADDYFILE"
+say "Installing the isolated staging Caddy policy"
+backup="$CADDYFILE.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+sudo cp "$CADDYFILE" "$backup"
+tmp_caddy="$(mktemp)"
+python3 - "$CADDYFILE" "$staging_dir/deploy/examples/Caddyfile.workspace-staging" "$tmp_caddy" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text()
+replacement = Path(sys.argv[2]).read_text().strip() + "\n"
+target = "staging-api.terrasatch.com {"
+
+start = source.find(target)
+if start == -1:
+    updated = source.rstrip() + "\n\n" + replacement
+else:
+    brace = source.find("{", start)
+    if brace == -1:
+        raise SystemExit("Malformed staging Caddy block")
+    depth = 0
+    end = None
+    for index in range(brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit("Unterminated staging Caddy block")
+    updated = source[:start].rstrip() + "\n\n" + replacement + source[end:].lstrip()
+
+Path(sys.argv[3]).write_text(updated)
+PY
+sudo install -m 644 "$tmp_caddy" "$CADDYFILE"
+rm -f "$tmp_caddy"
+
+if ! sudo caddy validate --config "$CADDYFILE"; then
+  sudo cp "$backup" "$CADDYFILE"
+  die "Caddy validation failed; original Caddyfile restored."
 fi
+sudo systemctl reload caddy
 
 say "Deploying only the isolated workspace staging stack"
 export TERRASATCH_STAGING_BRANCH="$BRANCH"
@@ -253,7 +283,26 @@ curl --fail --silent --show-error -o /dev/null -w 'local activation page: %{http
 
 say "Verifying public staging routing"
 curl --fail --silent --show-error -o /dev/null -w 'public cancel page: %{http_code}\n'   https://staging-api.terrasatch.com/api/v1/workspace/billing/cancel
-curl --fail --silent --show-error -o /dev/null -w 'public webhook GET (expected 405): %{http_code}\n'   https://staging-api.terrasatch.com/api/v1/workspace/billing/stripe/webhook || true
+webhook_public_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/api/v1/workspace/billing/stripe/webhook || true)"
+printf 'public webhook from non-Stripe IP: %s (expected 403)\n' "$webhook_public_code"
+[[ "$webhook_public_code" == "403" ]] || die "Staging webhook is not restricted to Stripe source IPs."
+
+checkout_smoke_email="staging-smoke-$(date +%s)@example.com"
+checkout_smoke="$(
+  curl --fail --silent --show-error     -H 'Content-Type: application/json'     -d "{\"display_name\":\"Staging Smoke\",\"email\":\"$checkout_smoke_email\",\"organization_name\":\"TerraSatch Staging Smoke\",\"plan_code\":\"field\",\"billing_interval\":\"monthly\"}"     https://staging-api.terrasatch.com/api/v1/workspace/billing/checkout
+)"
+python3 - "$checkout_smoke" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+url = str(payload.get("checkout_url") or "")
+if not url.startswith("https://buy.stripe.com/test_"):
+    raise SystemExit("Staging checkout did not return a Stripe sandbox Payment Link")
+if "client_reference_id=" not in url or "locked_prefilled_email=" not in url:
+    raise SystemExit("Staging checkout URL is missing reconciliation parameters")
+print("public staging checkout: 201-equivalent response with Stripe sandbox Payment Link")
+PY
+
 public_root_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/health || true)"
 printf 'public non-workspace route /health: %s (expected 404)\n' "$public_root_code"
 [[ "$public_root_code" == "404" ]] || die "Staging Caddy is exposing more than /api/v1/workspace/*."
