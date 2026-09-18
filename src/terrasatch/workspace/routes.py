@@ -92,7 +92,11 @@ def csrf(request):
 
 
 async def access(request, session, organization_id):
-    user_id = _require_user(request, request.app.state.settings)
+    user_id = await _require_user(
+        request,
+        request.app.state.settings,
+        session=session,
+    )
     user = await session.get(User, user_id)
     if user is None or not user.enabled:
         raise HTTPException(401, "Sign in required")
@@ -119,8 +123,12 @@ async def session_info(request: Request, response: Response):
     token = issue_csrf_token(request.session)
     if not request.session.get("portal_user_id"):
         return {"user": None, "organizations": [], "csrf_token": token}
-    user_id = _require_user(request, request.app.state.settings)
     async with create_session_factory(request.app.state.settings)() as session:
+        user_id = await _require_user(
+            request,
+            request.app.state.settings,
+            session=session,
+        )
         user = await session.get(User, user_id)
         if user is None or not user.enabled:
             request.session.clear()
@@ -159,6 +167,7 @@ async def login(payload: Login, request: Request):
             raise HTTPException(401, "Email or password is incorrect")
         request.session.clear()
         request.session["portal_user_id"] = str(user.id)
+        request.session["portal_credential_version"] = user.credential_version
         return {"csrf_token": issue_csrf_token(request.session)}
 
 
