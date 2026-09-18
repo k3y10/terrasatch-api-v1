@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BRANCH="${TERRASATCH_STAGING_BRANCH:-feat/subscription-billing}"
-EXPECTED_HEAD="${TERRASATCH_EXPECTED_STAGING_HEAD:-4ec7df3e0b362ffc9bcc0c1efc427fb5da60e52c}"
+EXPECTED_HEAD="${TERRASATCH_EXPECTED_STAGING_HEAD:-}"
 PROD_REPO="${TERRASATCH_PROD_REPO:-/opt/terrasatch/api}"
 DEFAULT_STAGING_DIR="${TERRASATCH_STAGING_DIR:-/home/ubuntu/terrasatch-workspace-staging}"
 CADDYFILE="${TERRASATCH_CADDYFILE:-/etc/caddy/Caddyfile}"
