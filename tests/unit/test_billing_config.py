@@ -137,3 +137,52 @@ def test_payment_link_mode_cannot_enable_production_billing() -> None:
 
     assert settings.staging_payment_links_are_configured is False
     assert settings.billing_is_configured is False
+
+
+def test_direct_resend_satisfies_transactional_email_readiness() -> None:
+    settings = Settings(
+        environment="production",
+        billing_enabled=True,
+        resend_api_key=SecretStr("re_test_terrasatch"),
+        billing_from="TerraSatch <billing@terrasatch.com>",
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=SecretStr("whsec_terrasatch"),
+    )
+
+    assert settings.billing_resend_is_configured is True
+    assert settings.billing_email_webhook_is_configured is False
+    assert settings.billing_email_is_configured is True
+    assert settings.billing_is_configured is True
+
+
+def test_webhook_fallback_still_satisfies_email_readiness() -> None:
+    settings = Settings(
+        billing_email_webhook_url="https://example.com/api/billing-email",
+        billing_email_webhook_secret=SecretStr("test-email-secret"),
+    )
+
+    assert settings.billing_resend_is_configured is False
+    assert settings.billing_email_webhook_is_configured is True
+    assert settings.billing_email_is_configured is True
+
+
+def test_empty_email_and_stripe_secrets_are_normalized_to_none() -> None:
+    settings = Settings(
+        resend_api_key="   ",
+        billing_email_webhook_secret="",
+        billing_activation_signing_secret=" ",
+        stripe_secret_key="",
+        stripe_webhook_secret=" ",
+        billing_from=" ",
+        billing_reply_to=" ",
+    )
+
+    assert settings.resend_api_key is None
+    assert settings.billing_email_webhook_secret is None
+    assert settings.billing_activation_signing_secret is None
+    assert settings.stripe_secret_key is None
+    assert settings.stripe_webhook_secret is None
+    assert settings.billing_from is None
+    assert settings.billing_reply_to is None
+    assert settings.billing_email_is_configured is False
