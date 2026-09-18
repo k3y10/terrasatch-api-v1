@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.billing.models import BillingActivation, BillingEmailOutbox
-from terrasatch.billing.notifications import BillingEmailContext
+from terrasatch.billing.notifications import BillingEmailContext, BillingEmailDeliveryReceipt
 from terrasatch.billing.outbox import dispatch_email_batch, enqueue_email
 from terrasatch.billing.plans import BillingInterval, get_plan
 from terrasatch.billing.service import _token_hash, recover_activation_token
@@ -28,7 +28,7 @@ async def test_activation_delivery_checks_current_token_state(monkeypatch, state
 
     async def send(**kwargs):
         deliveries.append(kwargs["activation_token"])
-        return True
+        return BillingEmailDeliveryReceipt(provider="test", message_id="email_valid")
 
     monkeypatch.setattr("terrasatch.billing.outbox.deliver_billing_email", send)
     async with factory() as session:
@@ -72,6 +72,8 @@ async def test_activation_delivery_checks_current_token_state(monkeypatch, state
         row = await session.get(BillingEmailOutbox, "activation-test")
         assert row.attempts == 1
         assert (row.sent_at is not None) == (state == "valid")
+        assert row.delivery_provider == ("test" if state == "valid" else None)
+        assert row.provider_message_id == ("email_valid" if state == "valid" else None)
         expected = {
             "expired": "activation_expired",
             "consumed": "activation_consumed",
@@ -104,7 +106,7 @@ async def test_rollback_cannot_send_and_retry_keeps_identical_payload(monkeypatc
         deliveries.append((kwargs["event_id"], asdict(kwargs["context"])))
         if len(deliveries) == 1:
             raise ProviderUnavailable("temporary")
-        return True
+        return BillingEmailDeliveryReceipt(provider="test", message_id="email_retry")
 
     monkeypatch.setattr("terrasatch.billing.outbox.deliver_billing_email", send)
     async with factory() as session:
@@ -123,6 +125,10 @@ async def test_rollback_cannot_send_and_retry_keeps_identical_payload(monkeypatc
         await session.commit()
     assert await dispatch_email_batch(settings(), session_factory=factory) == 1
     assert deliveries[0] == deliveries[1]
+    async with factory() as session:
+        row = await session.get(BillingEmailOutbox, "committed")
+        assert row.delivery_provider == "test"
+        assert row.provider_message_id == "email_retry"
     assert await dispatch_email_batch(settings(), session_factory=factory) == 0
     await engine.dispose()
 
