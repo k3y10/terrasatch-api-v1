@@ -285,7 +285,7 @@ class Settings(BaseSettings):
             return False
         if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
             return bool(
-                self.billing_email_is_configured
+                self.billing_resend_is_configured
                 and self.resend_webhook_is_configured
             )
         return self.billing_email_is_configured
