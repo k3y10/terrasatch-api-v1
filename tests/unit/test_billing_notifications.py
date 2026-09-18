@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -71,9 +72,10 @@ async def test_direct_resend_delivery_uses_idempotency_and_returns_receipt(monke
     )
     assert captured["authorization"] == "Bearer re_test_terrasatch"
     assert captured["idempotency"] == "terrasatch-billing/trial_started/evt_test_123"
-    assert '"from":"TerraSatch <billing@terrasatch.com>"' in str(captured["body"])
-    assert '"to":["owner@example.com"]' in str(captured["body"])
-    assert '"reply_to":"support@terrasatch.com"' in str(captured["body"])
+    body = json.loads(str(captured["body"]))
+    assert body["from"] == "TerraSatch <billing@terrasatch.com>"
+    assert body["to"] == ["owner@example.com"]
+    assert body["reply_to"] == "support@terrasatch.com"
 
 
 @pytest.mark.asyncio
