@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
@@ -92,6 +92,8 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_payment_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_subscription_event_created: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_invoice_event_created: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class BillingActivation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -123,6 +125,7 @@ class StripeEvent(TimestampMixin, Base):
     event_type: Mapped[str] = mapped_column(String(255), nullable=False)
     livemode: Mapped[bool] = mapped_column(Boolean, nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_created_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
