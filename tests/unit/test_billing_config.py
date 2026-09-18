@@ -10,6 +10,7 @@ def test_billing_secrets_can_be_supplied_by_field_name_for_internal_configuratio
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
         stripe_webhook_secret=SecretStr("whsec_terrasatch"),
     )
@@ -41,6 +42,7 @@ def test_staging_can_verify_test_webhooks_by_event_retrieval_without_signing_sec
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
         stripe_webhook_secret=None,
     )
@@ -71,6 +73,7 @@ def test_staging_retrieval_verification_rejects_live_stripe_keys() -> None:
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_live_not_allowed"),
         stripe_webhook_secret=None,
     )
@@ -97,6 +100,7 @@ def test_production_billing_still_requires_transactional_email() -> None:
         environment="production",
         billing_enabled=True,
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
         stripe_webhook_secret=SecretStr("whsec_terrasatch"),
     )
@@ -144,6 +148,7 @@ def test_direct_resend_satisfies_transactional_email_readiness() -> None:
         environment="production",
         billing_enabled=True,
         resend_api_key=SecretStr("re_test_terrasatch"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
         billing_from="TerraSatch <billing@terrasatch.com>",
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
@@ -170,6 +175,7 @@ def test_webhook_fallback_still_satisfies_email_readiness() -> None:
 def test_empty_email_and_stripe_secrets_are_normalized_to_none() -> None:
     settings = Settings(
         resend_api_key="   ",
+        resend_webhook_secret="",
         billing_email_webhook_secret="",
         billing_activation_signing_secret=" ",
         stripe_secret_key="",
@@ -179,6 +185,7 @@ def test_empty_email_and_stripe_secrets_are_normalized_to_none() -> None:
     )
 
     assert settings.resend_api_key is None
+    assert settings.resend_webhook_secret is None
     assert settings.billing_email_webhook_secret is None
     assert settings.billing_activation_signing_secret is None
     assert settings.stripe_secret_key is None
