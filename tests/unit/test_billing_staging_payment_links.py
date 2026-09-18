@@ -104,3 +104,12 @@ def test_staging_subscription_event_requires_terrasatch_metadata() -> None:
             settings=staging_settings(),
             event=event,
         )
+
+
+
+def test_staging_payment_links_remain_preferred_with_stripe_api_key() -> None:
+    settings = staging_settings().model_copy(
+        update={"stripe_secret_key": SecretStr("sk_test_portal_only")}
+    )
+
+    assert settings.staging_payment_links_are_configured is True
