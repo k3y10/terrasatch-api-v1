@@ -21,7 +21,7 @@ Annual values are null. Optional annual discounts remain proposals. Old pitch-mo
 2. Build from the billing branch in an isolated staging directory/database; never migrate production for a preview. Apply migrations through 0015 and run API and worker from the same version.
 3. Configure a protected Preview origin and staging-only server credentials. Identify the public staging webhook origin before creating endpoints. No default production URL is acceptable for a sandbox acceptance run.
 4. After explicit renewed Stripe authorization, verify account `acct_1Txb0QPwzxCRGRdh`, test mode, and create the matching v2 catalog. Configure customer portal cancellation/payment methods; plan switching needs separate backend validation.
-5. Production Stripe still requires a server-side restricted key and matching webhook signing secret. Staging and production billing readiness both require transactional email plus signed Resend delivery reconciliation; never print credentials or commit environment files.
+5. Production Stripe still requires a server-side restricted key and matching webhook signing secret. Staging and production billing readiness both require the direct Oracle-to-Resend sender plus signed Resend delivery reconciliation; the Vercel sender is resilience fallback only and cannot satisfy readiness by itself. Never print credentials or commit environment files.
 6. The separate TerraSatch Resend account now owns domain `terrasatch.com` (domain ID `5876992d-002a-4b26-b53c-0c7e29f33b8f`) and staging webhook `76225e17-36a9-4dc9-95a4-b28094a26d4d`. Preferred delivery is Oracle worker -> Resend using owner-only `TERRASATCH_RESEND_API_KEY`, `TERRASATCH_BILLING_FROM=TerraSatch Billing <billing@terrasatch.com>`, and `TERRASATCH_BILLING_REPLY_TO=support@terrasatch.com`. The protected Vercel `/api/billing-email` endpoint remains fallback-only.
 7. Exercise Individual and Team signup → Checkout → signed webhook → committed subscription/outbox → inbox activation → workspace login → customer portal. Card required, $0 today, billing after 30 days unless canceled. Operations/Enterprise must reject checkout.
 8. Test duplicate/concurrent/out-of-order webhooks, payment failures, cancellation, DB rollback, email retries, expired/consumed activation links, tenant isolation and CORS. Provider/message-ID receipt tracking and Resend sent/delivered/delayed/bounce/complaint/failure/suppression reconciliation are implemented; password-reset/operator-resend flows remain separate product work.
@@ -128,7 +128,7 @@ Fallback path:
 billing_email_outbox -> TerraSatch worker -> protected Vercel /api/billing-email -> Resend
 ```
 
-The fallback remains compatible with `TERRASATCH_BILLING_EMAIL_WEBHOOK_URL` and `TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET`. The Vercel endpoint now returns the Resend message ID so the same outbox receipt fields are populated.
+The fallback remains compatible with `TERRASATCH_BILLING_EMAIL_WEBHOOK_URL` and `TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET`, but it is not configured in isolated staging and cannot satisfy staging/production readiness by itself. The Vercel endpoint returns the Resend message ID so the same outbox receipt fields are populated when fallback is explicitly enabled for recovery.
 
 Migration `0015_billing_email_receipts` adds nullable `delivery_provider` and `provider_message_id` fields. Existing outbox rows remain valid.
 
