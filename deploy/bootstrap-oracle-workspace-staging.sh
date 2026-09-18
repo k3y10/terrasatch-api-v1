@@ -374,6 +374,18 @@ portal_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https
 printf 'public organization portal login: %s (expected 200)\n' "$portal_code"
 [[ "$portal_code" == "200" ]] || die "Staging organization portal is not reachable."
 
+forgot_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/forgot-password || true)"
+printf 'public forgot-password page: %s (expected 200)\n' "$forgot_code"
+[[ "$forgot_code" == "200" ]] || die "Staging forgot-password page is not reachable."
+
+resend_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/resend-activation || true)"
+printf 'public activation-resend page: %s (expected 200)\n' "$resend_code"
+[[ "$resend_code" == "200" ]] || die "Staging activation-resend page is not reachable."
+
+reset_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/reset-password || true)"
+printf 'public reset-password page: %s (expected 200)\n' "$reset_code"
+[[ "$reset_code" == "200" ]] || die "Staging reset-password page is not reachable."
+
 asset_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/assets/satchy.png || true)"
 printf 'public TerraSatch brand asset: %s (expected 200)\n' "$asset_code"
 [[ "$asset_code" == "200" ]] || die "Staging TerraSatch brand assets are not reachable."
