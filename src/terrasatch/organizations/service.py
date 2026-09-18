@@ -91,7 +91,7 @@ async def create_site(
     name: str,
     organization_selector: str | None = None,
 ) -> Site:
-    """Create a site under the explicitly resolved organization."""
+    """Create a site under the resolved organization and enforce managed plan limits."""
 
     organization = await resolve_organization(session, organization_selector)
     slug = slugify(name)
@@ -100,6 +100,10 @@ async def create_site(
     )
     if existing is not None:
         raise ResourceConflict(f"Site slug '{slug}' already exists for this organization")
+
+    from terrasatch.billing.entitlements import enforce_site_slot
+
+    await enforce_site_slot(session, organization_id=organization.id)
     site = Site(organization_id=organization.id, name=name.strip(), slug=slug)
     session.add(site)
     await session.flush()
@@ -164,6 +168,10 @@ async def update_site(
             raise ResourceConflict(f"Site slug '{slug}' already exists for this organization")
         site.name = name
         site.slug = slug
+    if payload.enabled is True and not site.enabled:
+        from terrasatch.billing.entitlements import enforce_site_slot
+
+        await enforce_site_slot(session, organization_id=organization_id)
     if payload.enabled is not None:
         site.enabled = payload.enabled
     await session.flush()

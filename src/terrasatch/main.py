@@ -14,9 +14,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from terrasatch import __version__
+from terrasatch.admin.data_routes import router as data_admin_router
+from terrasatch.admin.edge_routes import router as edge_admin_router
 from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.admin.satchy_routes import router as admin_satchy_router
+from terrasatch.api.billing import router as billing_router
+from terrasatch.api.billing import staging_router as staging_billing_router
 from terrasatch.api.control_plane import router as control_plane_router
 from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
@@ -31,7 +35,7 @@ from terrasatch.brand import (
     TERRASATCH_LOGO_ASSET_PATH,
     apply_public_branding,
 )
-from terrasatch.config import Settings, get_settings
+from terrasatch.config import Environment, Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
 from terrasatch.landing_v3 import build_landing_page
@@ -41,6 +45,7 @@ from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
 from terrasatch.observability.request_id import RequestIdMiddleware
 from terrasatch.portal.routes import router as portal_router
+from terrasatch.workspace.routes import router as workspace_router
 
 logger = structlog.get_logger(__name__)
 _BRAND_LOGO_PATH = Path(__file__).resolve().parent / "static" / "terrasatch-logo.svg"
@@ -84,7 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             secret_key=session_secret.get_secret_value(),
             max_age=configured_settings.admin_session_max_age_seconds,
             same_site="lax",
-            https_only=configured_settings.is_production,
+            https_only=configured_settings.environment in {"staging", "production"},
         )
     application.add_middleware(
         CORSMiddleware,
@@ -224,6 +229,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(edge_router)
     api_v1.include_router(radio_router)
     api_v1.include_router(uac_archive_router)
+    api_v1.include_router(billing_router)
+    if configured_settings.environment == Environment.STAGING:
+        api_v1.include_router(staging_billing_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
     async def get_admin_quality(
@@ -244,9 +252,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(api_v1)
     application.include_router(realtime_router)
     application.include_router(admin_router)
+    application.include_router(data_admin_router)
+    application.include_router(edge_admin_router)
     application.include_router(admin_satchy_router)
     application.include_router(admin_member_router)
     application.include_router(portal_router)
+    application.include_router(workspace_router)
     return application
 
 

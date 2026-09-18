@@ -119,9 +119,12 @@ async def claim_pairing(
     if pairing.approved_at is None or pairing.organization_id is None or pairing.site_id is None:
         return "pending", None, None
 
-    # Re-check immediately before credential/device creation so pairings opened
-    # before the limit was reached cannot silently exceed the configured cap.
+    # Re-check both global network capacity and the selected organization's plan
+    # immediately before credential/device creation.
     await _ensure_edge_capacity(session, settings)
+    from terrasatch.billing.entitlements import enforce_edge_slot
+
+    await enforce_edge_slot(session, organization_id=pairing.organization_id)
 
     api_key, generated = await issue_api_key(
         session,
@@ -241,6 +244,10 @@ async def update_device(
         device.site_id = payload.site_id
     if payload.name is not None:
         device.name = payload.name.strip()
+    if payload.enabled is True and not device.enabled:
+        from terrasatch.billing.entitlements import enforce_edge_slot
+
+        await enforce_edge_slot(session, organization_id=organization_id)
     if payload.enabled is not None:
         device.enabled = payload.enabled
     if payload.remote_config is not None:

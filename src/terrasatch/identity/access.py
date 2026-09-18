@@ -61,6 +61,22 @@ async def authenticate_user(
     return user if memberships is not None else None
 
 
+async def validate_browser_session(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    credential_version: int,
+) -> User | None:
+    """Return the user only when the signed browser session matches current credentials."""
+
+    user = await session.scalar(
+        select(User).where(User.id == user_id, User.enabled.is_(True))
+    )
+    if user is None or user.credential_version != credential_version:
+        return None
+    return user
+
+
 async def list_user_access(
     session: AsyncSession,
     *,
@@ -173,6 +189,20 @@ async def create_or_update_organization_member(
         raise InvalidConfiguration(str(error)) from error
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
+    membership = None
+    if user is not None:
+        membership = await session.scalar(
+            select(Membership).where(
+                Membership.organization_id == organization_id,
+                Membership.user_id == user.id,
+            )
+        )
+
+    if membership is None or not membership.enabled:
+        from terrasatch.billing.entitlements import enforce_member_slot
+
+        await enforce_member_slot(session, organization_id=organization_id)
+
     already_counted = user is not None and await _user_counts_toward_capacity(session, user)
     if not already_counted and settings is not None:
         registered_users = await count_portal_users(session)
@@ -191,6 +221,7 @@ async def create_or_update_organization_member(
             email=normalized_email,
             display_name=normalized_name,
             password_hash=password_hash,
+            credential_version=1,
             enabled=True,
         )
         session.add(user)
@@ -198,14 +229,9 @@ async def create_or_update_organization_member(
     else:
         user.display_name = normalized_name
         user.password_hash = password_hash
+        user.credential_version += 1
         user.enabled = True
 
-    membership = await session.scalar(
-        select(Membership).where(
-            Membership.organization_id == organization_id,
-            Membership.user_id == user.id,
-        )
-    )
     if membership is None:
         membership = Membership(
             organization_id=organization_id,

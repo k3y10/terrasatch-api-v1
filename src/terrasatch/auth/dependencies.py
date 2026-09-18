@@ -87,12 +87,27 @@ def require_any_scope(*scopes: str):
 
     required = frozenset(scopes)
 
-    async def check_scope(principal: Annotated[Principal, Security(get_principal)]) -> Principal:
+    async def check_scope(
+        request: Request, principal: Annotated[Principal, Security(get_principal)]
+    ) -> Principal:
         if "admin" not in principal.scopes and principal.scopes.isdisjoint(required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="API key scope is insufficient",
             )
+        if not all("billing" in scope or "edge" in scope for scope in required):
+            from terrasatch.billing.service import get_subscription_for_organization
+
+            async with create_session_factory(request.app.state.settings)() as session:
+                subscription = await get_subscription_for_organization(
+                    session, organization_id=principal.organization_id
+                )
+                if subscription.managed and (
+                    subscription.entitlements is None or not subscription.entitlements.api_access
+                ):
+                    raise HTTPException(
+                        status_code=403, detail="This plan does not include external API access"
+                    )
         return principal
 
     return check_scope

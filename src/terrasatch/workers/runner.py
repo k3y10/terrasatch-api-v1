@@ -8,6 +8,7 @@ import signal
 import structlog
 from redis.asyncio import Redis
 
+from terrasatch.billing.outbox import dispatch_email_batch
 from terrasatch.config import Settings
 from terrasatch.observability.logging import configure_logging
 
@@ -27,6 +28,20 @@ async def _publish_heartbeat(settings: Settings, shutdown_requested: asyncio.Eve
                 continue
     finally:
         await client.aclose()
+
+
+async def _billing_outbox(settings, shutdown_requested):
+    while not shutdown_requested.is_set():
+        if settings.billing_email_is_configured:
+            try:
+                await dispatch_email_batch(settings)
+            except Exception:
+                # No exception payload: provider failures can contain sensitive request data.
+                logger.error("billing.outbox_batch_failed")
+        try:
+            await asyncio.wait_for(shutdown_requested.wait(), timeout=15)
+        except TimeoutError:
+            pass
 
 
 async def run_worker(settings: Settings) -> None:
@@ -58,6 +73,8 @@ async def run_worker(settings: Settings) -> None:
         deployment=settings.deployment_name,
     )
     heartbeat_task = asyncio.create_task(_publish_heartbeat(settings, shutdown_requested))
+    outbox_task = asyncio.create_task(_billing_outbox(settings, shutdown_requested))
     await shutdown_requested.wait()
     await heartbeat_task
+    await outbox_task
     logger.info("worker.stopped")

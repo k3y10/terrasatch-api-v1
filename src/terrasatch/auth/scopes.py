@@ -22,6 +22,8 @@ SUPPORTED_API_SCOPES = frozenset(
         "read:transmissions",
         "read:transcripts",
         "read:events",
+        "read:billing",
+        "write:billing",
     }
 )
 

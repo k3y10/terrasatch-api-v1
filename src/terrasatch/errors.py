@@ -29,6 +29,11 @@ class ResourceConflict(TerraSatchError):
     status_code = 409
 
 
+class RateLimitExceeded(TerraSatchError):
+    code = "rate_limited"
+    status_code = 429
+
+
 class ProviderUnavailable(TerraSatchError):
     code = "provider_unavailable"
     status_code = 503

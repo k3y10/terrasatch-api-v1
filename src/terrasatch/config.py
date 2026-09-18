@@ -37,12 +37,18 @@ class Settings(BaseSettings):
 
     environment: Environment = Field(
         default=Environment.LOCAL,
-        validation_alias=AliasChoices("TERRASATCH_ENV", "TERRASATCH_ENVIRONMENT"),
+        validation_alias=AliasChoices(
+            "environment",
+            "TERRASATCH_ENV",
+            "TERRASATCH_ENVIRONMENT",
+        ),
     )
     deployment_name: str = Field(default="local", min_length=1, max_length=64)
     build_sha: str = Field(default="unknown", min_length=1, max_length=64)
     api_base_url: AnyHttpUrl = "http://localhost:8000"
-    database_url: PostgresDsn = "postgresql+asyncpg://terrasatch:terrasatch@localhost:5432/terrasatch"
+    database_url: PostgresDsn = (
+        "postgresql+asyncpg://terrasatch:terrasatch@localhost:5432/terrasatch"
+    )
     redis_url: RedisDsn = "redis://localhost:6379/0"
     log_level: str = "INFO"
     log_format: str = "json"
@@ -56,7 +62,81 @@ class Settings(BaseSettings):
     intelligence_fallback_to_deterministic: bool = True
     storage_provider: str = "local_filesystem"
     uac_archive_path: str | None = None
+
+    # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
+    # Live-mode Stripe webhooks remain a separate explicit production safety gate.
+    billing_allow_livemode: bool = False
+    billing_grace_days: int = Field(default=7, ge=1, le=30)
+    billing_checkout_ttl_minutes: int = Field(default=120, ge=30, le=1440)
+    billing_activation_ttl_hours: int = Field(default=24, ge=1, le=168)
+    account_password_reset_ttl_minutes: int = Field(default=30, ge=10, le=120)
+    billing_success_url: str = Field(
+        default="https://terrasatch.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_cancel_url: str = Field(
+        default="https://terrasatch.com/#cost",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_portal_return_url: str = Field(
+        default="https://api.terrasatch.com/portal",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_activation_url: str = Field(
+        default="https://terrasatch.com/activate",
+        min_length=10,
+        max_length=1000,
+    )
+    billing_staging_trust_caddy_stripe_ips: bool = False
+    billing_staging_individual_payment_link_url: str | None = None
+    billing_staging_individual_payment_link_id: str | None = None
+    billing_staging_team_payment_link_url: str | None = None
+    billing_staging_team_payment_link_id: str | None = None
+    # Primary transactional email path: direct Resend delivery from the durable Oracle outbox.
+    # The protected Vercel webhook below remains a fallback for deployments that do not
+    # provide Resend credentials directly to the API/worker.
+    resend_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "resend_api_key",
+            "TERRASATCH_RESEND_API_KEY",
+            "RESEND_API_KEY",
+        ),
+    )
+    resend_webhook_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "resend_webhook_secret",
+            "TERRASATCH_RESEND_WEBHOOK_SECRET",
+            "RESEND_WEBHOOK_SECRET",
+        ),
+    )
+    billing_from: str | None = Field(default=None, max_length=320)
+    billing_reply_to: str | None = Field(default=None, max_length=320)
+    billing_email_webhook_url: AnyHttpUrl | None = None
+    billing_email_webhook_secret: SecretStr | None = None
+    billing_activation_signing_secret: SecretStr | None = None
+    stripe_secret_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "stripe_secret_key",
+            "TERRASATCH_STRIPE_SECRET_KEY",
+            "STRIPE_SECRET_KEY",
+        ),
+    )
+    stripe_webhook_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "stripe_webhook_secret",
+            "TERRASATCH_STRIPE_WEBHOOK_SECRET",
+            "STRIPE_WEBHOOK_SECRET",
+        ),
+    )
+
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
     max_portal_users: int = Field(default=250, ge=1, le=1_000_000)
     admin_email: str | None = None
@@ -81,6 +161,37 @@ class Settings(BaseSettings):
     def normalize_build_sha(cls, value: str) -> str:
         return value.strip() or "unknown"
 
+    @field_validator(
+        "billing_from",
+        "billing_reply_to",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator(
+        "resend_api_key",
+        "resend_webhook_secret",
+        "stripe_secret_key",
+        "stripe_webhook_secret",
+        "billing_email_webhook_secret",
+        "billing_activation_signing_secret",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_secret(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, SecretStr):
+            raw = value.get_secret_value().strip()
+            return SecretStr(raw) if raw else None
+        raw = str(value).strip()
+        return raw or None
+
     @field_validator("uac_archive_path")
     @classmethod
     def normalize_uac_archive_path(cls, value: str | None) -> str | None:
@@ -98,6 +209,87 @@ class Settings(BaseSettings):
         """Only expose browser administration when all required secrets are configured."""
 
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
+
+    @property
+    def staging_payment_links_are_configured(self) -> bool:
+        """Return whether isolated staging can use Stripe-hosted sandbox Payment Links."""
+
+        return bool(
+            self.environment == Environment.STAGING
+            and not self.billing_allow_livemode
+            and self.billing_staging_trust_caddy_stripe_ips
+            and self.billing_staging_individual_payment_link_url
+            and self.billing_staging_individual_payment_link_id
+            and self.billing_staging_team_payment_link_url
+            and self.billing_staging_team_payment_link_id
+        )
+
+    @property
+    def stripe_webhook_is_configured(self) -> bool:
+        """Require HMAC in production; allow tightly scoped sandbox verification in staging."""
+
+        if self.stripe_webhook_secret is not None:
+            return True
+        if (
+            self.environment == Environment.STAGING
+            and not self.billing_allow_livemode
+            and self.stripe_secret_key is not None
+        ):
+            secret = self.stripe_secret_key.get_secret_value()
+            if secret.startswith(("sk_test_", "rk_test_")):
+                return True
+        return self.staging_payment_links_are_configured
+
+    @property
+    def billing_resend_is_configured(self) -> bool:
+        """Return whether Oracle can send transactional email directly through Resend."""
+
+        if not self.resend_api_key or not self.billing_from:
+            return False
+        if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
+            return "@terrasatch.com" in self.billing_from.casefold()
+        return True
+
+    @property
+    def resend_webhook_is_configured(self) -> bool:
+        """Return whether Resend delivery events can be signature-verified."""
+
+        return self.resend_webhook_secret is not None
+
+    @property
+    def billing_email_webhook_is_configured(self) -> bool:
+        """Return whether the protected Vercel billing-email fallback is configured."""
+
+        return bool(self.billing_email_webhook_url and self.billing_email_webhook_secret)
+
+    @property
+    def billing_email_is_configured(self) -> bool:
+        """Return whether at least one durable transactional email path is configured."""
+
+        return bool(
+            self.billing_resend_is_configured
+            or self.billing_email_webhook_is_configured
+        )
+
+    @property
+    def billing_is_configured(self) -> bool:
+        """Require billing safety primitives; production additionally requires email delivery."""
+
+        provider_ready = bool(self.stripe_secret_key or self.staging_payment_links_are_configured)
+        core_ready = bool(
+            self.billing_enabled
+            and provider_ready
+            and self.stripe_webhook_is_configured
+            and self.billing_activation_signing_secret
+        )
+        if not core_ready:
+            return False
+        if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
+            return bool(
+                self.billing_resend_is_configured
+                and self.resend_webhook_is_configured
+            )
+        return self.billing_email_is_configured
 
 
 @lru_cache

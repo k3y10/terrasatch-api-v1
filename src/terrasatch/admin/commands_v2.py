@@ -5,12 +5,14 @@ from __future__ import annotations
 import shlex
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.ai_channel import ai_channel_lines, run_ai_channel_command
 from terrasatch.admin.channel_commands import run_radio_resource_command
 from terrasatch.admin.commands import AdminCommandResult
 from terrasatch.admin.commands import run_admin_command as run_base_admin_command
+from terrasatch.billing.models import BillingEmailOutbox
 from terrasatch.edge.service import get_device
 from terrasatch.errors import InvalidConfiguration
 from terrasatch.masterdata.admin_commands import run_masterdata_command
@@ -56,10 +58,74 @@ async def run_admin_command(
             "  source list | source show <id|slug> | source sync <id|slug>",
             "  sync list | sync <source-id|slug> | inspect [source|event] <id|text>",
             "  database status | backup status",
+            "  billing email-status",
         ]
         if not base.lines:
             return AdminCommandResult(extra)
         return AdminCommandResult(base.lines[:-1] + extra + base.lines[-1:])
+
+
+    if verb == "billing":
+        if not args or args[0].lower() not in {"email-status", "email"}:
+            raise InvalidConfiguration("Usage: billing email-status")
+
+        sent = await session.scalar(
+            select(func.count()).select_from(BillingEmailOutbox).where(
+                BillingEmailOutbox.sent_at.is_not(None)
+            )
+        )
+        pending = await session.scalar(
+            select(func.count()).select_from(BillingEmailOutbox).where(
+                BillingEmailOutbox.sent_at.is_(None),
+                BillingEmailOutbox.last_error.is_(None),
+            )
+        )
+        retrying = await session.scalar(
+            select(func.count()).select_from(BillingEmailOutbox).where(
+                BillingEmailOutbox.sent_at.is_(None),
+                BillingEmailOutbox.last_error == "delivery_failed",
+            )
+        )
+        reconcile = await session.scalar(
+            select(func.count()).select_from(BillingEmailOutbox).where(
+                BillingEmailOutbox.last_error == "reconcile_required"
+            )
+        )
+        held = await session.scalar(
+            select(func.count()).select_from(BillingEmailOutbox).where(
+                BillingEmailOutbox.last_error.in_(
+                    {"activation_expired", "activation_consumed"}
+                )
+            )
+        )
+        recent = list(
+            (
+                await session.scalars(
+                    select(BillingEmailOutbox)
+                    .order_by(BillingEmailOutbox.created_at.desc())
+                    .limit(10)
+                )
+            ).all()
+        )
+        lines = [
+            "BILLING EMAIL OUTBOX",
+            f"sent={sent or 0} pending={pending or 0} retrying={retrying or 0} "
+            f"reconcile={reconcile or 0} held={held or 0}",
+        ]
+        for row in recent:
+            if row.sent_at is not None:
+                state = row.delivery_status or "accepted"
+            elif row.last_error:
+                state = row.last_error
+            else:
+                state = "pending"
+            provider = row.delivery_provider or "-"
+            message_id = row.provider_message_id or "-"
+            lines.append(
+                f"{row.event_id[:28]:28} {row.kind[:22]:22} "
+                f"{state[:20]:20} {provider[:16]:16} {message_id[:32]}"
+            )
+        return AdminCommandResult(lines)
 
     if verb in {"agent", "agents", "channel", "channels"}:
         if not selected_organization:

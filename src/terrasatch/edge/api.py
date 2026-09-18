@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_scope
+from terrasatch.billing.service import edge_service_payload
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.command_service import (
@@ -230,15 +231,22 @@ async def get_edge_config(
     request: Request,
     principal: Annotated[Principal, Depends(require_scope("edge:connect"))],
 ) -> dict[str, object]:
-    device = await _run_database(
-        request.app.state.settings,
-        lambda session: get_device_for_api_key(
+    async def load_config(session: AsyncSession) -> tuple[EdgeDevice, dict[str, object]]:
+        device = await get_device_for_api_key(
             session,
             organization_id=principal.organization_id,
             api_key_id=principal.api_key_id,
-        ),
-    )
-    return device.remote_config
+        )
+        service = await edge_service_payload(
+            session,
+            organization_id=principal.organization_id,
+        )
+        return device, service
+
+    device, service = await _run_database(request.app.state.settings, load_config)
+    config = dict(device.remote_config or {})
+    config["service"] = service
+    return config
 
 
 @router.get("/command-capabilities", response_model=dict[str, object])

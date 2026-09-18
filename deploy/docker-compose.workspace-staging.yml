@@ -1,0 +1,94 @@
+name: terrasatch-workspace-staging
+
+x-runtime: &runtime
+  image: terrasatch-workspace-staging:local
+  build:
+    context: ..
+  env_file: ../.env.staging
+  environment:
+    TERRASATCH_ENV: staging
+    TERRASATCH_DEPLOYMENT_NAME: workspace-staging
+    TERRASATCH_BUILD_SHA: ${TERRASATCH_BUILD_SHA:-unknown}
+    TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:?Set staging database password}@postgres:5432/terrasatch_staging
+    TERRASATCH_REDIS_URL: redis://redis:6379/0
+    TERRASATCH_API_BASE_URL: https://staging-api.terrasatch.com
+    TERRASATCH_BILLING_ENABLED: "true"
+    TERRASATCH_BILLING_ALLOW_LIVEMODE: "false"
+    TERRASATCH_BILLING_STAGING_TRUST_CADDY_STRIPE_IPS: "true"
+    TERRASATCH_BILLING_STAGING_INDIVIDUAL_PAYMENT_LINK_URL: https://buy.stripe.com/test_eVqaEZ6K1bR5fYs2xV0Jq00
+    TERRASATCH_BILLING_STAGING_INDIVIDUAL_PAYMENT_LINK_ID: plink_1UH5n8PwzxCRGRdhckplOIz0
+    TERRASATCH_BILLING_STAGING_TEAM_PAYMENT_LINK_URL: https://buy.stripe.com/test_aFaeVf1pHg7l27C6Ob0Jq01
+    TERRASATCH_BILLING_STAGING_TEAM_PAYMENT_LINK_ID: plink_1UH5nAPwzxCRGRdhTJE7crl5
+    TERRASATCH_BILLING_SUCCESS_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/success?session_id={CHECKOUT_SESSION_ID}
+    TERRASATCH_BILLING_CANCEL_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/cancel
+    TERRASATCH_BILLING_PORTAL_RETURN_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/portal-return
+    TERRASATCH_BILLING_ACTIVATION_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/activate
+    TERRASATCH_INTELLIGENCE_PROVIDER: ollama
+    TERRASATCH_INTELLIGENCE_FALLBACK_TO_DETERMINISTIC: "false"
+    TERRASATCH_OLLAMA_BASE_URL: http://ollama:11434
+    TERRASATCH_OLLAMA_MODEL: qwen3:0.6b
+    TERRASATCH_INTELLIGENCE_TIMEOUT_SECONDS: "40"
+  restart: unless-stopped
+  mem_limit: 384m
+  cpus: 0.15
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: imresamu/postgis:16-3.6.1-alpine3.22@sha256:8fcc73f4afd381738dea98a0b0b17212c4d46f59f1eec40808e40710fd66dfda
+    environment:
+      POSTGRES_DB: terrasatch_staging
+      POSTGRES_USER: terrasatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set staging database password}
+    volumes:
+      - staging_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U terrasatch -d terrasatch_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 384m
+    cpus: 0.1
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, "yes", --maxmemory, 64mb, --maxmemory-policy, noeviction]
+    volumes:
+      - staging_redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 128m
+    cpus: 0.05
+    restart: unless-stopped
+  api:
+    <<: *runtime
+    ports:
+      - "127.0.0.1:8012:8000"
+  worker:
+    <<: *runtime
+    command: [terrasatch, worker]
+    cpus: 0.05
+  ollama:
+    image: ollama/ollama:0.34.1
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: "4096"
+      OLLAMA_KEEP_ALIVE: "5m"
+    volumes:
+      - staging_models:/root/.ollama
+    mem_limit: 2304m
+    cpus: 0.5
+    restart: unless-stopped
+
+volumes:
+  staging_postgres:
+  staging_redis:
+  staging_models:

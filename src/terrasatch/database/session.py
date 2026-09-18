@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -12,8 +13,13 @@ from terrasatch.config import Settings
 def create_session_factory(settings: Settings) -> async_sessionmaker[AsyncSession]:
     """Create sessions without connecting during import time."""
 
+    return _session_factory(str(settings.database_url))
+
+
+@lru_cache(maxsize=8)
+def _session_factory(database_url: str) -> async_sessionmaker[AsyncSession]:
     engine = create_async_engine(
-        str(settings.database_url),
+        database_url,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
