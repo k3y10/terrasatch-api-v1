@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from urllib.parse import quote
 
 from sqlalchemy import select
 
@@ -10,9 +11,19 @@ from terrasatch.billing.notifications import BillingEmailContext, deliver_billin
 from terrasatch.billing.service import _token_hash, recover_activation_token
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import ProviderUnavailable
+from terrasatch.identity.models import PasswordResetIntent
+from terrasatch.identity.recovery import recover_password_reset_token
 
 
-async def enqueue_email(session, *, event_id, kind, context, activation_token=None):
+async def enqueue_email(
+    session,
+    *,
+    event_id,
+    kind,
+    context,
+    activation_token=None,
+    password_reset_id=None,
+):
     values = asdict(context)
     for key, value in values.items():
         if isinstance(value, datetime):
@@ -32,6 +43,7 @@ async def enqueue_email(session, *, event_id, kind, context, activation_token=No
             kind=kind,
             context=values,
             activation_id=activation_id,
+            password_reset_id=password_reset_id,
             next_attempt_at=datetime.now(UTC),
         )
     )
@@ -59,6 +71,8 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                         BillingEmailOutbox.last_error.is_distinct_from("reconcile_required"),
                         BillingEmailOutbox.last_error.is_distinct_from("activation_expired"),
                         BillingEmailOutbox.last_error.is_distinct_from("activation_consumed"),
+                        BillingEmailOutbox.last_error.is_distinct_from("password_reset_expired"),
+                        BillingEmailOutbox.last_error.is_distinct_from("password_reset_consumed"),
                     )
                     .order_by(BillingEmailOutbox.next_attempt_at)
                     .with_for_update(skip_locked=True)
@@ -95,6 +109,20 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                         # Never replace this retry's payload under an existing provider key.
                         row.last_error = "activation_expired"
                         continue
+                password_reset = None
+                if row.password_reset_id:
+                    password_reset = await session.get(
+                        PasswordResetIntent, row.password_reset_id, with_for_update=True
+                    )
+                    if password_reset is None:
+                        row.last_error = "reconcile_required"
+                        continue
+                    if password_reset.consumed_at is not None:
+                        row.last_error = "password_reset_consumed"
+                        continue
+                    if password_reset.expires_at.replace(tzinfo=UTC) <= datetime.now(UTC):
+                        row.last_error = "password_reset_expired"
+                        continue
                 values = dict(row.context)
                 for key in ("trial_ends_at", "current_period_end", "grace_ends_at"):
                     if values[key]:
@@ -107,6 +135,17 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                 if token and _token_hash(token) != activation.token_hash:
                     row.last_error = "reconcile_required"
                     continue
+                action_url = None
+                if password_reset is not None:
+                    reset_token = recover_password_reset_token(settings, password_reset.id)
+                    if _token_hash(reset_token) != password_reset.token_hash:
+                        row.last_error = "reconcile_required"
+                        continue
+                    base_url = str(settings.api_base_url).rstrip("/")
+                    action_url = (
+                        f"{base_url}/portal/reset-password#token="
+                        f"{quote(reset_token, safe='')}"
+                    )
                 try:
                     receipt = await deliver_billing_email(
                         settings=settings,
@@ -114,6 +153,7 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                         kind=row.kind,
                         context=BillingEmailContext(**values),
                         activation_token=token,
+                        action_url=action_url,
                     )
                     if receipt is None:
                         raise ProviderUnavailable("Email is not configured")
