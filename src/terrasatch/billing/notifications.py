@@ -190,149 +190,178 @@ def build_billing_email(
         details = [
             f"<strong>Organization:</strong> {organization}",
             f"<strong>Plan:</strong> {plan}",
-            f"<strong>Trial ends:</strong> {escape(trial_end)}" if trial_end else None,
-            (
+        ]
+        if trial_end:
+            details.append(f"<strong>Trial ends:</strong> {escape(trial_end)}")
+        if price and trial_end:
+            details.append(
                 f"<strong>First scheduled charge:</strong> {escape(price)} "
                 f"after {escape(trial_end)}"
-                if price and trial_end
-                else None
-            ),
-        ]
-        detail_html = "<br>".join(item for item in details if item)
+            )
         activation = (
             _button(activation_url, "Activate TerraSatch account")
             if activation_url
             else ""
         )
-        text = (
-            f"Hi {context.display_name or 'there'},\n\n"
-            f"Your TerraSatch trial is active for {context.organization_name}.\n"
-            f"Plan: {context.plan_name or 'TerraSatch'}"
-            f"{f'\nTrial ends: {trial_end}' if trial_end else ''}"
-            f"{f'\nRecurring price: {price}' if price else ''}"
-            f"{f'\n\nActivate your account: {activation_url}' if activation_url else ''}"
-            "\n\nLISTEN. WATCH. LEARN. ADAPT."
-        )
-        html = _shell(
-            subject,
-            (
-                f"<p>Hi {name},</p><p>Your 30-day TerraSatch trial is active.</p>"
-                f"<p>{detail_html}</p>{activation}"
-                "<p>Stripe securely manages your payment method. "
-                "TerraSatch does not store card data.</p>"
+        text_lines = [
+            f"Hi {context.display_name or 'there'},",
+            "",
+            f"Your TerraSatch trial is active for {context.organization_name}.",
+            f"Plan: {context.plan_name or 'TerraSatch'}",
+        ]
+        if trial_end:
+            text_lines.append(f"Trial ends: {trial_end}")
+        if price:
+            text_lines.append(f"Recurring price: {price}")
+        if activation_url:
+            text_lines.extend(["", f"Activate your account: {activation_url}"])
+        text_lines.extend(["", "LISTEN. WATCH. LEARN. ADAPT."])
+        return BillingEmailMessage(
+            subject=subject,
+            text="\n".join(text_lines),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    "<p>Your 30-day TerraSatch trial is active.</p>"
+                    f"<p>{'<br>'.join(details)}</p>"
+                    f"{activation}"
+                    "<p>Stripe securely manages your payment method. "
+                    "TerraSatch does not store card data.</p>"
+                ),
             ),
         )
-        return BillingEmailMessage(subject=subject, text=text, html=html)
 
     if kind == "trial_ending":
         subject = "Your TerraSatch trial ends soon"
-        text = (
-            f"Hi {context.display_name or 'there'},\n\n"
-            f"Your {context.plan_name or 'TerraSatch'} trial"
-            f"{f' ends on {trial_end}' if trial_end else ' ends soon'}."
-            f"{f' Your subscription will continue at {price}.' if price else ''}"
-            "\n\nYou can manage billing from your TerraSatch organization portal."
+        ending_text = f" ends on {trial_end}" if trial_end else " ends soon"
+        renewal_text = (
+            f" Your subscription will continue at {price}."
+            if price
+            else ""
         )
-        html = _shell(
-            subject,
-            (
-                f"<p>Hi {name},</p><p>Your <strong>{plan}</strong> trial"
+        ending_html = (
+            f" ends on <strong>{escape(trial_end)}</strong>"
+            if trial_end
+            else " ends soon"
+        )
+        renewal_html = ""
+        if price:
+            renewal_html = (
+                "<p>Your subscription will continue at "
+                f"<strong>{escape(price)}</strong> unless you cancel before "
+                "the trial ends.</p>"
+            )
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"Your {context.plan_name or 'TerraSatch'} trial"
+                f"{ending_text}.{renewal_text}\n\n"
+                "You can manage billing from your TerraSatch organization portal."
+            ),
+            html=_shell(
+                subject,
                 (
-                    f" ends on <strong>{escape(trial_end)}</strong>"
-                    if trial_end
-                    else " ends soon"
-                )
-                + ".</p>"
-                + (
-                    "<p>Your subscription will continue at "
-                    f"<strong>{escape(price)}</strong> unless you cancel before "
-                    "the trial ends.</p>"
-                    if price
-                    else ""
-                )
-                "<p>You can manage billing from your TerraSatch organization portal.</p>"
+                    f"<p>Hi {name},</p>"
+                    f"<p>Your <strong>{plan}</strong> trial{ending_html}.</p>"
+                    f"{renewal_html}"
+                    "<p>You can manage billing from your TerraSatch "
+                    "organization portal.</p>"
+                ),
             ),
         )
-        return BillingEmailMessage(subject=subject, text=text, html=html)
 
     if kind == "payment_failed":
         subject = "Action needed: TerraSatch payment failed"
-        text = (
-            f"Hi {context.display_name or 'there'},\n\n"
-            f"We could not process the latest TerraSatch payment for {context.organization_name}."
-            (
-                f" Your organization remains in a temporary grace period through {grace_end}."
-                if grace_end
-                else ""
-            )
-            "\n\nPlease update the payment method from your TerraSatch organization portal."
+        grace_text = (
+            f" Your organization remains in a temporary grace period through {grace_end}."
+            if grace_end
+            else ""
         )
-        html = _shell(
-            subject,
-            (
-                f"<p>Hi {name},</p><p>We could not process the latest payment for "
-                f"<strong>{organization}</strong>.</p>"
+        grace_html = ""
+        if grace_end:
+            grace_html = (
+                "<p>Your organization remains in a temporary grace period through "
+                f"<strong>{escape(grace_end)}</strong>.</p>"
+            )
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                "We could not process the latest TerraSatch payment for "
+                f"{context.organization_name}.{grace_text}\n\n"
+                "Please update the payment method from your TerraSatch organization portal."
+            ),
+            html=_shell(
+                subject,
                 (
-                    "<p>Your organization remains in a temporary grace period through "
-                    f"<strong>{escape(grace_end)}</strong>.</p>"
-                    if grace_end
-                    else ""
-                )
-                "<p>Please update the payment method from your TerraSatch organization portal.</p>"
+                    f"<p>Hi {name},</p>"
+                    "<p>We could not process the latest payment for "
+                    f"<strong>{organization}</strong>.</p>"
+                    f"{grace_html}"
+                    "<p>Please update the payment method from your TerraSatch "
+                    "organization portal.</p>"
+                ),
             ),
         )
-        return BillingEmailMessage(subject=subject, text=text, html=html)
 
     if kind == "cancellation_scheduled":
         subject = "TerraSatch cancellation scheduled"
-        ending = (
+        ending_text = (
             f" at the end of the current period on {period_end}"
             if period_end
             else " at the end of the current billing period"
         )
-        text = (
-            f"Hi {context.display_name or 'there'},\n\n"
-            f"Your TerraSatch subscription for {context.organization_name} is scheduled to cancel"
-            f"{ending}. Your data will not be deleted automatically."
+        ending_html = (
+            f" on <strong>{escape(period_end)}</strong>"
+            if period_end
+            else " at the end of the current billing period"
         )
-        html = _shell(
-            subject,
-            (
-                f"<p>Hi {name},</p><p>Your TerraSatch subscription for "
-                f"<strong>{organization}</strong> is scheduled to cancel"
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"Your TerraSatch subscription for {context.organization_name} "
+                f"is scheduled to cancel{ending_text}. "
+                "Your data will not be deleted automatically."
+            ),
+            html=_shell(
+                subject,
                 (
-                    f" on <strong>{escape(period_end)}</strong>"
-                    if period_end
-                    else " at the end of the current billing period"
-                )
-                + ".</p><p>Service remains available through the paid period. "
-                + "TerraSatch does not automatically delete operational history "
-                + "when billing ends.</p>"
+                    f"<p>Hi {name},</p>"
+                    f"<p>Your TerraSatch subscription for <strong>{organization}</strong> "
+                    f"is scheduled to cancel{ending_html}.</p>"
+                    "<p>Service remains available through the paid period. "
+                    "TerraSatch does not automatically delete operational history "
+                    "when billing ends.</p>"
+                ),
             ),
         )
-        return BillingEmailMessage(subject=subject, text=text, html=html)
 
     if kind == "subscription_ended":
         subject = "Your TerraSatch subscription has ended"
-        text = (
-            f"Hi {context.display_name or 'there'},\n\n"
-            f"The TerraSatch subscription for {context.organization_name} has ended. "
-            "Existing operational history is not automatically deleted. "
-            "Contact TerraSatch if you need to reactivate the organization."
-        )
-        html = _shell(
-            subject,
-            (
-                f"<p>Hi {name},</p><p>The TerraSatch subscription for "
-                f"<strong>{organization}</strong> has ended.</p>"
-                "<p>Existing operational history is not automatically deleted. "
-                "Contact TerraSatch if you need to reactivate the organization.</p>"
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"The TerraSatch subscription for {context.organization_name} has ended. "
+                "Existing operational history is not automatically deleted. "
+                "Contact TerraSatch if you need to reactivate the organization."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    f"<p>The TerraSatch subscription for <strong>{organization}</strong> "
+                    "has ended.</p>"
+                    "<p>Existing operational history is not automatically deleted. "
+                    "Contact TerraSatch if you need to reactivate the organization.</p>"
+                ),
             ),
         )
-        return BillingEmailMessage(subject=subject, text=text, html=html)
 
     raise ValueError("Unsupported billing email kind")
-
 
 def _activation_url(settings: Settings, token: str | None) -> str | None:
     if not token:
