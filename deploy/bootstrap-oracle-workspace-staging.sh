@@ -4,7 +4,7 @@ set -euo pipefail
 BRANCH="${TERRASATCH_STAGING_BRANCH:-feat/subscription-billing}"
 EXPECTED_HEAD="${TERRASATCH_EXPECTED_STAGING_HEAD:-fbbbc13945e5eb7dc446cb16767fb4784edb36de}"
 PROD_REPO="${TERRASATCH_PROD_REPO:-/opt/terrasatch/api}"
-DEFAULT_STAGING_DIR="${TERRASATCH_STAGING_DIR:-/opt/terrasatch/workspace-staging}"
+DEFAULT_STAGING_DIR="${TERRASATCH_STAGING_DIR:-/home/ubuntu/terrasatch-workspace-staging}"
 CADDYFILE="${TERRASATCH_CADDYFILE:-/etc/caddy/Caddyfile}"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -62,8 +62,7 @@ if [[ -z "$staging_dir" ]]; then
     git -C "$PROD_REPO" branch --track "$BRANCH" "origin/$BRANCH"
   fi
   say "Creating isolated staging worktree: $staging_dir"
-  sudo mkdir -p "$(dirname "$staging_dir")"
-  sudo chown ubuntu:ubuntu "$(dirname "$staging_dir")"
+  mkdir -p "$(dirname "$staging_dir")"
   git -C "$PROD_REPO" worktree add "$staging_dir" "$BRANCH"
 else
   say "Reusing isolated staging worktree: $staging_dir"
