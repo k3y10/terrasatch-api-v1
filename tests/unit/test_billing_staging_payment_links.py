@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from terrasatch.api.billing import _validate_staging_payment_link_event
+from terrasatch.api.billing import _validate_staging_payment_link_event, _verified_stripe_event
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
@@ -113,3 +113,26 @@ def test_staging_payment_links_remain_preferred_with_stripe_api_key() -> None:
     )
 
     assert settings.staging_payment_links_are_configured is True
+
+
+
+@pytest.mark.asyncio
+async def test_staging_api_event_retrieval_still_enforces_payment_link_scope() -> None:
+    settings = staging_settings().model_copy(
+        update={"stripe_secret_key": SecretStr("rk_test_event_verification")}
+    )
+
+    class FakeStripe:
+        secret_key = "rk_test_event_verification"
+
+        async def retrieve_event(self, event_id: str):
+            assert event_id == "evt_test_checkout"
+            return checkout_event(link="plink_unknown", plan="field")
+
+    with pytest.raises(InvalidConfiguration):
+        await _verified_stripe_event(
+            settings=settings,
+            stripe=FakeStripe(),
+            raw_payload=b'{"id":"evt_test_checkout"}',
+            stripe_signature=None,
+        )
