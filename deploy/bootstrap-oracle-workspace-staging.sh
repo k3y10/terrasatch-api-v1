@@ -251,7 +251,32 @@ fi
 
 uv sync --extra dev --frozen
 uv run ruff check src tests
-uv run pytest
+
+say "Running pytest with staging environment variables scrubbed"
+test_env_unset=()
+while IFS= read -r key; do
+  [[ -n "$key" ]] || continue
+  test_env_unset+=("-u" "$key")
+done < <(
+  awk -F= '
+    /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/ {
+      key=$1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      print key
+    }
+  ' "$staging_dir/.env.staging" | sort -u
+)
+
+# The bootstrap itself may synthesize/export aliases that are intentionally absent
+# from .env.staging. Remove those too so Settings() tests exercise true defaults.
+test_env_unset+=(
+  "-u" "TERRASATCH_STRIPE_SECRET_KEY"
+  "-u" "STRIPE_SECRET_KEY"
+  "-u" "TERRASATCH_STRIPE_WEBHOOK_SECRET"
+  "-u" "STRIPE_WEBHOOK_SECRET"
+)
+
+env "${test_env_unset[@]}" uv run pytest
 
 if [[ "$lock_updated" == "true" ]]; then
   say "Tests passed with regenerated lockfile; committing uv.lock to the draft staging branch"
