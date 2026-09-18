@@ -1,0 +1,20 @@
+# Isolated subscription/workspace staging host.
+# Install this block alongside the existing production api.terrasatch.com block.
+# It intentionally exposes only /api/v1/workspace/* from the staging service.
+
+staging-api.terrasatch.com {
+    encode zstd gzip
+
+    @workspace path /api/v1/workspace/*
+    handle @workspace {
+        reverse_proxy 127.0.0.1:8012
+    }
+
+    handle {
+        respond "Not Found" 404
+    }
+
+    header {
+        -Server
+    }
+}
