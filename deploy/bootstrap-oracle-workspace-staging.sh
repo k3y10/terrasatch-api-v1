@@ -106,17 +106,30 @@ set +a
 TERRASATCH_STRIPE_SECRET_KEY="${TERRASATCH_STRIPE_SECRET_KEY:-${STRIPE_SECRET_KEY:-}}"
 TERRASATCH_STRIPE_WEBHOOK_SECRET="${TERRASATCH_STRIPE_WEBHOOK_SECRET:-${STRIPE_WEBHOOK_SECRET:-}}"
 
-EXPECTED_STRIPE_ACCOUNT="${TERRASATCH_EXPECTED_STRIPE_ACCOUNT:-acct_1Txb0QPwzxCRGRdh}"
+EXPECTED_STRIPE_SUBSCRIPTION="${TERRASATCH_EXPECTED_STRIPE_SUBSCRIPTION:-sub_1UH8MPPwzxCRGRdhI424hID3}"
 
 stripe_key_matches_account() {
   local candidate="$1"
   [[ "$candidate" == sk_test_* || "$candidate" == rk_test_* ]] || return 1
-  local account_id
-  account_id="$(
-    curl --silent --show-error --fail       -u "$candidate:"       https://api.stripe.com/v1/account 2>/dev/null |
-      python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true
+  local verified
+  verified="$(
+    curl --silent --show-error --fail \
+      -u "$candidate:" \
+      "https://api.stripe.com/v1/subscriptions/$EXPECTED_STRIPE_SUBSCRIPTION" 2>/dev/null |
+      python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+m=s.get("metadata") or {}
+ok=(
+    s.get("id") == sys.argv[1]
+    and s.get("livemode") is False
+    and m.get("product") == "terrasatch"
+    and m.get("environment") == "staging"
+)
+print("yes" if ok else "no")
+' "$EXPECTED_STRIPE_SUBSCRIPTION" 2>/dev/null || true
   )"
-  [[ "$account_id" == "$EXPECTED_STRIPE_ACCOUNT" ]]
+  [[ "$verified" == "yes" ]]
 }
 
 persist_staging_stripe_key() {
@@ -132,7 +145,7 @@ persist_staging_stripe_key() {
 }
 
 if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]] && ! stripe_key_matches_account "$TERRASATCH_STRIPE_SECRET_KEY"; then
-  die "Configured Stripe test key does not belong to the TerraSatch sandbox account."
+  die "Configured Stripe test key cannot read the expected TerraSatch staging subscription."
 fi
 
 if [[ -z "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
