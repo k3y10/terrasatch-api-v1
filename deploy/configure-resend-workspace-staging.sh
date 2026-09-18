@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STAGING_DIR="${TERRASATCH_STAGING_DIR:-/home/ubuntu/terrasatch-workspace-staging}"
+ENV_FILE="${TERRASATCH_STAGING_ENV_FILE:-$STAGING_DIR/.env.staging}"
+COMPOSE_FILE="${TERRASATCH_STAGING_COMPOSE_FILE:-$STAGING_DIR/deploy/docker-compose.workspace-staging.yml}"
+RESEND_WEBHOOK_URL="https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook"
+
+say() { printf '\n==> %s\n' "$*"; }
+die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+
+[[ -d "$STAGING_DIR" ]] || die "Missing staging worktree: $STAGING_DIR"
+[[ -f "$ENV_FILE" ]] || die "Missing staging environment file: $ENV_FILE"
+[[ -f "$COMPOSE_FILE" ]] || die "Missing staging Compose file: $COMPOSE_FILE"
+[[ "$(git -C "$STAGING_DIR" branch --show-current)" == "feat/subscription-billing" ]] ||
+  die "Resend staging setup must run from the isolated billing worktree."
+
+chmod 600 "$ENV_FILE"
+
+say "Configure direct TerraSatch staging email through Resend"
+printf 'Secrets are read without terminal echo and are never printed.\n'
+
+read -r -s -p "Resend API key (re_...): " resend_api_key
+printf '\n'
+[[ -n "$resend_api_key" ]] || die "Resend API key is required."
+[[ "$resend_api_key" == re_* ]] || die "Resend API key must use the expected re_ prefix."
+
+read -r -s -p "Resend webhook signing secret (whsec_..., leave blank if webhook is not created yet): " resend_webhook_secret
+printf '\n'
+if [[ -n "$resend_webhook_secret" && "$resend_webhook_secret" != whsec_* ]]; then
+  die "Resend webhook signing secret must use the expected whsec_ prefix."
+fi
+
+default_from='TerraSatch Billing <billing@terrasatch.com>'
+read -r -p "Billing From [$default_from]: " billing_from
+billing_from="${billing_from:-$default_from}"
+[[ "$billing_from" == *"@"* ]] || die "Billing From must contain an email address."
+
+default_reply_to='support@terrasatch.com'
+read -r -p "Billing Reply-To [$default_reply_to]: " billing_reply_to
+billing_reply_to="${billing_reply_to:-$default_reply_to}"
+[[ "$billing_reply_to" == *"@"* ]] || die "Billing Reply-To must contain an email address."
+
+quote_env_value() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+print(json.dumps(sys.argv[1]))
+PY
+}
+
+tmp_env="$(mktemp)"
+cleanup() {
+  rm -f "$tmp_env"
+  unset resend_api_key resend_webhook_secret billing_from billing_reply_to
+}
+trap cleanup EXIT
+
+awk '
+  !/^TERRASATCH_RESEND_API_KEY=/ &&
+  !/^TERRASATCH_RESEND_WEBHOOK_SECRET=/ &&
+  !/^TERRASATCH_BILLING_FROM=/ &&
+  !/^TERRASATCH_BILLING_REPLY_TO=/
+' "$ENV_FILE" >"$tmp_env"
+
+printf 'TERRASATCH_RESEND_API_KEY=%s\n' "$(quote_env_value "$resend_api_key")" >>"$tmp_env"
+if [[ -n "$resend_webhook_secret" ]]; then
+  printf 'TERRASATCH_RESEND_WEBHOOK_SECRET=%s\n' "$(quote_env_value "$resend_webhook_secret")" >>"$tmp_env"
+fi
+printf 'TERRASATCH_BILLING_FROM=%s\n' "$(quote_env_value "$billing_from")" >>"$tmp_env"
+printf 'TERRASATCH_BILLING_REPLY_TO=%s\n' "$(quote_env_value "$billing_reply_to")" >>"$tmp_env"
+
+install -m 600 "$tmp_env" "$ENV_FILE"
+
+say "Validating staging configuration without printing secrets"
+(
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+
+  python3 - <<'PY'
+import os
+
+required = (
+    "TERRASATCH_RESEND_API_KEY",
+    "TERRASATCH_BILLING_FROM",
+)
+missing = [name for name in required if not os.environ.get(name, "").strip()]
+if missing:
+    raise SystemExit("Missing required Resend staging configuration: " + ", ".join(missing))
+
+api_key = os.environ["TERRASATCH_RESEND_API_KEY"].strip()
+if not api_key.startswith("re_"):
+    raise SystemExit("Resend API key does not use the expected re_ prefix")
+
+webhook = os.environ.get("TERRASATCH_RESEND_WEBHOOK_SECRET", "").strip()
+if webhook and not webhook.startswith("whsec_"):
+    raise SystemExit("Resend webhook secret does not use the expected whsec_ prefix")
+
+print("Direct Resend sender configuration: present")
+print("Resend webhook verification: " + ("configured" if webhook else "not configured"))
+PY
+
+  docker compose -f "$COMPOSE_FILE" config >/dev/null
+)
+
+say "Restarting only the isolated staging API and worker"
+(
+  cd "$STAGING_DIR"
+  set -a
+  # shellcheck disable=SC1091
+  source "$ENV_FILE"
+  set +a
+  export TERRASATCH_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+  docker compose -f "$COMPOSE_FILE" up -d --force-recreate api worker
+)
+
+say "Waiting for staging API health"
+for attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error     http://127.0.0.1:8012/health/ready >/tmp/terrasatch-resend-staging-health.json 2>/dev/null; then
+    cat /tmp/terrasatch-resend-staging-health.json
+    printf '\n'
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    die "Staging API did not become healthy after Resend configuration."
+  fi
+  sleep 2
+done
+
+say "Verifying Resend webhook gate"
+resend_code="$(
+  curl --silent --output /dev/null --write-out '%{http_code}'     -X POST     -H 'Content-Type: application/json'     -d '{}'     "$RESEND_WEBHOOK_URL" || true
+)"
+
+if [[ -n "$resend_webhook_secret" ]]; then
+  printf 'Unsigned Resend webhook request: %s (expected 400)\n' "$resend_code"
+  [[ "$resend_code" == "400" ]] ||
+    die "Configured Resend webhook did not reject an unsigned request."
+else
+  printf 'Resend webhook without signing secret: %s (expected 404)\n' "$resend_code"
+  [[ "$resend_code" == "404" ]] ||
+    die "Resend webhook should remain disabled until its signing secret is configured."
+fi
+
+say "RESEND STAGING CONFIGURATION PASSED"
+printf 'Webhook URL to configure in Resend: %s\n' "$RESEND_WEBHOOK_URL"
+printf 'Live Stripe billing remains disabled.\n'
