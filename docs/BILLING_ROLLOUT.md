@@ -143,3 +143,16 @@ Still required before public/live billing:
 - Configure Resend delivery/bounce webhook reconciliation.
 - Add operator-driven resend/password-reset flows.
 - Finish Stripe Customer Portal configuration and live-mode security review.
+
+
+Resend webhook routes:
+- Production/canonical: `/api/v1/billing/resend/webhook`
+- Isolated staging: `/api/v1/workspace/billing/resend/webhook`
+
+Subscribe the Resend webhook to `email.sent`, `email.delivered`,
+`email.delivery_delayed`, `email.bounced`, `email.complained`,
+`email.failed`, and `email.suppressed`. TerraSatch verifies the raw request
+using the Resend/Svix signing secret and a five-minute timestamp tolerance before
+updating a matching `provider_message_id`. Unmatched events are acknowledged but
+do not mutate billing state, which allows the same Resend account to carry other
+TerraSatch email categories safely.
