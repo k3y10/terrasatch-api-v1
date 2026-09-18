@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+import json
 from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -38,11 +39,12 @@ from terrasatch.billing.service import (
 )
 from terrasatch.billing.status import get_checkout_status
 from terrasatch.billing.stripe_gateway import StripeGateway
-from terrasatch.config import Settings
+from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+staging_router = APIRouter(prefix="/workspace/billing", tags=["billing"])
 Result = TypeVar("Result")
 
 
@@ -245,22 +247,72 @@ async def post_billing_activation(
     return ActivationResponse(activated=True, organization_id=organization_id)
 
 
-@router.post("/stripe/webhook", response_model=WebhookResponse)
-async def post_stripe_webhook(
-    request: Request,
-    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
-) -> WebhookResponse:
-    """Verify and apply Stripe lifecycle events with transactional email retry safety."""
+async def _verified_stripe_event(
+    *,
+    settings: Settings,
+    stripe: StripeGateway,
+    raw_payload: bytes,
+    stripe_signature: str | None,
+) -> tuple[dict[str, object], bytes]:
+    """Verify Stripe input with HMAC, or by test-event retrieval in staging only."""
 
-    if not stripe_signature:
+    if stripe_signature and settings.stripe_webhook_secret is not None:
+        event = stripe.construct_event(payload=raw_payload, signature=stripe_signature)
+        return event, raw_payload
+
+    if settings.environment != Environment.STAGING or settings.billing_allow_livemode:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stripe-Signature header required",
         )
+    if not stripe.secret_key.startswith(("sk_test_", "rk_test_")):
+        raise ProviderUnavailable("Staging webhook verification requires a Stripe test key")
+
+    try:
+        untrusted = json.loads(raw_payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise InvalidConfiguration("Stripe webhook payload is invalid JSON") from error
+    if not isinstance(untrusted, dict):
+        raise InvalidConfiguration("Stripe webhook payload is invalid")
+    event_id = str(untrusted.get("id") or "")
+    event = await stripe.retrieve_event(event_id)
+    if bool(event.get("livemode", False)):
+        raise ProviderUnavailable("Live Stripe events are disabled in staging")
+
+    verified_payload = json.dumps(
+        event,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return event, verified_payload
+
+
+async def _process_stripe_webhook(
+    request: Request,
+    stripe_signature: str | None,
+) -> WebhookResponse:
     settings: Settings = request.app.state.settings
+
+    if (
+        not stripe_signature
+        and (
+            settings.environment != Environment.STAGING
+            or settings.stripe_webhook_secret is not None
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe-Signature header required",
+        )
+
     stripe = _gateway(settings)
     raw_payload = await request.body()
-    event = stripe.construct_event(payload=raw_payload, signature=stripe_signature)
+    event, verified_payload = await _verified_stripe_event(
+        settings=settings,
+        stripe=stripe,
+        raw_payload=raw_payload,
+        stripe_signature=stripe_signature,
+    )
     if bool(event.get("livemode", False)) and not settings.billing_allow_livemode:
         raise ProviderUnavailable(
             "Live Stripe events are disabled until TerraSatch explicitly enables live billing"
@@ -292,7 +344,7 @@ async def post_stripe_webhook(
             result = await process_verified_event(
                 database,
                 event=event,
-                raw_payload=raw_payload,
+                raw_payload=verified_payload,
                 settings=settings,
                 subscription_snapshot=subscription_snapshot,
             )
@@ -320,3 +372,23 @@ async def post_stripe_webhook(
             raise
 
     return WebhookResponse(received=True, duplicate=result.duplicate)
+
+
+@router.post("/stripe/webhook", response_model=WebhookResponse)
+async def post_stripe_webhook(
+    request: Request,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
+) -> WebhookResponse:
+    """Verify and apply Stripe lifecycle events with transactional email retry safety."""
+
+    return await _process_stripe_webhook(request, stripe_signature)
+
+
+@staging_router.post("/stripe/webhook", response_model=WebhookResponse)
+async def post_staging_stripe_webhook(
+    request: Request,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
+) -> WebhookResponse:
+    """Staging-only alias for the externally exposed isolated workspace host."""
+
+    return await _process_stripe_webhook(request, stripe_signature)
