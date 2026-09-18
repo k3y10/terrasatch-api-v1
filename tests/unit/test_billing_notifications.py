@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -194,3 +195,42 @@ def test_subscription_update_email_requires_meaningful_previous_attributes() -> 
         == "subscription_updated"
     )
 
+
+
+def test_cancellation_notifications_require_real_state_transition() -> None:
+    scheduled = replace(context(), cancel_at_period_end=True)
+
+    assert (
+        notification_kind(
+            stripe_event_type="customer.subscription.updated",
+            activation_token=None,
+            context=scheduled,
+            previous_attributes={"metadata": {"example": "change"}},
+        )
+        is None
+    )
+    assert (
+        notification_kind(
+            stripe_event_type="customer.subscription.updated",
+            activation_token=None,
+            context=scheduled,
+            previous_attributes={"cancel_at_period_end": False},
+        )
+        == "cancellation_scheduled"
+    )
+    assert (
+        notification_kind(
+            stripe_event_type="customer.subscription.updated",
+            activation_token=None,
+            context=context(),
+            previous_attributes={"cancel_at_period_end": True},
+        )
+        == "cancellation_reversed"
+    )
+
+    message = build_billing_email(
+        kind="cancellation_reversed",
+        context=context(),
+        activation_url=None,
+    )
+    assert message.subject == "TerraSatch cancellation removed"
