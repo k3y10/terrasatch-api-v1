@@ -156,3 +156,25 @@ using the Resend/Svix signing secret and a five-minute timestamp tolerance befor
 updating a matching `provider_message_id`. Unmatched events are acknowledged but
 do not mutate billing state, which allows the same Resend account to carry other
 TerraSatch email categories safely.
+
+
+### Secure Oracle staging Resend setup
+
+Use `deploy/configure-resend-workspace-staging.sh` after the TerraSatch Resend
+account/domain exists. The helper:
+- prompts for the Resend API key without terminal echo;
+- optionally accepts the Resend webhook signing secret without terminal echo;
+- writes only the four Resend/from/reply-to values into owner-readable
+  `.env.staging` without putting secrets in shell history;
+- validates the Compose configuration;
+- restarts only the isolated staging API and worker;
+- waits for local staging health;
+- verifies the public Resend route is `400` for an unsigned request when the
+  signing secret is configured, otherwise `404`;
+- never changes `TERRASATCH_BILLING_ALLOW_LIVEMODE`.
+
+Recommended staging webhook URL:
+`https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook`
+
+After configuration, rerun the standard staging bootstrap. Its safety summary now
+reports direct Resend and delivery-reconciliation readiness independently.
