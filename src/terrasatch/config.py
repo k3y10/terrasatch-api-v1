@@ -168,17 +168,26 @@ class Settings(BaseSettings):
         return False
 
     @property
-    def billing_is_configured(self) -> bool:
-        """Require Stripe, webhook verification, activation signing and transactional email."""
+    def billing_email_is_configured(self) -> bool:
+        """Return whether transactional billing email delivery is fully configured."""
 
-        return bool(
+        return bool(self.billing_email_webhook_url and self.billing_email_webhook_secret)
+
+    @property
+    def billing_is_configured(self) -> bool:
+        """Require billing safety primitives; production additionally requires email delivery."""
+
+        core_ready = bool(
             self.billing_enabled
             and self.stripe_secret_key
             and self.stripe_webhook_is_configured
-            and self.billing_email_webhook_url
-            and self.billing_email_webhook_secret
             and self.billing_activation_signing_secret
         )
+        if not core_ready:
+            return False
+        if self.environment == Environment.STAGING and not self.billing_allow_livemode:
+            return True
+        return self.billing_email_is_configured
 
 
 @lru_cache
