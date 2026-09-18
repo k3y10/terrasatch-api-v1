@@ -266,9 +266,16 @@ async def portal_forgot_password(
     _verify_csrf(request, csrf_token)
     await enforce_public_rate_limit(
         settings,
-        category="portal-password-reset",
+        category="portal-password-reset-email",
+        identifier=email.strip().casefold(),
+        limit=5,
+        window=3600,
+    )
+    await enforce_public_rate_limit(
+        settings,
+        category="portal-password-reset-ip",
         identifier=request.client.host if request.client else "unknown",
-        limit=10,
+        limit=20,
         window=3600,
     )
     await _run_database(
@@ -320,9 +327,16 @@ async def portal_resend_activation(
     _verify_csrf(request, csrf_token)
     await enforce_public_rate_limit(
         settings,
-        category="portal-activation-resend",
+        category="portal-activation-resend-email",
+        identifier=email.strip().casefold(),
+        limit=5,
+        window=3600,
+    )
+    await enforce_public_rate_limit(
+        settings,
+        category="portal-activation-resend-ip",
         identifier=request.client.host if request.client else "unknown",
-        limit=10,
+        limit=20,
         window=3600,
     )
     await _run_database(
