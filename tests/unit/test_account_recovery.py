@@ -81,6 +81,7 @@ async def test_password_reset_is_single_use_and_replaces_password() -> None:
             password="new-password-123",
         )
         assert reset_user.id == user.id
+        assert reset_user.credential_version == 1
         assert verify_admin_password("new-password-123", reset_user.password_hash or "")
         await session.commit()
 
