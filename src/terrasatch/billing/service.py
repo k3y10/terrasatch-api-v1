@@ -277,6 +277,7 @@ async def _find_signup(
     *,
     signup_id: str | None,
     checkout_session_id: str | None = None,
+    stripe_customer_id: str | None = None,
 ) -> BillingSignup:
     signup: BillingSignup | None = None
     if signup_id:
@@ -289,6 +290,13 @@ async def _find_signup(
             select(BillingSignup).where(
                 BillingSignup.stripe_checkout_session_id == checkout_session_id
             )
+        )
+    if signup is None and stripe_customer_id:
+        signup = await session.scalar(
+            select(BillingSignup)
+            .where(BillingSignup.stripe_customer_id == stripe_customer_id)
+            .order_by(BillingSignup.created_at.desc())
+            .limit(1)
         )
     if signup is None:
         raise ResourceNotFound("Stripe event does not match a TerraSatch billing signup")
@@ -474,7 +482,11 @@ async def sync_subscription_snapshot(
 ) -> ProvisioningResult:
     subscription_id, customer_id, plan_code, interval = _validated_subscription_identity(snapshot)
     metadata = _subscription_metadata(snapshot)
-    signup = await _find_signup(session, signup_id=metadata.get("signup_id"))
+    signup = await _find_signup(
+        session,
+        signup_id=metadata.get("signup_id"),
+        stripe_customer_id=customer_id,
+    )
     if signup.plan_code != plan_code.value or signup.billing_interval != interval.value:
         raise InvalidConfiguration("Subscription does not match the original signup plan")
     provisioned = await _provision_signup(
@@ -526,7 +538,7 @@ async def _sync_checkout_completed(
     session: AsyncSession,
     *,
     checkout: dict[str, Any],
-    subscription_snapshot: dict[str, Any],
+    subscription_snapshot: dict[str, Any] | None,
     settings: Settings,
 ) -> ProvisioningResult:
     checkout_id = _object_id(checkout.get("id"))
@@ -538,7 +550,7 @@ async def _sync_checkout_completed(
         signup_id=signup_id or None,
         checkout_session_id=checkout_id,
     )
-    if not customer_id:
+    if not customer_id and subscription_snapshot is not None:
         customer_id = _object_id(subscription_snapshot.get("customer"))
     if not customer_id:
         raise InvalidConfiguration("Completed Stripe Checkout is missing a customer")
@@ -549,11 +561,12 @@ async def _sync_checkout_completed(
         stripe_customer_id=customer_id,
         settings=settings,
     )
-    await sync_subscription_snapshot(
-        session,
-        snapshot=subscription_snapshot,
-        settings=settings,
-    )
+    if subscription_snapshot is not None:
+        await sync_subscription_snapshot(
+            session,
+            snapshot=subscription_snapshot,
+            settings=settings,
+        )
     return provisioned
 
 
@@ -631,8 +644,6 @@ async def process_verified_event(
 
     result = WebhookProcessingResult(duplicate=False, event_type=event_type)
     if event_type == "checkout.session.completed":
-        if subscription_snapshot is None:
-            raise InvalidConfiguration("Completed Checkout requires a subscription snapshot")
         provisioned = await _sync_checkout_completed(
             session,
             checkout=obj,
