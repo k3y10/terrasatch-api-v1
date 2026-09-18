@@ -7,7 +7,7 @@ import hmac
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.security import hash_admin_password
@@ -43,7 +43,9 @@ async def create_password_reset_intent(
 
     normalized = email.strip().casefold()
     user = await session.scalar(
-        select(User).where(User.email == normalized, User.enabled.is_(True))
+        select(User)
+        .where(User.email == normalized, User.enabled.is_(True))
+        .with_for_update()
     )
     if user is None or not user.password_hash:
         return None
@@ -62,14 +64,18 @@ async def create_password_reset_intent(
         return None
 
     now = datetime.now(UTC)
-    await session.execute(
-        update(PasswordResetIntent)
-        .where(
-            PasswordResetIntent.user_id == user.id,
-            PasswordResetIntent.consumed_at.is_(None),
+    previous_intents = list(
+        await session.scalars(
+            select(PasswordResetIntent)
+            .where(
+                PasswordResetIntent.user_id == user.id,
+                PasswordResetIntent.consumed_at.is_(None),
+            )
+            .with_for_update()
         )
-        .values(consumed_at=now)
     )
+    for previous_intent in previous_intents:
+        previous_intent.consumed_at = now
 
     reset_id = uuid4()
     token = recover_password_reset_token(settings, reset_id)
@@ -115,13 +121,17 @@ async def reset_password(
     except ValueError as error:
         raise InvalidConfiguration(str(error)) from error
 
-    await session.execute(
-        update(PasswordResetIntent)
-        .where(
-            PasswordResetIntent.user_id == user.id,
-            PasswordResetIntent.consumed_at.is_(None),
+    open_intents = list(
+        await session.scalars(
+            select(PasswordResetIntent)
+            .where(
+                PasswordResetIntent.user_id == user.id,
+                PasswordResetIntent.consumed_at.is_(None),
+            )
+            .with_for_update()
         )
-        .values(consumed_at=now)
     )
+    for open_intent in open_intents:
+        open_intent.consumed_at = now
     await session.flush()
     return user
