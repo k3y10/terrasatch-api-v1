@@ -67,7 +67,7 @@ class CheckoutRequest(BaseModel):
 
 class CheckoutSessionResponse(BaseModel):
     signup_id: UUID
-    checkout_session_id: str
+    checkout_session_id: str | None
     checkout_url: str
     expires_at: datetime
     plan_code: PlanCode
