@@ -281,10 +281,12 @@ class Settings(BaseSettings):
             return False
         if self.environment == Environment.STAGING and not self.billing_allow_livemode:
             return True
-        return bool(
-            self.billing_email_is_configured
-            and self.resend_webhook_is_configured
-        )
+        if self.environment == Environment.PRODUCTION:
+            return bool(
+                self.billing_email_is_configured
+                and self.resend_webhook_is_configured
+            )
+        return self.billing_email_is_configured
 
 
 @lru_cache
