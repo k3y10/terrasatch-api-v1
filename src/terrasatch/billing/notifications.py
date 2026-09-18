@@ -168,6 +168,7 @@ def notification_kind(
     activation_token: str | None,
     context: BillingEmailContext | None,
     previous_attributes: dict[str, object] | None = None,
+    event_object: dict[str, object] | None = None,
 ) -> str | None:
     if activation_token:
         return "trial_started"
@@ -175,7 +176,12 @@ def notification_kind(
         return "trial_ending"
     if stripe_event_type == "invoice.payment_failed":
         return "payment_failed"
-    if stripe_event_type == "invoice.paid":
+    if (
+        stripe_event_type == "invoice.paid"
+        and event_object is not None
+        and isinstance(event_object.get("amount_paid"), int)
+        and int(event_object["amount_paid"]) > 0
+    ):
         return "payment_confirmed"
     if stripe_event_type == "customer.subscription.deleted":
         return "subscription_ended"
