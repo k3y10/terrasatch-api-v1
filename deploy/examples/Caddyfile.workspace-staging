@@ -1,5 +1,6 @@
 # Isolated subscription/workspace staging host.
-# Only /api/v1/workspace/* is exposed from the staging service.
+# Exposes only workspace APIs, the session-protected organization portal,
+# and public TerraSatch brand assets from the staging service.
 # Unsigned sandbox Stripe webhooks are additionally restricted to Stripe's
 # published webhook source IP addresses. Production continues to use HMAC.
 
@@ -21,6 +22,16 @@ staging-api.terrasatch.com {
 
     @workspace path /api/v1/workspace/*
     handle @workspace {
+        reverse_proxy 127.0.0.1:8012
+    }
+
+    @portal path /portal /portal/*
+    handle @portal {
+        reverse_proxy 127.0.0.1:8012
+    }
+
+    @brand_assets path /assets/*
+    handle @brand_assets {
         reverse_proxy 127.0.0.1:8012
     }
 
