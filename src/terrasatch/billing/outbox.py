@@ -57,6 +57,8 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                         BillingEmailOutbox.sent_at.is_(None),
                         BillingEmailOutbox.next_attempt_at <= now,
                         BillingEmailOutbox.last_error.is_distinct_from("reconcile_required"),
+                        BillingEmailOutbox.last_error.is_distinct_from("activation_expired"),
+                        BillingEmailOutbox.last_error.is_distinct_from("activation_consumed"),
                     )
                     .order_by(BillingEmailOutbox.next_attempt_at)
                     .with_for_update(skip_locked=True)
@@ -78,6 +80,21 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                 row = await session.get(BillingEmailOutbox, event_id, with_for_update=True)
                 if row.sent_at is not None:
                     continue
+                if row.activation_id:
+                    activation = await session.get(
+                        BillingActivation, row.activation_id, with_for_update=True
+                    )
+                    if activation is None:
+                        row.last_error = "reconcile_required"
+                        continue
+                    if activation.consumed_at is not None:
+                        row.last_error = "activation_consumed"
+                        continue
+                    if activation.expires_at.replace(tzinfo=UTC) <= datetime.now(UTC):
+                        # A fresh activation needs a new explicit intent and idempotency key.
+                        # Never replace this retry's payload under an existing provider key.
+                        row.last_error = "activation_expired"
+                        continue
                 values = dict(row.context)
                 for key in ("trial_ends_at", "current_period_end", "grace_ends_at"):
                     if values[key]:
@@ -87,6 +104,9 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                     if row.activation_id
                     else None
                 )
+                if token and _token_hash(token) != activation.token_hash:
+                    row.last_error = "reconcile_required"
+                    continue
                 try:
                     delivered = await deliver_billing_email(
                         settings=settings,

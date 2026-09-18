@@ -5,15 +5,81 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from terrasatch.billing.models import BillingEmailOutbox
+from terrasatch.billing.models import BillingActivation, BillingEmailOutbox
 from terrasatch.billing.notifications import BillingEmailContext
 from terrasatch.billing.outbox import dispatch_email_batch, enqueue_email
 from terrasatch.billing.plans import BillingInterval, get_plan
-from terrasatch.billing.service import recover_activation_token
+from terrasatch.billing.service import _token_hash, recover_activation_token
 from terrasatch.billing.stripe_gateway import validate_price
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
+from terrasatch.identity.models import Account, Organization, User
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["expired", "consumed", "rotated", "valid"])
+async def test_activation_delivery_checks_current_token_state(monkeypatch, state):
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    deliveries = []
+
+    async def send(**kwargs):
+        deliveries.append(kwargs["activation_token"])
+        return True
+
+    monkeypatch.setattr("terrasatch.billing.outbox.deliver_billing_email", send)
+    async with factory() as session:
+        account = Account(name="Email test")
+        session.add(account)
+        await session.flush()
+        org = Organization(account_id=account.id, name="Email test", slug="email-test")
+        user = User(email="email-test@example.com", display_name="Email test")
+        session.add_all([org, user])
+        await session.flush()
+        identity = uuid4()
+        token = recover_activation_token(settings(), identity)
+        activation = BillingActivation(
+            id=identity,
+            user_id=user.id,
+            organization_id=org.id,
+            token_hash=_token_hash(token),
+            expires_at=datetime.now(UTC) + timedelta(hours=-1 if state == "expired" else 1),
+            consumed_at=datetime.now(UTC) if state == "consumed" else None,
+        )
+        session.add(activation)
+        await session.flush()
+        await enqueue_email(
+            session,
+            event_id="activation-test",
+            kind="trial_started",
+            context=context(),
+            activation_token=token,
+        )
+        await session.commit()
+    config = (
+        Settings(billing_activation_signing_secret="rotated-secret")
+        if state == "rotated"
+        else settings()
+    )
+    assert await dispatch_email_batch(config, session_factory=factory) == (state == "valid")
+    assert deliveries == ([token] if state == "valid" else [])
+    # Terminal intents are not retried or falsely marked as sent.
+    assert await dispatch_email_batch(config, session_factory=factory) == 0
+    async with factory() as session:
+        row = await session.get(BillingEmailOutbox, "activation-test")
+        assert row.attempts == 1
+        assert (row.sent_at is not None) == (state == "valid")
+        expected = {
+            "expired": "activation_expired",
+            "consumed": "activation_consumed",
+            "rotated": "reconcile_required",
+            "valid": None,
+        }
+        assert row.last_error == expected[state]
+    await engine.dispose()
 
 
 def settings():
