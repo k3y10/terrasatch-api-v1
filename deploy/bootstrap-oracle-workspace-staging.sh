@@ -279,14 +279,14 @@ test_env_unset+=(
 env "${test_env_unset[@]}" uv run pytest
 
 if [[ "$lock_updated" == "true" ]]; then
-  say "Tests passed with regenerated lockfile; committing uv.lock to the draft staging branch"
+  say "Tests passed with regenerated lockfile; committing uv.lock locally for staging"
   git config user.name "TerraSatch Staging Automation"
   git config user.email "staging-automation@terrasatch.local"
   git add uv.lock
   git commit -m "Refresh uv lockfile for staging resolver"
-  git push origin "HEAD:$BRANCH"
   staging_head="$(git rev-parse HEAD)"
-  printf 'Staging branch advanced with validated lockfile: %s\n' "$staging_head"
+  printf 'Validated local staging revision: %s\n' "$staging_head"
+  printf 'Oracle GitHub credentials remain read-only; no remote push is required for staging.\n'
   rm -f "$lock_backup"
   lock_backup=""
   lock_updated=false
