@@ -45,6 +45,7 @@ class ProvisioningResult:
     user_id: UUID
     activation_token: str | None
     newly_provisioned: bool
+    state_applied: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,7 @@ class WebhookProcessingResult:
     organization_id: UUID | None = None
     activation_token: str | None = None
     activation_email: str | None = None
+    state_applied: bool = True
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -479,6 +481,7 @@ async def sync_subscription_snapshot(
     *,
     snapshot: dict[str, Any],
     settings: Settings,
+    event_created: int | None = None,
 ) -> ProvisioningResult:
     subscription_id, customer_id, plan_code, interval = _validated_subscription_identity(snapshot)
     metadata = _subscription_metadata(snapshot)
@@ -504,6 +507,19 @@ async def sync_subscription_snapshot(
     subscription = await session.scalar(
         select(Subscription).where(Subscription.stripe_subscription_id == subscription_id)
     )
+    if (
+        subscription is not None
+        and event_created is not None
+        and subscription.last_subscription_event_created is not None
+        and event_created < subscription.last_subscription_event_created
+    ):
+        return ProvisioningResult(
+            organization_id=provisioned.organization_id,
+            user_id=provisioned.user_id,
+            activation_token=provisioned.activation_token,
+            newly_provisioned=provisioned.newly_provisioned,
+            state_applied=False,
+        )
     if subscription is None:
         subscription = Subscription(
             organization_id=billing_customer.organization_id,
@@ -530,6 +546,8 @@ async def sync_subscription_snapshot(
     if subscription.status in _ACTIVE_ACCESS_STATUSES:
         subscription.grace_ends_at = None
         subscription.last_payment_failed_at = None
+    if event_created is not None:
+        subscription.last_subscription_event_created = event_created
     await session.flush()
     return provisioned
 
@@ -585,44 +603,62 @@ async def _mark_invoice_failed(
     *,
     invoice: dict[str, Any],
     settings: Settings,
-) -> UUID | None:
+    event_created: int | None = None,
+) -> tuple[UUID | None, bool]:
     subscription_id = _invoice_subscription_id(invoice)
     if not subscription_id:
-        return None
+        return None, True
     subscription = await session.scalar(
         select(Subscription).where(Subscription.stripe_subscription_id == subscription_id)
     )
     if subscription is None:
-        return None
+        return None, True
+    if (
+        event_created is not None
+        and subscription.last_invoice_event_created is not None
+        and event_created < subscription.last_invoice_event_created
+    ):
+        return subscription.organization_id, False
     now = datetime.now(UTC)
     subscription.status = "past_due"
     subscription.last_invoice_id = _object_id(invoice.get("id"))
     subscription.last_payment_failed_at = now
     subscription.grace_ends_at = now + timedelta(days=settings.billing_grace_days)
+    if event_created is not None:
+        subscription.last_invoice_event_created = event_created
     await session.flush()
-    return subscription.organization_id
+    return subscription.organization_id, True
 
 
 async def _mark_invoice_paid(
     session: AsyncSession,
     *,
     invoice: dict[str, Any],
-) -> UUID | None:
+    event_created: int | None = None,
+) -> tuple[UUID | None, bool]:
     subscription_id = _invoice_subscription_id(invoice)
     if not subscription_id:
-        return None
+        return None, True
     subscription = await session.scalar(
         select(Subscription).where(Subscription.stripe_subscription_id == subscription_id)
     )
     if subscription is None:
-        return None
+        return None, True
+    if (
+        event_created is not None
+        and subscription.last_invoice_event_created is not None
+        and event_created < subscription.last_invoice_event_created
+    ):
+        return subscription.organization_id, False
     subscription.last_invoice_id = _object_id(invoice.get("id"))
     if subscription.status == "past_due":
         subscription.status = "active"
     subscription.grace_ends_at = None
     subscription.last_payment_failed_at = None
+    if event_created is not None:
+        subscription.last_invoice_event_created = event_created
     await session.flush()
-    return subscription.organization_id
+    return subscription.organization_id, True
 
 
 async def process_verified_event(
@@ -637,6 +673,14 @@ async def process_verified_event(
 
     event_id = _object_id(event.get("id"))
     event_type = str(event.get("type") or "")
+    raw_event_created = event.get("created")
+    event_created = (
+        raw_event_created
+        if isinstance(raw_event_created, int)
+        and not isinstance(raw_event_created, bool)
+        and raw_event_created >= 0
+        else None
+    )
     if not event_id or not event_type:
         raise InvalidConfiguration("Stripe webhook event is missing an ID or type")
     # Serialize lifecycle events across workers before provisioning or checking the ledger.
@@ -687,6 +731,7 @@ async def process_verified_event(
             session,
             snapshot=obj,
             settings=settings,
+            event_created=event_created,
         )
         billing_customer = await session.scalar(
             select(BillingCustomer).where(
@@ -707,16 +752,32 @@ async def process_verified_event(
             organization_id=provisioned.organization_id,
             activation_token=provisioned.activation_token,
             activation_email=signup.email if signup is not None else None,
+            state_applied=provisioned.state_applied,
         )
     elif event_type == "invoice.payment_failed":
-        organization_id = await _mark_invoice_failed(session, invoice=obj, settings=settings)
+        organization_id, state_applied = await _mark_invoice_failed(
+            session,
+            invoice=obj,
+            settings=settings,
+            event_created=event_created,
+        )
         result = WebhookProcessingResult(
-            duplicate=False, event_type=event_type, organization_id=organization_id
+            duplicate=False,
+            event_type=event_type,
+            organization_id=organization_id,
+            state_applied=state_applied,
         )
     elif event_type == "invoice.paid":
-        organization_id = await _mark_invoice_paid(session, invoice=obj)
+        organization_id, state_applied = await _mark_invoice_paid(
+            session,
+            invoice=obj,
+            event_created=event_created,
+        )
         result = WebhookProcessingResult(
-            duplicate=False, event_type=event_type, organization_id=organization_id
+            duplicate=False,
+            event_type=event_type,
+            organization_id=organization_id,
+            state_applied=state_applied,
         )
 
     session.add(
@@ -725,6 +786,7 @@ async def process_verified_event(
             event_type=event_type,
             livemode=bool(event.get("livemode", False)),
             payload_sha256=_event_payload_hash(raw_payload),
+            provider_created_at=event_created,
             processed_at=datetime.now(UTC),
         )
     )
