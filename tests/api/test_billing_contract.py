@@ -217,3 +217,30 @@ async def test_staging_billing_callback_pages_are_self_contained() -> None:
     assert "Billing settings updated" in portal_return.text
     assert activate.status_code == 200
     assert "workspace/billing/activate" in activate.text
+
+
+@pytest.mark.asyncio
+async def test_resend_webhook_routes_are_scoped_and_disabled_without_secret() -> None:
+    settings = Settings(
+        environment="staging",
+        deployment_name="billing-resend-contract-test",
+        api_base_url="https://staging-api.terrasatch.com",
+        cors_origins=[],
+    )
+    application = create_app(settings)
+    paths = application.openapi()["paths"]
+
+    assert "/api/v1/billing/resend/webhook" in paths
+    assert "/api/v1/workspace/billing/resend/webhook" in paths
+
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/workspace/billing/resend/webhook",
+            content=b"{}",
+        )
+
+    assert response.status_code == 404
