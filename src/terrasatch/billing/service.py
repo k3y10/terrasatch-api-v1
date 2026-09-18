@@ -772,6 +772,51 @@ async def get_stripe_customer_id(
     return billing_customer.stripe_customer_id
 
 
+async def recover_pending_activation_token_for_checkout(
+    session: AsyncSession,
+    *,
+    checkout_session_id: str,
+    settings: Settings,
+) -> str | None:
+    """Recover a pending activation token for isolated staging acceptance only."""
+
+    signup = await session.scalar(
+        select(BillingSignup).where(
+            BillingSignup.stripe_checkout_session_id == checkout_session_id,
+            BillingSignup.status == "completed",
+        )
+    )
+    if signup is None or not signup.stripe_customer_id:
+        return None
+
+    billing_customer = await session.scalar(
+        select(BillingCustomer).where(
+            BillingCustomer.stripe_customer_id == signup.stripe_customer_id
+        )
+    )
+    if billing_customer is None:
+        return None
+
+    now = datetime.now(UTC)
+    activation = await session.scalar(
+        select(BillingActivation)
+        .where(
+            BillingActivation.organization_id == billing_customer.organization_id,
+            BillingActivation.consumed_at.is_(None),
+            BillingActivation.expires_at > now,
+        )
+        .order_by(BillingActivation.created_at.desc())
+        .limit(1)
+    )
+    if activation is None:
+        return None
+
+    token = recover_activation_token(settings, activation.id)
+    if _token_hash(token) != activation.token_hash:
+        raise InvalidConfiguration("Activation signing secret does not match staging state")
+    return token
+
+
 async def activate_owner(
     session: AsyncSession,
     *,
