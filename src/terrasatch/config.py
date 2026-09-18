@@ -90,6 +90,11 @@ class Settings(BaseSettings):
         min_length=10,
         max_length=1000,
     )
+    billing_staging_trust_caddy_stripe_ips: bool = False
+    billing_staging_individual_payment_link_url: str | None = None
+    billing_staging_individual_payment_link_id: str | None = None
+    billing_staging_team_payment_link_url: str | None = None
+    billing_staging_team_payment_link_id: str | None = None
     billing_email_webhook_url: AnyHttpUrl | None = None
     billing_email_webhook_secret: SecretStr | None = None
     billing_activation_signing_secret: SecretStr | None = None
@@ -153,8 +158,22 @@ class Settings(BaseSettings):
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
 
     @property
+    def staging_payment_links_are_configured(self) -> bool:
+        """Return whether isolated staging can use Stripe-hosted sandbox Payment Links."""
+
+        return bool(
+            self.environment == Environment.STAGING
+            and not self.billing_allow_livemode
+            and self.billing_staging_trust_caddy_stripe_ips
+            and self.billing_staging_individual_payment_link_url
+            and self.billing_staging_individual_payment_link_id
+            and self.billing_staging_team_payment_link_url
+            and self.billing_staging_team_payment_link_id
+        )
+
+    @property
     def stripe_webhook_is_configured(self) -> bool:
-        """Require HMAC in production; allow Stripe event retrieval in test-only staging."""
+        """Require HMAC in production; allow tightly scoped sandbox verification in staging."""
 
         if self.stripe_webhook_secret is not None:
             return True
@@ -164,8 +183,9 @@ class Settings(BaseSettings):
             and self.stripe_secret_key is not None
         ):
             secret = self.stripe_secret_key.get_secret_value()
-            return secret.startswith(("sk_test_", "rk_test_"))
-        return False
+            if secret.startswith(("sk_test_", "rk_test_")):
+                return True
+        return self.staging_payment_links_are_configured
 
     @property
     def billing_email_is_configured(self) -> bool:
@@ -177,9 +197,10 @@ class Settings(BaseSettings):
     def billing_is_configured(self) -> bool:
         """Require billing safety primitives; production additionally requires email delivery."""
 
+        provider_ready = bool(self.stripe_secret_key or self.staging_payment_links_are_configured)
         core_ready = bool(
             self.billing_enabled
-            and self.stripe_secret_key
+            and provider_ready
             and self.stripe_webhook_is_configured
             and self.billing_activation_signing_secret
         )
