@@ -126,6 +126,7 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                     row.sent_at = now
                     row.delivery_provider = receipt.provider
                     row.provider_message_id = receipt.message_id
+                    row.delivery_status = "accepted"
                     row.last_error = None
                     sent += 1
     return sent
