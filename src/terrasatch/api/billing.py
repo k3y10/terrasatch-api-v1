@@ -149,12 +149,12 @@ async def post_billing_checkout(
     """Create a 30-day subscription trial in Stripe Checkout without trusting price IDs."""
 
     settings: Settings = request.app.state.settings
-    if not settings.billing_is_configured:
-        raise ProviderUnavailable("Billing activation and provider configuration is incomplete")
     plan = get_plan(payload.plan_code)
     recurring_amount = plan.amount_cents(payload.billing_interval)
     if not plan.self_service or recurring_amount is None:
         raise InvalidConfiguration("The selected plan is not available for self-service checkout")
+    if not settings.billing_is_configured:
+        raise ProviderUnavailable("Billing activation and provider configuration is incomplete")
 
     await enforce_checkout_rate_limit(
         settings,
