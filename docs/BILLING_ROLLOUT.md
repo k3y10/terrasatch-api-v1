@@ -95,7 +95,7 @@ Checkout completion provisions the signup using `client_reference_id` and the lo
 
 Transactional email is no longer optional in isolated staging readiness. The staging success page still supports activation recovery for diagnostics, but `billing_is_configured` now remains false until an email sender and signed Resend delivery webhook reconciliation are both configured.
 
-Customer Portal remains a separate Stripe account configuration. The connected Stripe credential can read portal configurations but does not have permission to create one; no portal configuration currently exists in the TerraSatch sandbox.
+Customer Portal is now configured in the TerraSatch sandbox with default configuration `bpc_1UHAGBPwzxCRGRdhBmPQexBm`. It allows payment-method updates, invoice history, and cancellation at period end with cancellation reasons. Customer profile/email updates, subscription plan changes, quantity changes, and the hosted shareable login page remain disabled so TerraSatch stays authoritative for identity and entitlements. A sandbox Portal session was created successfully for the existing TerraSatch test customer using the default configuration.
 
 
 ## Transactional email structure — September 18, 2026
@@ -144,7 +144,7 @@ Still required before public/live billing:
 - Run one final Stripe sandbox Checkout -> webhook -> password creation -> automatic Field Workspace handoff on the current branch head.
 - Exercise delayed/out-of-order subscription and invoice events against staging and confirm stale events do not mutate current state or enqueue customer email.
 - Visually confirm the Field Workspace recovery screens and login handoff.
-- Finish Stripe Customer Portal configuration and live-mode security review.
+- Re-run the authenticated TerraSatch Portal route against current staging and confirm it opens the configured sandbox Customer Portal; live-mode security review remains separate.
 
 
 Resend webhook routes:
