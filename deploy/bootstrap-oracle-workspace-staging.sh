@@ -208,8 +208,15 @@ else
   printf 'Stripe provider mode: hosted Payment Links + Caddy IP-restricted sandbox webhooks\n'
 fi
 printf 'Live billing: disabled\n'
-if [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
-  printf 'Transactional email: configured\n'
+if [[ -n "${TERRASATCH_RESEND_API_KEY:-}" && -n "${TERRASATCH_BILLING_FROM:-}" ]]; then
+  printf 'Transactional email: direct Resend configured\n'
+  if [[ -n "${TERRASATCH_RESEND_WEBHOOK_SECRET:-}" ]]; then
+    printf 'Resend delivery reconciliation: configured\n'
+  else
+    printf 'Resend delivery reconciliation: not configured\n'
+  fi
+elif [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
+  printf 'Transactional email: Vercel fallback configured\n'
 else
   printf 'Transactional email: not configured (allowed in isolated staging; activation fallback enabled)\n'
 fi
