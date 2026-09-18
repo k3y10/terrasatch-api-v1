@@ -45,13 +45,13 @@ from terrasatch.billing.service import (
     public_plans,
     recover_pending_activation_token_for_checkout,
 )
-from terrasatch.billing.status import get_checkout_status
 from terrasatch.billing.staging_ui import (
     render_staging_billing_activation,
     render_staging_billing_cancel,
     render_staging_billing_portal_return,
     render_staging_billing_success,
 )
+from terrasatch.billing.status import get_checkout_status
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
