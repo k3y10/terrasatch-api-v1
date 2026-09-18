@@ -180,6 +180,7 @@ export TERRASATCH_STRIPE_SECRET_KEY TERRASATCH_STRIPE_WEBHOOK_SECRET
 required=(
   POSTGRES_PASSWORD
   TERRASATCH_BILLING_ACTIVATION_SIGNING_SECRET
+  TERRASATCH_STRIPE_SECRET_KEY
 )
 missing=()
 for name in "${required[@]}"; do
@@ -191,22 +192,16 @@ if [[ "${#missing[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
-  case "$TERRASATCH_STRIPE_SECRET_KEY" in
-    sk_test_*|rk_test_*) ;;
-    *) die "Configured Stripe credential is not a test-mode key." ;;
-  esac
-fi
+case "$TERRASATCH_STRIPE_SECRET_KEY" in
+  sk_test_*|rk_test_*) ;;
+  *) die "Configured Stripe credential is not a test-mode key." ;;
+esac
 if [[ "${TERRASATCH_BILLING_ALLOW_LIVEMODE:-false}" == "true" ]]; then
   die "TERRASATCH_BILLING_ALLOW_LIVEMODE must not be true in staging."
 fi
 
 say "Sandbox environment safety checks passed"
-if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
-  printf 'Stripe provider mode: test API key + sandbox webhooks\n'
-else
-  printf 'Stripe provider mode: hosted Payment Links + Caddy IP-restricted sandbox webhooks\n'
-fi
+printf 'Stripe provider mode: test API key + sandbox webhooks + Customer Portal\n'
 printf 'Live billing: disabled\n'
 [[ -n "${TERRASATCH_RESEND_API_KEY:-}" && -n "${TERRASATCH_BILLING_FROM:-}" ]] ||
   die "Direct Oracle-to-Resend email must be configured before staging billing can be ready."
