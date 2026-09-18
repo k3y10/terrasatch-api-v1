@@ -143,7 +143,8 @@ def _format_date(value: datetime | None) -> str | None:
     normalized = value
     if normalized.tzinfo is None:
         normalized = normalized.replace(tzinfo=UTC)
-    return normalized.astimezone(UTC).strftime("%B %-d, %Y")
+    normalized = normalized.astimezone(UTC)
+    return f"{normalized.strftime('%B')} {normalized.day}, {normalized.year}"
 
 
 def _button(href: str, label: str) -> str:
