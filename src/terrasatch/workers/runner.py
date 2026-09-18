@@ -32,7 +32,7 @@ async def _publish_heartbeat(settings: Settings, shutdown_requested: asyncio.Eve
 
 async def _billing_outbox(settings, shutdown_requested):
     while not shutdown_requested.is_set():
-        if settings.billing_is_configured:
+        if settings.billing_email_is_configured:
             try:
                 await dispatch_email_batch(settings)
             except Exception:
