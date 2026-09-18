@@ -340,7 +340,7 @@ sudo systemctl reload caddy
 
 say "Deploying only the isolated workspace staging stack"
 export TERRASATCH_STAGING_BRANCH="$BRANCH"
-bash "$staging_dir/deploy/release-workspace-staging.sh"
+bash "$staging_dir/deploy/release-workspace-staging.sh" </dev/null
 
 say "Verifying container isolation"
 docker compose -f "$staging_dir/deploy/docker-compose.workspace-staging.yml" ps
