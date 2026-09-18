@@ -18,7 +18,7 @@ Annual values are null. Optional annual discounts remain proposals. Old pitch-mo
 ## Gates and deployment order
 
 1. Keep billing disabled and live mode false. Keep both PRs draft.
-2. Build from the billing branch in an isolated staging directory/database; never migrate production for a preview. Apply migrations through 0015 and run API and worker from the same version.
+2. Build from the billing branch in an isolated staging directory/database; never migrate production for a preview. Apply migrations through 0017 and run API and worker from the same version.
 3. Configure a protected Preview origin and staging-only server credentials. Identify the public staging webhook origin before creating endpoints. No default production URL is acceptable for a sandbox acceptance run.
 4. After explicit renewed Stripe authorization, verify account `acct_1Txb0QPwzxCRGRdh`, test mode, and create the matching v2 catalog. Configure customer portal cancellation/payment methods; plan switching needs separate backend validation.
 5. Production Stripe still requires a server-side restricted key and matching webhook signing secret. Staging and production billing readiness both require the direct Oracle-to-Resend sender plus signed Resend delivery reconciliation; the Vercel sender is resilience fallback only and cannot satisfy readiness by itself. Never print credentials or commit environment files.
@@ -27,7 +27,7 @@ Annual values are null. Optional annual discounts remain proposals. Old pitch-mo
 8. Test duplicate/concurrent/out-of-order webhooks, payment failures, cancellation, DB rollback, email retries, expired/consumed activation links, tenant isolation and CORS. Provider/message-ID receipt tracking and Resend sent/delivered/delayed/bounce/complaint/failure/suppression reconciliation are implemented. Password reset and activation resend now use the same durable outbox and signed delivery reconciliation.
 9. Confirm unit economics, retention semantics, support/hardware scope, tax registration/collection, subscription migration, and release base before requesting any production rollout.
 
-Webhook event set: checkout.session.completed; customer.subscription.created/updated/deleted/trial_will_end; invoice.paid; invoice.payment_failed. Fresh subscription state and stale invoice ordering still need review. Live gate must remain false.
+Webhook event set: checkout.session.completed; customer.subscription.created/updated/deleted/trial_will_end; invoice.paid; invoice.payment_failed. Subscription and invoice state now record Stripe event-created watermarks so older delayed events are ledgered but cannot overwrite newer state or enqueue stale customer email. The current branch still requires Oracle staging acceptance of these guards. Live gate must remain false.
 
 ## Implemented safeguards and limits
 
@@ -132,14 +132,17 @@ billing_email_outbox -> TerraSatch worker -> protected Vercel /api/billing-email
 
 The fallback remains compatible with `TERRASATCH_BILLING_EMAIL_WEBHOOK_URL` and `TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET`, but it is not configured in isolated staging and cannot satisfy staging/production readiness by itself. The Vercel endpoint returns the Resend message ID so the same outbox receipt fields are populated when fallback is explicitly enabled for recovery.
 
-Migration `0015_billing_email_receipts` adds nullable `delivery_provider` and `provider_message_id` fields. Existing outbox rows remain valid.
+Migration `0015_billing_email_receipts` adds provider receipt/reconciliation fields. Migration `0016_account_recovery_email` adds credential-version and password-reset intent state. Migration `0017_stripe_event_ordering` adds nullable Stripe event-created watermarks to subscription/invoice state and the event ledger. Existing rows remain valid and acquire watermarks as new Stripe events are processed.
 
 GitHub Actions workflow files were removed from the billing branch intentionally. Validation is performed through the Oracle staging bootstrap and the manual browser acceptance script so field testing does not consume GitHub Actions minutes or introduce CI billing risk.
 
 Live Stripe billing remains disabled. Transactional email work does not change `TERRASATCH_BILLING_ALLOW_LIVEMODE=false`.
 
 Still required before public/live billing:
+- Run the standard isolated Oracle bootstrap on the current branch head and require lock validation, Ruff, the full pytest suite, migration through `0017`, Caddy checks, and clean staging logs.
 - Run one real staging password-reset email and one activation-resend email through the verified `billing@terrasatch.com` sender and confirm signed delivery reconciliation.
+- Run one final Stripe sandbox Checkout -> webhook -> password creation -> automatic Field Workspace handoff on the current branch head.
+- Exercise delayed/out-of-order subscription and invoice events against staging and confirm stale events do not mutate current state or enqueue customer email.
 - Visually confirm the Field Workspace recovery screens and login handoff.
 - Finish Stripe Customer Portal configuration and live-mode security review.
 
