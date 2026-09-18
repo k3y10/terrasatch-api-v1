@@ -106,6 +106,14 @@ class Settings(BaseSettings):
             "RESEND_API_KEY",
         ),
     )
+    resend_webhook_secret: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "resend_webhook_secret",
+            "TERRASATCH_RESEND_WEBHOOK_SECRET",
+            "RESEND_WEBHOOK_SECRET",
+        ),
+    )
     billing_from: str | None = Field(default=None, max_length=320)
     billing_reply_to: str | None = Field(default=None, max_length=320)
     billing_email_webhook_url: AnyHttpUrl | None = None
@@ -166,6 +174,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "resend_api_key",
+        "resend_webhook_secret",
         "stripe_secret_key",
         "stripe_webhook_secret",
         "billing_email_webhook_secret",
@@ -237,6 +246,12 @@ class Settings(BaseSettings):
         return bool(self.resend_api_key and self.billing_from)
 
     @property
+    def resend_webhook_is_configured(self) -> bool:
+        """Return whether Resend delivery events can be signature-verified."""
+
+        return self.resend_webhook_secret is not None
+
+    @property
     def billing_email_webhook_is_configured(self) -> bool:
         """Return whether the protected Vercel billing-email fallback is configured."""
 
@@ -266,7 +281,10 @@ class Settings(BaseSettings):
             return False
         if self.environment == Environment.STAGING and not self.billing_allow_livemode:
             return True
-        return self.billing_email_is_configured
+        return bool(
+            self.billing_email_is_configured
+            and self.resend_webhook_is_configured
+        )
 
 
 @lru_cache
