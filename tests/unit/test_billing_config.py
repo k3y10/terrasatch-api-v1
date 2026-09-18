@@ -77,3 +77,29 @@ def test_staging_retrieval_verification_rejects_live_stripe_keys() -> None:
 
     assert settings.stripe_webhook_is_configured is False
     assert settings.billing_is_configured is False
+
+
+def test_staging_billing_can_run_without_transactional_email() -> None:
+    settings = Settings(
+        environment="staging",
+        billing_enabled=True,
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=None,
+    )
+
+    assert settings.billing_email_is_configured is False
+    assert settings.billing_is_configured is True
+
+
+def test_production_billing_still_requires_transactional_email() -> None:
+    settings = Settings(
+        environment="production",
+        billing_enabled=True,
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=SecretStr("whsec_terrasatch"),
+    )
+
+    assert settings.billing_email_is_configured is False
+    assert settings.billing_is_configured is False
