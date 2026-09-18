@@ -431,10 +431,18 @@ async function check() {
     return;
   }
   const data = await response.json();
-  target.textContent = data.provisioned
-    ? "Subscription webhook processed. Account provisioning is complete."
-    : "Checkout returned. Waiting for the Stripe webhook to finish provisioning.";
-  if (!data.provisioned) setTimeout(check, 1500);
+  if (data.state === "ready") {
+    target.textContent = data.activation_required
+      ? "Subscription webhook processed. Account provisioning is complete; activation is required."
+      : "Subscription webhook processed. Account provisioning is complete.";
+    return;
+  }
+  if (data.state === "expired") {
+    target.textContent = "This Checkout session expired before provisioning completed.";
+    return;
+  }
+  target.textContent = "Checkout returned. Waiting for the Stripe webhook to finish provisioning.";
+  setTimeout(check, 1500);
 }
 check();
 </script></body></html>"""
