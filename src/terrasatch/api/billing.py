@@ -442,6 +442,7 @@ async def _verified_stripe_event(
         event = await stripe.retrieve_event(event_id)
         if bool(event.get("livemode", False)):
             raise ProviderUnavailable("Live Stripe events are disabled in staging")
+        _validate_staging_payment_link_event(settings=settings, event=event)
         verified_payload = json.dumps(
             event,
             sort_keys=True,
