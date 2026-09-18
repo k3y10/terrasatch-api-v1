@@ -79,6 +79,27 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             )
         ).status_code == 403
         headers = {"X-CSRF-Token": login.json()["csrf_token"]}
+        assert own.json()["modules"] == ["Map", "Radio Log", "Observations", "Satchy"]
+        assert own.json()["integrations"]["devices"] == []
+        prefs_url = f"/api/v1/workspace/organizations/{organization_id}/preferences"
+        assert (await client.post(prefs_url, json={"modules": []})).status_code == 403
+        assert (
+            await client.post(prefs_url, json={"modules": ["unknown-plugin"]}, headers=headers)
+        ).status_code == 422
+        assert (
+            await client.post(
+                f"/api/v1/workspace/organizations/{uuid4()}/preferences",
+                json={"modules": []},
+                headers=headers,
+            )
+        ).status_code == 404
+        changed = await client.post(
+            prefs_url, json={"modules": ["Map", "Workflows", "Map"]}, headers=headers
+        )
+        assert changed.json()["modules"] == ["Map", "Workflows"]
+        assert (await client.get(f"/api/v1/workspace/organizations/{organization_id}")).json()[
+            "modules"
+        ] == ["Map", "Workflows"]
         note = {
             "site_id": str(site_id),
             "request_id": str(uuid4()),
@@ -103,6 +124,10 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert stored["records"][0]["original"] == note["text"]
         assert stored["records"][0]["location"]["latitude"] == 40.7
         assert stored["records"][0]["interpretations"] == []
+        await client.post(prefs_url, json={"modules": []}, headers=headers)
+        hidden = (await client.get(f"/api/v1/workspace/organizations/{organization_id}")).json()
+        assert hidden["modules"] == []
+        assert hidden["records"][0]["original"] == note["text"]
         foreign_note = {**note, "request_id": str(uuid4()), "site_id": str(uuid4())}
         assert (
             await client.post(

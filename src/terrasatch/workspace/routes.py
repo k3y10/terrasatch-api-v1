@@ -18,6 +18,7 @@ from terrasatch.billing.rate_limit import enforce_public_rate_limit
 from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.database.session import create_session_factory
+from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import ProviderUnavailable
 from terrasatch.identity.access import (
     authenticate_user,
@@ -28,9 +29,32 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import MembershipRole, Site, User
 from terrasatch.portal.routes import _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
-from terrasatch.workspace.models import WorkspaceMessage
+from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
+STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
+
+
+class ModulePreferences(BaseModel):
+    modules: list[Literal["Map", "Radio Log", "Observations", "Workflows", "Satchy"]] = Field(
+        max_length=5
+    )
+
+
+@router.post("/organizations/{organization_id}/preferences")
+async def save_preferences(organization_id: UUID, payload: ModulePreferences, request: Request):
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, _ = await access(request, session, organization_id)
+        # Serialize first-time creation and updates for this member.
+        await session.get(User, user.id, with_for_update=True)
+        preference = await session.get(WorkspacePreference, (organization_id, user.id))
+        if preference is None:
+            preference = WorkspacePreference(organization_id=organization_id, user_id=user.id)
+            session.add(preference)
+        preference.modules = list(dict.fromkeys(payload.modules))
+        await session.commit()
+        return {"modules": preference.modules}
 
 
 class Login(BaseModel):
@@ -200,6 +224,14 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
         user, membership = await access(request, session, organization_id)
+        preference = await session.get(WorkspacePreference, (organization_id, user.id))
+        devices = list(
+            await session.scalars(
+                select(EdgeDevice)
+                .where(EdgeDevice.organization_id == organization_id)
+                .order_by(EdgeDevice.name)
+            )
+        )
         subscription = await get_subscription_for_organization(
             session, organization_id=organization_id
         )
@@ -226,6 +258,23 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
         return jsonable_encoder(
             {
                 "role": membership.role,
+                "modules": preference.modules if preference is not None else STARTER_MODULES,
+                "integrations": {
+                    "devices": [
+                        {
+                            "id": str(d.id),
+                            "name": d.name,
+                            "enabled": d.enabled,
+                            "last_seen_at": d.last_seen_at,
+                            "agent_version": d.agent_version,
+                        }
+                        for d in devices
+                    ],
+                    "engine": {
+                        "provider": request.app.state.settings.intelligence_provider,
+                        "model": request.app.state.settings.ollama_model,
+                    },
+                },
                 "subscription": subscription,
                 "sites": [{"id": str(s.id), "name": s.name} for s in sites],
                 "records": await records(session, organization_id),
@@ -316,8 +365,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             "created, sent, approved or completed work. "
             "Direct consequential actions to the human review queue. "
             "Only the latest 100 records are supplied; "
-            "do not claim exhaustive historical coverage.\nRecords:\n"
-            + json.dumps(context)[:60000]
+            "do not claim exhaustive historical coverage.\nRecords:\n" + json.dumps(context)[:60000]
         )
         messages = (
             [{"role": "system", "content": system}]

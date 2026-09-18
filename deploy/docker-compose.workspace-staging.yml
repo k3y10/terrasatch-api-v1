@@ -14,7 +14,7 @@ x-runtime: &runtime
     TERRASATCH_INTELLIGENCE_PROVIDER: ollama
     TERRASATCH_INTELLIGENCE_FALLBACK_TO_DETERMINISTIC: "false"
     TERRASATCH_OLLAMA_BASE_URL: http://ollama:11434
-    TERRASATCH_OLLAMA_MODEL: qwen3:1.7b
+    TERRASATCH_OLLAMA_MODEL: qwen3:0.6b
     TERRASATCH_INTELLIGENCE_TIMEOUT_SECONDS: "40"
   restart: unless-stopped
   mem_limit: 384m
@@ -73,7 +73,7 @@ services:
     volumes:
       - staging_models:/root/.ollama
     mem_limit: 2304m
-    cpus: 0.25
+    cpus: 0.5
     restart: unless-stopped
 
 volumes:
