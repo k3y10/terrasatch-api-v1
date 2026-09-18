@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.admin.security import hash_admin_password
+from terrasatch.billing.models import BillingCustomer
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, User
@@ -49,6 +50,13 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         site = Site(organization_id=org.id, name="Real test site", slug="real")
         session.add(site)
+        session.add(
+            BillingCustomer(
+                account_id=account.id,
+                organization_id=org.id,
+                stripe_customer_id="cus_workspace_portal_test",
+            )
+        )
         await session.commit()
         site_id = site.id
         organization_id, user_id = org.id, user.id
@@ -84,6 +92,29 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             )
         ).status_code == 403
         headers = {"X-CSRF-Token": login.json()["csrf_token"]}
+
+        async def fake_portal(self, *, stripe_customer_id: str) -> str:
+            assert stripe_customer_id == "cus_workspace_portal_test"
+            return "https://billing.stripe.com/p/session?secret=test_workspace_portal"
+
+        monkeypatch.setattr(
+            "terrasatch.workspace.routes.StripeGateway.create_customer_portal",
+            fake_portal,
+        )
+        assert (
+            await client.post(
+                f"/api/v1/workspace/organizations/{organization_id}/billing"
+            )
+        ).status_code == 403
+        portal = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/billing",
+            headers=headers,
+        )
+        assert portal.status_code == 200
+        assert portal.json() == {
+            "url": "https://billing.stripe.com/p/session?secret=test_workspace_portal"
+        }
+
         assert own.json()["modules"] == ["Map", "Radio Log", "Observations", "Satchy"]
         assert own.json()["integrations"]["devices"] == []
         prefs_url = f"/api/v1/workspace/organizations/{organization_id}/preferences"
