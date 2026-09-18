@@ -147,7 +147,7 @@ class StripeGateway:
         price_id = await self.resolve_price_id(plan, interval)
         metadata = {
             "product": "terrasatch",
-            "billing_version": "v1",
+            "billing_version": "v2",
             "signup_id": signup_id,
             "plan_code": plan.code.value,
             "billing_interval": interval.value,
