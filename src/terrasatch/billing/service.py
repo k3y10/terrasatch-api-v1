@@ -558,6 +558,7 @@ async def _sync_checkout_completed(
     checkout: dict[str, Any],
     subscription_snapshot: dict[str, Any] | None,
     settings: Settings,
+    event_created: int | None = None,
 ) -> ProvisioningResult:
     checkout_id = _object_id(checkout.get("id"))
     customer_id = _object_id(checkout.get("customer"))
@@ -594,6 +595,7 @@ async def _sync_checkout_completed(
             session,
             snapshot=subscription_snapshot,
             settings=settings,
+            event_created=event_created,
         )
     return provisioned
 
@@ -703,6 +705,7 @@ async def process_verified_event(
             checkout=obj,
             subscription_snapshot=subscription_snapshot,
             settings=settings,
+            event_created=event_created,
         )
         signup = await _find_signup(
             session,
