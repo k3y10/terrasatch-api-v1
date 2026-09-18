@@ -45,3 +45,34 @@ Sites, memberships, devices and channels have managed-plan checks. Processing-ho
 - All 240 API tests passed for that deployment. The subsequent activation-email fix passed all 15 billing-safety tests, including four activation-state cases; it is not yet deployed to Oracle.
 - The actual qwen3:1.7b model returned 27 tokens in 39.52 seconds. Full workspace chat timed out at 40 seconds with a truthful 503 and no saved answer. qwen3:0.6b has downloaded but its comparison test is pending. The running staging model container was temporarily capped at 0.5 CPU for comparison; compose still specifies 0.25 CPU, so the next operator must reconcile that deliberate temporary difference.
 - D: disconnected and the temporary SSH key was cleaned up before the final model comparison. Restore the user-supplied key source before deploying further changes. Resend's current session lists QuakWrap only; TerraSatch email account/team selection is pending. No new Stripe mutations or production promotion occurred.
+
+
+## Webhook implementation update — September 18, 2026
+
+Stripe sandbox account `acct_1Txb0QPwzxCRGRdh` now has the v2 self-service catalog and an enabled staging webhook destination:
+
+- Individual: `terrasatch_individual_monthly_v2` at $24/month.
+- Team: `terrasatch_team_monthly_v2` at $399/month.
+- Webhook endpoint: `we_1UH5K2PwzxCRGRdhQxNE0ddZ`.
+- URL: `https://staging-api.terrasatch.com/api/v1/workspace/billing/stripe/webhook`.
+- Events: `checkout.session.completed`, subscription created/updated/deleted/trial-will-end, `invoice.paid`, and `invoice.payment_failed`.
+- Operations and Enterprise remain non-self-service and have no Checkout price.
+
+The canonical production route remains `/api/v1/billing/stripe/webhook`. The workspace-prefixed alias is registered only when `TERRASATCH_ENV=staging`, allowing the existing staging Caddy policy to expose it without widening the production API surface.
+
+Production continues to require normal Stripe HMAC signature verification. Isolated staging can instead verify test-mode events by retrieving the received `evt_*` directly from Stripe using the server-side test key and processing the provider-returned event. This fallback is allowed only when environment is staging, live billing is false, and the Stripe key is test-mode. The event ledger still provides replay/idempotency protection.
+
+The staging Compose file now enables billing only in the isolated staging stack and points success, cancellation, activation, portal-return, and billing-email URLs at the persistent subscription-billing preview. Secrets remain in the owner-only `.env.staging`; none are committed.
+
+Deploy only from an isolated `feat/subscription-billing` worktree:
+
+```bash
+cd /path/to/isolated/subscription-billing-worktree
+bash deploy/release-workspace-staging.sh
+```
+
+The script refuses `main`, refuses a dirty tracked worktree, loads `.env.staging`, migrates only the `terrasatch_staging` database, recreates only the `terrasatch-workspace-staging` API/worker, and verifies `127.0.0.1:8012/health/ready`.
+
+Caddy reference: `deploy/examples/Caddyfile.workspace-staging`. It exposes only `/api/v1/workspace/*` from port 8012 and returns 404 elsewhere.
+
+Do not describe the webhook as end-to-end accepted until the Oracle staging process is running the current branch head and an actual Stripe sandbox delivery has been observed successfully. Live billing remains disabled.
