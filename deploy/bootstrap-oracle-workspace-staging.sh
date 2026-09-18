@@ -215,12 +215,57 @@ else
 fi
 printf 'Required sandbox secrets: present (values suppressed)\n'
 
-say "Running locked dependency check, Ruff, and full pytest suite"
+say "Running dependency lock validation, Ruff, and full pytest suite"
 cd "$staging_dir"
-uv lock --check
+
+lock_updated=false
+lock_backup=""
+cleanup_generated_lock() {
+  status=$?
+  if [[ "$lock_updated" == "true" && -n "$lock_backup" && -f "$lock_backup" ]]; then
+    if ! git diff --quiet -- uv.lock; then
+      cp "$lock_backup" uv.lock
+    fi
+    rm -f "$lock_backup"
+  fi
+  exit "$status"
+}
+
+if ! uv lock --check; then
+  say "Repository lockfile is stale for the current uv resolver; regenerating uv.lock only"
+  lock_backup="$(mktemp)"
+  cp uv.lock "$lock_backup"
+  trap cleanup_generated_lock EXIT
+  uv lock
+
+  mapfile -t changed_after_lock < <(git status --porcelain --untracked-files=no | awk '{print $2}')
+  if [[ "${#changed_after_lock[@]}" -ne 1 || "${changed_after_lock[0]}" != "uv.lock" ]]; then
+    printf 'Unexpected tracked changes after uv lock:\n' >&2
+    printf '  %s\n' "${changed_after_lock[@]}" >&2
+    exit 1
+  fi
+  uv lock --check
+  lock_updated=true
+fi
+
 uv sync --extra dev --frozen
 uv run ruff check src tests
 uv run pytest
+
+if [[ "$lock_updated" == "true" ]]; then
+  say "Tests passed with regenerated lockfile; committing uv.lock to the draft staging branch"
+  git config user.name "TerraSatch Staging Automation"
+  git config user.email "staging-automation@terrasatch.local"
+  git add uv.lock
+  git commit -m "Refresh uv lockfile for staging resolver"
+  git push origin "HEAD:$BRANCH"
+  staging_head="$(git rev-parse HEAD)"
+  printf 'Staging branch advanced with validated lockfile: %s\n' "$staging_head"
+  rm -f "$lock_backup"
+  lock_backup=""
+  lock_updated=false
+  trap - EXIT
+fi
 
 say "Installing the isolated staging Caddy policy"
 backup="$CADDYFILE.backup.$(date -u +%Y%m%dT%H%M%SZ)"
