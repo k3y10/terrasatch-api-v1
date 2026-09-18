@@ -89,7 +89,7 @@ async def post_billing_checkout(
     settings: Settings = request.app.state.settings
     stripe = _gateway(settings)
     if not settings.billing_is_configured:
-        raise ProviderUnavailable("Billing activation and email configuration is incomplete")
+        raise ProviderUnavailable("Billing activation and provider configuration is incomplete")
     plan = get_plan(payload.plan_code)
     recurring_amount = plan.amount_cents(payload.billing_interval)
     if not plan.self_service or recurring_amount is None:
@@ -349,7 +349,11 @@ async def _process_stripe_webhook(
                 settings=settings,
                 subscription_snapshot=subscription_snapshot,
             )
-            if not result.duplicate and result.organization_id is not None:
+            if (
+                not result.duplicate
+                and result.organization_id is not None
+                and settings.billing_email_is_configured
+            ):
                 context = await get_billing_email_context(
                     database,
                     organization_id=result.organization_id,
