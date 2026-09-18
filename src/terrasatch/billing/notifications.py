@@ -103,11 +103,71 @@ async def get_billing_email_context(
     )
 
 
+async def get_account_email_context(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> BillingEmailContext | None:
+    """Return a customer-safe email context for any enabled workspace member."""
+
+    row = (
+        await session.execute(
+            select(User, Membership, Organization)
+            .join(Membership, Membership.user_id == User.id)
+            .join(Organization, Organization.id == Membership.organization_id)
+            .where(
+                User.id == user_id,
+                User.enabled.is_(True),
+                Membership.enabled.is_(True),
+                Organization.enabled.is_(True),
+            )
+            .order_by(Membership.created_at, Organization.name)
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    user, _membership, organization = row
+    subscription = await session.scalar(
+        select(Subscription).where(Subscription.organization_id == organization.id)
+    )
+
+    plan_name: str | None = None
+    interval: str | None = None
+    recurring_amount: int | None = None
+    if subscription is not None:
+        try:
+            plan_code = PlanCode(subscription.plan_code)
+            billing_interval = BillingInterval(subscription.billing_interval)
+            plan = get_plan(plan_code)
+            plan_name = plan.name
+            interval = billing_interval.value
+            recurring_amount = plan.amount_cents(billing_interval)
+        except ValueError:
+            pass
+
+    return BillingEmailContext(
+        to=user.email,
+        display_name=user.display_name,
+        organization_name=organization.name,
+        plan_name=plan_name,
+        billing_interval=interval,
+        recurring_amount_cents=recurring_amount,
+        trial_ends_at=subscription.trial_ends_at if subscription is not None else None,
+        current_period_end=subscription.current_period_end if subscription is not None else None,
+        grace_ends_at=subscription.grace_ends_at if subscription is not None else None,
+        cancel_at_period_end=(
+            subscription.cancel_at_period_end if subscription is not None else False
+        ),
+    )
+
+
 def notification_kind(
     *,
     stripe_event_type: str,
     activation_token: str | None,
     context: BillingEmailContext | None,
+    previous_attributes: dict[str, object] | None = None,
 ) -> str | None:
     if activation_token:
         return "trial_started"
@@ -115,6 +175,8 @@ def notification_kind(
         return "trial_ending"
     if stripe_event_type == "invoice.payment_failed":
         return "payment_failed"
+    if stripe_event_type == "invoice.paid":
+        return "payment_confirmed"
     if stripe_event_type == "customer.subscription.deleted":
         return "subscription_ended"
     if (
@@ -123,6 +185,12 @@ def notification_kind(
         and context.cancel_at_period_end
     ):
         return "cancellation_scheduled"
+    if (
+        stripe_event_type == "customer.subscription.updated"
+        and previous_attributes
+        and any(key in previous_attributes for key in ("items", "plan", "quantity"))
+    ):
+        return "subscription_updated"
     return None
 
 
@@ -358,6 +426,97 @@ def build_billing_email(
                     "has ended.</p>"
                     "<p>Existing operational history is not automatically deleted. "
                     "Contact TerraSatch if you need to reactivate the organization.</p>"
+                ),
+            ),
+        )
+
+    if kind == "activation_resend":
+        subject = "Finish setting up your TerraSatch account"
+        action = (
+            _button(activation_url, "Finish TerraSatch setup")
+            if activation_url
+            else ""
+        )
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                "Your TerraSatch workspace is ready. "
+                f"{'Finish setup: ' + activation_url if activation_url else 'Open TerraSatch to finish setup.'}\n\n"
+                "If you did not request this message, you can ignore it."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    f"<p>Your TerraSatch workspace for <strong>{organization}</strong> is ready.</p>"
+                    f"{action}"
+                    "<p>If you did not request this message, you can ignore it.</p>"
+                ),
+            ),
+        )
+
+    if kind == "password_reset":
+        subject = "Reset your TerraSatch password"
+        action = _button(activation_url, "Reset password") if activation_url else ""
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                "A password reset was requested for your TerraSatch account. "
+                f"{'Reset password: ' + activation_url if activation_url else ''}\n\n"
+                "This link is single-use and expires shortly. "
+                "If you did not request it, no action is needed."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    "<p>A password reset was requested for your TerraSatch account.</p>"
+                    f"{action}"
+                    "<p>This link is single-use and expires shortly. "
+                    "If you did not request it, no action is needed.</p>"
+                ),
+            ),
+        )
+
+    if kind == "payment_confirmed":
+        subject = "TerraSatch payment received"
+        amount = f" for {escape(price)}" if price else ""
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"Stripe confirmed your TerraSatch payment{(' for ' + price) if price else ''}. "
+                f"Your {context.plan_name or 'TerraSatch'} subscription remains active."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    f"<p>Stripe confirmed your TerraSatch payment{amount}.</p>"
+                    f"<p>Your <strong>{plan}</strong> subscription remains active.</p>"
+                ),
+            ),
+        )
+
+    if kind == "subscription_updated":
+        subject = "Your TerraSatch subscription was updated"
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"Your TerraSatch subscription is now {context.plan_name or 'TerraSatch'}"
+                f"{(' at ' + price) if price else ''}. "
+                "You can review billing from your TerraSatch workspace."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    f"<p>Your TerraSatch subscription is now <strong>{plan}</strong>"
+                    f"{(' at ' + escape(price)) if price else ''}.</p>"
+                    "<p>You can review billing from your TerraSatch workspace.</p>"
                 ),
             ),
         )
