@@ -377,6 +377,44 @@ async function main() {
       );
     }
 
+    const billingPortalResponse = await context.request.post(
+      `${BASE}/api/v1/workspace/organizations/${encodeURIComponent(activated.organization_id)}/billing`,
+      {
+        headers: {
+          "X-CSRF-Token":
+            authenticatedSession.csrf_token || loginPayload.csrf_token,
+        },
+      },
+    );
+    if (!billingPortalResponse.ok()) {
+      throw new Error(
+        `Stripe Customer Portal handoff failed: HTTP ${billingPortalResponse.status()} ${await billingPortalResponse.text()}`,
+      );
+    }
+    const billingPortal = await billingPortalResponse.json();
+    if (
+      typeof billingPortal.url !== "string" ||
+      !billingPortal.url.startsWith("https://billing.stripe.com/p/session")
+    ) {
+      throw new Error(
+        `Stripe Customer Portal returned an invalid URL: ${JSON.stringify(billingPortal)}`,
+      );
+    }
+
+    const stripePortalResponse = await page.goto(billingPortal.url, {
+      waitUntil: "domcontentloaded",
+      timeout: 90_000,
+    });
+    if (
+      !stripePortalResponse ||
+      !stripePortalResponse.ok() ||
+      new URL(page.url()).hostname !== "billing.stripe.com"
+    ) {
+      throw new Error(
+        `Stripe Customer Portal did not load correctly: HTTP ${stripePortalResponse?.status() ?? "unknown"} url=${page.url()}`,
+      );
+    }
+
     const portalResponse = await page.goto(`${BASE}/portal`, {
       waitUntil: "domcontentloaded",
       timeout: 90_000,
@@ -429,6 +467,7 @@ async function main() {
           workspace_login: "passed",
           workspace_organization_access: "passed",
           portal_handoff: "passed",
+          stripe_customer_portal: "passed",
           workspace_logout: "passed",
         },
         null,
