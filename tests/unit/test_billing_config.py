@@ -167,6 +167,23 @@ def test_direct_resend_satisfies_transactional_email_readiness() -> None:
     assert settings.billing_is_configured is True
 
 
+def test_staging_direct_resend_rejects_non_terrasatch_sender() -> None:
+    settings = Settings(
+        environment="staging",
+        billing_enabled=True,
+        resend_api_key=SecretStr("re_test_terrasatch"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
+        billing_from="Test <onboarding@resend.dev>",
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=None,
+    )
+
+    assert settings.billing_resend_is_configured is False
+    assert settings.billing_email_is_configured is False
+    assert settings.billing_is_configured is False
+
+
 def test_webhook_fallback_still_satisfies_email_readiness() -> None:
     settings = Settings(
         billing_email_webhook_url="https://example.com/api/billing-email",
