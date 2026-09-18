@@ -24,7 +24,7 @@ Annual values are null. Optional annual discounts remain proposals. Old pitch-mo
 5. Production Stripe still requires a server-side restricted key and matching webhook signing secret. Staging and production billing readiness both require the direct Oracle-to-Resend sender plus signed Resend delivery reconciliation; the Vercel sender is resilience fallback only and cannot satisfy readiness by itself. Never print credentials or commit environment files.
 6. The separate TerraSatch Resend account now owns domain `terrasatch.com` (domain ID `5876992d-002a-4b26-b53c-0c7e29f33b8f`) and staging webhook `76225e17-36a9-4dc9-95a4-b28094a26d4d`. Preferred delivery is Oracle worker -> Resend using owner-only `TERRASATCH_RESEND_API_KEY`, `TERRASATCH_BILLING_FROM=TerraSatch Billing <billing@terrasatch.com>`, and `TERRASATCH_BILLING_REPLY_TO=support@terrasatch.com`. The protected Vercel `/api/billing-email` endpoint remains fallback-only.
 7. Exercise Individual and Team signup → Checkout → signed webhook → committed subscription/outbox → inbox activation → workspace login → customer portal. Card required, $0 today, billing after 30 days unless canceled. Operations/Enterprise must reject checkout.
-8. Test duplicate/concurrent/out-of-order webhooks, payment failures, cancellation, DB rollback, email retries, expired/consumed activation links, tenant isolation and CORS. Provider/message-ID receipt tracking and Resend sent/delivered/delayed/bounce/complaint/failure/suppression reconciliation are implemented; password-reset/operator-resend flows remain separate product work.
+8. Test duplicate/concurrent/out-of-order webhooks, payment failures, cancellation, DB rollback, email retries, expired/consumed activation links, tenant isolation and CORS. Provider/message-ID receipt tracking and Resend sent/delivered/delayed/bounce/complaint/failure/suppression reconciliation are implemented. Password reset and activation resend now use the same durable outbox and signed delivery reconciliation.
 9. Confirm unit economics, retention semantics, support/hardware scope, tax registration/collection, subscription migration, and release base before requesting any production rollout.
 
 Webhook event set: checkout.session.completed; customer.subscription.created/updated/deleted/trial_will_end; invoice.paid; invoice.payment_failed. Fresh subscription state and stale invoice ordering still need review. Live gate must remain false.
@@ -33,7 +33,7 @@ Webhook event set: checkout.session.completed; customer.subscription.created/upd
 
 Source/card data stays in its owning system: Stripe owns payment methods; TerraSatch owns tenant state and authorization. Browser inputs cannot select arbitrary Price IDs. Lookup key, amount, currency, cadence and subscription quantity are validated. Pending valid checkout is reused; near-expiry refresh remains an explicit retry conflict.
 
-Email intents commit with billing state. The worker prefers direct Resend delivery and uses the protected Vercel sender only as a fallback. Retries reconstruct the same activation token and reuse the same provider idempotency key. Provider acceptance stores the Resend message ID in `billing_email_outbox`; signed Resend webhooks then reconcile sent, delivered, delayed, bounced, complained, failed, and suppressed outcomes. Expired and consumed activations are held with `activation_expired` or `activation_consumed`; a token/signing-secret mismatch requires reconciliation. These terminal rows are not falsely marked sent and are not retried automatically. `billing email-status` exposes safe outbox state in the admin console without recipient/context data. Operator resend and password reset remain separate product work.
+Email intents commit with billing state. The worker prefers direct Resend delivery and uses the protected Vercel sender only as a fallback. Retries reconstruct the same activation token and reuse the same provider idempotency key. Provider acceptance stores the Resend message ID in `billing_email_outbox`; signed Resend webhooks then reconcile sent, delivered, delayed, bounced, complained, failed, and suppressed outcomes. Expired and consumed activations are held with `activation_expired` or `activation_consumed`; a token/signing-secret mismatch requires reconciliation. These terminal rows are not falsely marked sent and are not retried automatically. `billing email-status` exposes safe outbox state in the admin console without recipient/context data. Password reset and activation resend are durable account-email flows. Reset tokens are single-use, purpose-bound, short-lived, and reconstructed only at send time; plaintext reset tokens are not stored in the outbox.
 
 Sites, memberships, devices and channels have managed-plan checks. Processing-hour/retention allowances are not metered or pruned automatically. No new Satchy Agent or drone add-on entitlement is enforced yet; proposed 2/5 included agents require a tenant-scoped registry, measured costs and atomic activation limits first. Never claim those add-ons are currently deliverable.
 
@@ -115,6 +115,8 @@ Stripe sandbox event
 
 The worker checks the outbox every 15 seconds only when an email provider is configured. Direct Resend uses the same stable idempotency key for retries: `terrasatch-billing/<kind>/<stripe-event-id>`. Activation tokens are reconstructed from the stable activation signing secret only at send time; plaintext activation tokens are not stored in the outbox.
 
+Account recovery uses the same queue. `password_reset` rows reference a short-lived reset intent ID; the worker reconstructs the purpose-separated HMAC token only when sending and builds the reset URL from `TERRASATCH_API_BASE_URL`. `activation_resend` reuses a valid pending activation or creates a fresh one after expiry. Public recovery forms intentionally return the same response whether an email exists or not.
+
 Required direct-provider settings, stored only in the owner-readable deployment environment:
 
 - `TERRASATCH_RESEND_API_KEY`
@@ -137,10 +139,8 @@ GitHub Actions workflow files were removed from the billing branch intentionally
 Live Stripe billing remains disabled. Transactional email work does not change `TERRASATCH_BILLING_ALLOW_LIVEMODE=false`.
 
 Still required before public/live billing:
-- Add the generated Resend DNS records to the authoritative GoDaddy DNS zone for `terrasatch.com` and complete provider verification.
-- Run `deploy/configure-resend-workspace-staging.sh` on Oracle so the dedicated sending key and rotated webhook signing secret are written only to owner-readable `.env.staging`.
-- Run one real staging lifecycle email through the verified `billing@terrasatch.com` sender and confirm the outbox moves from provider acceptance to `delivered`.
-- Add operator-driven resend/password-reset flows.
+- Run one real staging password-reset email and one activation-resend email through the verified `billing@terrasatch.com` sender and confirm signed delivery reconciliation.
+- Visually confirm the Field Workspace recovery screens and login handoff.
 - Finish Stripe Customer Portal configuration and live-mode security review.
 
 
@@ -178,7 +178,7 @@ Resend domain ID: `5876992d-002a-4b26-b53c-0c7e29f33b8f`
 Authoritative DNS: GoDaddy (`ns25.domaincontrol.com`, `ns26.domaincontrol.com`)  
 Required sender: `TerraSatch Billing <billing@terrasatch.com>`
 
-The domain was provisioned in Resend on September 18, 2026. It remains fail-closed until these provider-issued records are present and Resend reports `verified`:
+The domain was provisioned and verified in Resend on September 18, 2026. The provider-issued records remain documented below for operational recovery:
 
 | Capability | DNS type | Name | Value / target | Priority |
 | --- | --- | --- | --- | --- |
