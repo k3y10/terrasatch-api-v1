@@ -108,14 +108,14 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                     row.last_error = "reconcile_required"
                     continue
                 try:
-                    delivered = await deliver_billing_email(
+                    receipt = await deliver_billing_email(
                         settings=settings,
                         event_id=row.event_id,
                         kind=row.kind,
                         context=BillingEmailContext(**values),
                         activation_token=token,
                     )
-                    if not delivered:
+                    if receipt is None:
                         raise ProviderUnavailable("Email is not configured")
                 except ProviderUnavailable:
                     row.last_error = "delivery_failed"
@@ -124,6 +124,8 @@ async def dispatch_email_batch(settings, *, session_factory=None, limit=20):
                     )
                 else:
                     row.sent_at = now
+                    row.delivery_provider = receipt.provider
+                    row.provider_message_id = receipt.message_id
                     row.last_error = None
                     sent += 1
     return sent
