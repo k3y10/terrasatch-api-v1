@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.billing.models import BillingSignup
 from terrasatch.billing.schemas import CheckoutRequest
-from terrasatch.billing.service import _provision_signup, create_signup
+from terrasatch.billing.service import _provision_signup, _sync_checkout_completed, create_signup
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.errors import ResourceConflict
@@ -164,5 +164,45 @@ async def test_completed_trial_blocks_repeat_self_service_trial() -> None:
                 payload=checkout_request(),
                 settings=make_settings(),
             )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_payment_link_checkout_provisions_before_subscription_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    configured = Settings(billing_activation_signing_secret="test-only-activation-secret")
+
+    async with sessions() as session:
+        signup = await create_signup(
+            session,
+            payload=checkout_request(plan_code="field"),
+            settings=configured,
+        )
+        await session.commit()
+
+        result = await _sync_checkout_completed(
+            session,
+            checkout={
+                "id": "cs_test_payment_link",
+                "customer": "cus_payment_link",
+                "client_reference_id": str(signup.id),
+                "customer_details": {"email": signup.email},
+            },
+            subscription_snapshot=None,
+            settings=configured,
+        )
+        await session.commit()
+        refreshed = await session.get(BillingSignup, signup.id)
+
+        assert refreshed is not None
+        assert refreshed.status == "completed"
+        assert refreshed.stripe_checkout_session_id == "cs_test_payment_link"
+        assert refreshed.stripe_customer_id == "cus_payment_link"
+        assert result.organization_id is not None
+        assert result.activation_token is not None
 
     await engine.dispose()
