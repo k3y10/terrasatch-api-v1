@@ -176,7 +176,7 @@ async def post_billing_checkout(
         lambda session: create_signup(session, payload=payload, settings=settings),
     )
 
-    if settings.staging_payment_links_are_configured and settings.stripe_secret_key is None:
+    if settings.staging_payment_links_are_configured:
         if payload.billing_interval.value != "monthly":
             raise InvalidConfiguration(
                 "Staging Payment Link checkout currently supports monthly plans"
