@@ -136,6 +136,9 @@ class BillingEmailOutbox(TimestampMixin, Base):
     activation_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("billing_activations.id", ondelete="RESTRICT"), nullable=True
     )
+    password_reset_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("password_reset_intents.id", ondelete="RESTRICT"), nullable=True
+    )
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     first_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
