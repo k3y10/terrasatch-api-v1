@@ -25,7 +25,7 @@ async def test_portal_login_is_available_with_browser_session_secret() -> None:
 
     assert response.status_code == 200
     assert "FIELD WORKSPACE" in response.text
-    assert "individual TerraSatch account" in response.text
+    assert "Open your TerraSatch workspace" in response.text
     assert 'name="csrf_token"' in response.text
 
 
