@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -13,7 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.device_status import device_status_payload, fleet_summary
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token
-from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
+from terrasatch.billing.notifications import (
+    get_account_email_context,
+    get_billing_email_context,
+)
+from terrasatch.billing.outbox import enqueue_email
+from terrasatch.billing.rate_limit import enforce_public_rate_limit
+from terrasatch.billing.service import (
+    get_stripe_customer_id,
+    get_subscription_for_organization,
+    recover_or_refresh_activation_for_email,
+)
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
@@ -24,9 +34,17 @@ from terrasatch.identity.access import (
     list_user_access,
     role_allows,
 )
+from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import MembershipRole
+from terrasatch.identity.recovery import create_password_reset_intent, reset_password
 from terrasatch.organizations.service import list_sites
-from terrasatch.portal.ui import render_portal, render_portal_login
+from terrasatch.portal.ui import (
+    render_portal,
+    render_portal_forgot_password,
+    render_portal_login,
+    render_portal_resend_activation,
+    render_portal_reset_password,
+)
 
 router = APIRouter(tags=["portal"])
 
@@ -74,6 +92,57 @@ def _verify_csrf(request: Request, csrf_token: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
 
 
+async def _queue_password_reset(
+    session: AsyncSession,
+    *,
+    email: str,
+    settings: Settings,
+) -> None:
+    if not settings.billing_email_is_configured:
+        return
+    intent = await create_password_reset_intent(session, email=email, settings=settings)
+    if intent is None:
+        return
+    context = await get_account_email_context(session, user_id=intent.user_id)
+    if context is None:
+        return
+    await enqueue_email(
+        session,
+        event_id=f"account:password-reset:{intent.id}",
+        kind="password_reset",
+        context=context,
+        password_reset_id=intent.id,
+    )
+
+
+async def _queue_activation_resend(
+    session: AsyncSession,
+    *,
+    email: str,
+    settings: Settings,
+) -> None:
+    if not settings.billing_email_is_configured:
+        return
+    recovered = await recover_or_refresh_activation_for_email(
+        session,
+        email=email,
+        settings=settings,
+    )
+    if recovered is None:
+        return
+    token, organization_id = recovered
+    context = await get_billing_email_context(session, organization_id=organization_id)
+    if context is None:
+        return
+    await enqueue_email(
+        session,
+        event_id=f"account:activation-resend:{uuid4()}",
+        kind="activation_resend",
+        context=context,
+        activation_token=token,
+    )
+
+
 @router.get(
     "/portal/login",
     response_class=HTMLResponse,
@@ -85,7 +154,18 @@ async def portal_login_form(request: Request) -> HTMLResponse | RedirectResponse
     _enabled(settings)
     if _portal_user_id(request) is not None:
         return RedirectResponse("/portal", status_code=status.HTTP_303_SEE_OTHER)
-    return HTMLResponse(render_portal_login(issue_csrf_token(request.session), failed=False))
+    notice = (
+        "Password updated. Sign in with your new password."
+        if request.query_params.get("reset") == "1"
+        else None
+    )
+    return HTMLResponse(
+        render_portal_login(
+            issue_csrf_token(request.session),
+            failed=False,
+            notice=notice,
+        )
+    )
 
 
 @router.post("/portal/login", include_in_schema=False, response_model=None)
@@ -113,6 +193,178 @@ async def portal_login(
     request.session["portal_display_name"] = user.display_name
     issue_csrf_token(request.session)
     return RedirectResponse("/portal", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get(
+    "/portal/forgot-password",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def portal_forgot_password_form(request: Request) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    return HTMLResponse(
+        render_portal_forgot_password(
+            issue_csrf_token(request.session),
+            sent=False,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post(
+    "/portal/forgot-password",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def portal_forgot_password(
+    request: Request,
+    email: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    _verify_csrf(request, csrf_token)
+    await enforce_public_rate_limit(
+        settings,
+        category="portal-password-reset",
+        identifier=request.client.host if request.client else "unknown",
+        limit=10,
+        window=3600,
+    )
+    await _run_database(
+        settings,
+        lambda session: _queue_password_reset(
+            session,
+            email=email,
+            settings=settings,
+        ),
+    )
+    return HTMLResponse(
+        render_portal_forgot_password(
+            issue_csrf_token(request.session),
+            sent=True,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get(
+    "/portal/resend-activation",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def portal_resend_activation_form(request: Request) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    return HTMLResponse(
+        render_portal_resend_activation(
+            issue_csrf_token(request.session),
+            sent=False,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post(
+    "/portal/resend-activation",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def portal_resend_activation(
+    request: Request,
+    email: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    _verify_csrf(request, csrf_token)
+    await enforce_public_rate_limit(
+        settings,
+        category="portal-activation-resend",
+        identifier=request.client.host if request.client else "unknown",
+        limit=10,
+        window=3600,
+    )
+    await _run_database(
+        settings,
+        lambda session: _queue_activation_resend(
+            session,
+            email=email,
+            settings=settings,
+        ),
+    )
+    return HTMLResponse(
+        render_portal_resend_activation(
+            issue_csrf_token(request.session),
+            sent=True,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get(
+    "/portal/reset-password",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+async def portal_reset_password_form(request: Request) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    return HTMLResponse(
+        render_portal_reset_password(issue_csrf_token(request.session)),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+@router.post(
+    "/portal/reset-password",
+    include_in_schema=False,
+    response_model=None,
+)
+async def portal_reset_password(
+    request: Request,
+    token: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    confirm_password: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> HTMLResponse | RedirectResponse:
+    settings: Settings = request.app.state.settings
+    _enabled(settings)
+    _verify_csrf(request, csrf_token)
+    if not token or password != confirm_password:
+        return HTMLResponse(
+            render_portal_reset_password(
+                issue_csrf_token(request.session),
+                error="The reset link is missing or the passwords do not match.",
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+    try:
+        await _run_database(
+            settings,
+            lambda session: reset_password(
+                session,
+                token=token,
+                password=password,
+            ),
+        )
+    except (InvalidConfiguration, ResourceNotFound) as error:
+        return HTMLResponse(
+            render_portal_reset_password(
+                issue_csrf_token(request.session),
+                error=str(error),
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+
+    request.session.clear()
+    return RedirectResponse(
+        "/portal/login?reset=1",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/portal/logout", include_in_schema=False)
