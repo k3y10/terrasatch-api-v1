@@ -149,3 +149,41 @@ async def test_public_reference_lists_billing_contract_and_rate_limit_error() ->
     errors = {(item["http_status"], item["code"]) for item in payload["common_errors"]}
     assert (429, "rate_limited") in errors
     assert (503, "provider_unavailable") in errors
+
+
+@pytest.mark.asyncio
+async def test_workspace_webhook_alias_is_not_exposed_outside_staging() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/workspace/billing/stripe/webhook",
+            content=b"{}",
+        )
+
+    assert response.status_code == 404
+    assert "/api/v1/workspace/billing/stripe/webhook" not in application.openapi()["paths"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_webhook_alias_is_exposed_only_in_staging() -> None:
+    settings = Settings(
+        environment="staging",
+        deployment_name="billing-staging-contract-test",
+        api_base_url="https://staging-api.terrasatch.com",
+        cors_origins=[],
+        billing_enabled=False,
+    )
+    application = create_app(settings)
+    transport = httpx.ASGITransport(app=application)
+
+    assert "/api/v1/workspace/billing/stripe/webhook" in application.openapi()["paths"]
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/v1/workspace/billing/stripe/webhook",
+            content=b'{"id":"evt_test_staging"}',
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "provider_unavailable"
