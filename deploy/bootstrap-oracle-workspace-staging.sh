@@ -222,7 +222,8 @@ lock_updated=false
 lock_backup=""
 cleanup_generated_lock() {
   status=$?
-  if [[ "$lock_updated" == "true" && -n "$lock_backup" && -f "$lock_backup" ]]; then
+  trap - EXIT
+  if [[ -n "$lock_backup" && -f "$lock_backup" ]]; then
     if ! git diff --quiet -- uv.lock; then
       cp "$lock_backup" uv.lock
     fi
@@ -237,6 +238,7 @@ if ! uv lock --check; then
   cp uv.lock "$lock_backup"
   trap cleanup_generated_lock EXIT
   uv lock
+  lock_updated=true
 
   mapfile -t changed_after_lock < <(git status --porcelain --untracked-files=no | awk '{print $2}')
   if [[ "${#changed_after_lock[@]}" -ne 1 || "${changed_after_lock[0]}" != "uv.lock" ]]; then
@@ -245,7 +247,6 @@ if ! uv lock --check; then
     exit 1
   fi
   uv lock --check
-  lock_updated=true
 fi
 
 uv sync --extra dev --frozen
