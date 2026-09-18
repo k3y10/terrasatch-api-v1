@@ -13,10 +13,10 @@ x-runtime: &runtime
     TERRASATCH_API_BASE_URL: https://staging-api.terrasatch.com
     TERRASATCH_BILLING_ENABLED: "true"
     TERRASATCH_BILLING_ALLOW_LIVEMODE: "false"
-    TERRASATCH_BILLING_SUCCESS_URL: https://wasatch-ascent-git-feat-subscription-billing-k3y10s.vercel.app/billing/success?session_id={CHECKOUT_SESSION_ID}
-    TERRASATCH_BILLING_CANCEL_URL: https://wasatch-ascent-git-feat-subscription-billing-k3y10s.vercel.app/#cost
-    TERRASATCH_BILLING_PORTAL_RETURN_URL: https://wasatch-ascent-git-feat-subscription-billing-k3y10s.vercel.app/workspace
-    TERRASATCH_BILLING_ACTIVATION_URL: https://wasatch-ascent-git-feat-subscription-billing-k3y10s.vercel.app/activate
+    TERRASATCH_BILLING_SUCCESS_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/success?session_id={CHECKOUT_SESSION_ID}
+    TERRASATCH_BILLING_CANCEL_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/cancel
+    TERRASATCH_BILLING_PORTAL_RETURN_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/portal-return
+    TERRASATCH_BILLING_ACTIVATION_URL: https://staging-api.terrasatch.com/api/v1/workspace/billing/activate
     TERRASATCH_BILLING_EMAIL_WEBHOOK_URL: https://wasatch-ascent-git-feat-subscription-billing-k3y10s.vercel.app/api/billing-email
     TERRASATCH_INTELLIGENCE_PROVIDER: ollama
     TERRASATCH_INTELLIGENCE_FALLBACK_TO_DETERMINISTIC: "false"
