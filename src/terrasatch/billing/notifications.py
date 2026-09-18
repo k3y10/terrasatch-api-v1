@@ -188,9 +188,14 @@ def notification_kind(
     if (
         stripe_event_type == "customer.subscription.updated"
         and context is not None
-        and context.cancel_at_period_end
+        and previous_attributes is not None
+        and "cancel_at_period_end" in previous_attributes
     ):
-        return "cancellation_scheduled"
+        was_canceling = previous_attributes.get("cancel_at_period_end")
+        if context.cancel_at_period_end and was_canceling is False:
+            return "cancellation_scheduled"
+        if not context.cancel_at_period_end and was_canceling is True:
+            return "cancellation_reversed"
     if (
         stripe_event_type == "customer.subscription.updated"
         and previous_attributes
@@ -410,6 +415,28 @@ def build_billing_email(
                     "<p>Service remains available through the paid period. "
                     "TerraSatch does not automatically delete operational history "
                     "when billing ends.</p>"
+                ),
+            ),
+        )
+
+    if kind == "cancellation_reversed":
+        subject = "TerraSatch cancellation removed"
+        return BillingEmailMessage(
+            subject=subject,
+            text=(
+                f"Hi {context.display_name or 'there'},\n\n"
+                f"The scheduled cancellation for {context.organization_name} was removed. "
+                f"Your {context.plan_name or 'TerraSatch'} subscription will continue"
+                f"{(' at ' + price) if price else ''}."
+            ),
+            html=_shell(
+                subject,
+                (
+                    f"<p>Hi {name},</p>"
+                    f"<p>The scheduled cancellation for <strong>{organization}</strong> "
+                    "was removed.</p>"
+                    f"<p>Your <strong>{plan}</strong> subscription will continue"
+                    f"{(' at ' + escape(price)) if price else ''}.</p>"
                 ),
             ),
         )
