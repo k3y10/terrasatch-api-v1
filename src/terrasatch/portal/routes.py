@@ -80,6 +80,19 @@ def _portal_user_id(request: Request) -> UUID | None:
         return None
 
 
+def _clear_portal_auth(request: Request) -> None:
+    """Remove authenticated portal state without invalidating the anonymous CSRF session."""
+
+    for key in (
+        "portal_user_id",
+        "portal_credential_version",
+        "portal_email",
+        "portal_display_name",
+        "portal_organization",
+    ):
+        request.session.pop(key, None)
+
+
 async def _require_user(
     request: Request,
     settings: Settings,
@@ -90,7 +103,7 @@ async def _require_user(
     user_id = _portal_user_id(request)
     credential_version = request.session.get("portal_credential_version")
     if user_id is None or not isinstance(credential_version, int):
-        request.session.clear()
+        _clear_portal_auth(request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Portal login required",
@@ -112,7 +125,7 @@ async def _require_user(
             credential_version=credential_version,
         )
     if user is None:
-        request.session.clear()
+        _clear_portal_auth(request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Portal login required",
