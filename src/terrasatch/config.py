@@ -153,13 +153,28 @@ class Settings(BaseSettings):
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
 
     @property
+    def stripe_webhook_is_configured(self) -> bool:
+        """Require HMAC in production; allow Stripe event retrieval in test-only staging."""
+
+        if self.stripe_webhook_secret is not None:
+            return True
+        if (
+            self.environment == Environment.STAGING
+            and not self.billing_allow_livemode
+            and self.stripe_secret_key is not None
+        ):
+            secret = self.stripe_secret_key.get_secret_value()
+            return secret.startswith(("sk_test_", "rk_test_"))
+        return False
+
+    @property
     def billing_is_configured(self) -> bool:
-        """Require Stripe, activation signing and transactional email before checkout."""
+        """Require Stripe, webhook verification, activation signing and transactional email."""
 
         return bool(
             self.billing_enabled
             and self.stripe_secret_key
-            and self.stripe_webhook_secret
+            and self.stripe_webhook_is_configured
             and self.billing_email_webhook_url
             and self.billing_email_webhook_secret
             and self.billing_activation_signing_secret
