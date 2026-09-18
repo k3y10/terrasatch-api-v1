@@ -37,6 +37,7 @@ from terrasatch.billing.service import (
     mark_checkout_created,
     process_verified_event,
     public_plans,
+    recover_pending_activation_token_for_checkout,
 )
 from terrasatch.billing.status import get_checkout_status
 from terrasatch.billing.stripe_gateway import StripeGateway
@@ -399,6 +400,33 @@ async def get_staging_billing_checkout_status(
     return await get_billing_checkout_status(request=request, session_id=session_id)
 
 
+@staging_router.get("/checkout/activation")
+async def get_staging_checkout_activation(
+    request: Request,
+    session_id: Annotated[str, Query(min_length=10, max_length=255)],
+) -> dict[str, str | None]:
+    """Return a pending activation token only on the isolated staging surface."""
+
+    settings: Settings = request.app.state.settings
+    if settings.environment != Environment.STAGING or settings.billing_allow_livemode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await enforce_public_rate_limit(
+        settings,
+        category="billing-staging-activation",
+        identifier=request.client.host if request.client else "unknown",
+        limit=60,
+    )
+    token = await _run_database(
+        settings,
+        lambda session: recover_pending_activation_token_for_checkout(
+            session,
+            checkout_session_id=session_id,
+            settings=settings,
+        ),
+    )
+    return {"token": token}
+
+
 @staging_router.post("/activate", response_model=ActivationResponse)
 async def post_staging_billing_activation(
     payload: ActivationRequest,
@@ -436,9 +464,26 @@ async function check() {
   }
   const data = await response.json();
   if (data.state === "ready") {
-    target.textContent = data.activation_required
-      ? "Subscription webhook processed. Account provisioning is complete; activation is required."
-      : "Subscription webhook processed. Account provisioning is complete.";
+    if (data.activation_required) {
+      const activationResponse = await fetch(
+        "/api/v1/workspace/billing/checkout/activation?session_id=" + encodeURIComponent(id),
+        {credentials: "same-origin"}
+      );
+      if (activationResponse.ok) {
+        const activation = await activationResponse.json();
+        if (activation.token) {
+          const link = document.createElement("a");
+          link.href = "/api/v1/workspace/billing/activate#token=" + encodeURIComponent(activation.token);
+          link.textContent = "Activate staging account";
+          target.textContent = "Subscription webhook processed. Account provisioning is complete. ";
+          target.appendChild(link);
+          return;
+        }
+      }
+      target.textContent = "Subscription webhook processed. Account provisioning is complete; activation is required.";
+      return;
+    }
+    target.textContent = "Subscription webhook processed. Account provisioning is complete.";
     return;
   }
   if (data.state === "expired") {
