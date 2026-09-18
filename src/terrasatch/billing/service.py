@@ -798,8 +798,8 @@ async def recover_pending_activation_token_for_checkout(
     *,
     checkout_session_id: str,
     settings: Settings,
-) -> str | None:
-    """Recover a pending activation token for isolated staging acceptance only."""
+) -> tuple[str, str] | None:
+    """Recover a pending activation token and owner email for isolated staging onboarding."""
 
     signup = await session.scalar(
         select(BillingSignup).where(
@@ -835,7 +835,7 @@ async def recover_pending_activation_token_for_checkout(
     token = recover_activation_token(settings, activation.id)
     if _token_hash(token) != activation.token_hash:
         raise InvalidConfiguration("Activation signing secret does not match staging state")
-    return token
+    return token, signup.email
 
 
 async def activate_owner(
