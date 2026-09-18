@@ -53,7 +53,9 @@ async def test_direct_resend_delivery_uses_idempotency_and_returns_receipt(monke
         resend_api_key=SecretStr("re_test_terrasatch"),
         billing_from="TerraSatch <billing@terrasatch.com>",
         billing_reply_to="support@terrasatch.com",
-        billing_activation_url="https://staging-api.terrasatch.com/api/v1/workspace/billing/activate",
+        billing_activation_url=(
+            "https://staging-api.terrasatch.com/api/v1/workspace/billing/activate"
+        ),
     )
     receipt = await deliver_billing_email(
         settings=settings,
