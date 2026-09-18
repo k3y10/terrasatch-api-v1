@@ -7,6 +7,7 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import terrasatch.billing.outbox as outbox
+from terrasatch.admin.security import hash_admin_password
 from terrasatch.billing.models import BillingEmailOutbox
 from terrasatch.billing.notifications import (
     BillingEmailDeliveryReceipt,
@@ -44,6 +45,8 @@ async def test_password_reset_outbox_reconstructs_link_without_storing_token(mon
             id=uuid4(),
             email="owner@example.com",
             display_name="Owner",
+            password_hash=hash_admin_password("existing-password-123"),
+            credential_version=1,
         )
         membership = Membership(
             id=uuid4(),
