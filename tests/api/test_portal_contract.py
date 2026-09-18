@@ -58,6 +58,7 @@ async def test_portal_fleet_status_requires_member_session() -> None:
     assert response.status_code == 401
     assert response.json()["detail"] == "Portal login required"
 
+
 @pytest.mark.asyncio
 async def test_portal_account_recovery_pages_are_available() -> None:
     application = create_app(make_settings())
