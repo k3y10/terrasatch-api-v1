@@ -34,6 +34,7 @@ from terrasatch.identity.access import (
     get_user_organization_access,
     list_user_access,
     role_allows,
+    validate_browser_session,
 )
 from terrasatch.identity.models import MembershipRole
 from terrasatch.identity.recovery import create_password_reset_intent, reset_password
@@ -79,11 +80,43 @@ def _portal_user_id(request: Request) -> UUID | None:
         return None
 
 
-def _require_user(request: Request, settings: Settings) -> UUID:
+async def _require_user(
+    request: Request,
+    settings: Settings,
+    *,
+    session: AsyncSession | None = None,
+) -> UUID:
     _enabled(settings)
     user_id = _portal_user_id(request)
-    if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Portal login required")
+    credential_version = request.session.get("portal_credential_version")
+    if user_id is None or not isinstance(credential_version, int):
+        request.session.clear()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Portal login required",
+        )
+
+    if session is None:
+        user = await _run_database(
+            settings,
+            lambda database: validate_browser_session(
+                database,
+                user_id=user_id,
+                credential_version=credential_version,
+            ),
+        )
+    else:
+        user = await validate_browser_session(
+            session,
+            user_id=user_id,
+            credential_version=credential_version,
+        )
+    if user is None:
+        request.session.clear()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Portal login required",
+        )
     return user_id
 
 
@@ -153,7 +186,12 @@ async def portal_login_form(request: Request) -> HTMLResponse | RedirectResponse
     settings: Settings = request.app.state.settings
     _enabled(settings)
     if _portal_user_id(request) is not None:
-        return RedirectResponse("/portal", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            await _require_user(request, settings)
+        except HTTPException:
+            pass
+        else:
+            return RedirectResponse("/portal", status_code=status.HTTP_303_SEE_OTHER)
     notice = (
         "Password updated. Sign in with your new password."
         if request.query_params.get("reset") == "1"
@@ -189,6 +227,7 @@ async def portal_login(
         )
     request.session.clear()
     request.session["portal_user_id"] = str(user.id)
+    request.session["portal_credential_version"] = user.credential_version
     request.session["portal_email"] = user.email
     request.session["portal_display_name"] = user.display_name
     issue_csrf_token(request.session)
@@ -373,7 +412,7 @@ async def portal_logout(
     csrf_token: Annotated[str, Form()],
 ) -> RedirectResponse:
     settings: Settings = request.app.state.settings
-    _require_user(request, settings)
+    _enabled(settings)
     _verify_csrf(request, csrf_token)
     request.session.clear()
     return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -391,11 +430,15 @@ async def portal_dashboard(
 ) -> HTMLResponse | RedirectResponse:
     settings: Settings = request.app.state.settings
     _enabled(settings)
-    user_id = _portal_user_id(request)
-    if user_id is None:
+    try:
+        user_id = await _require_user(request, settings)
+    except HTTPException:
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    access = await _run_database(settings, lambda session: list_user_access(session, user_id=user_id))
+    access = await _run_database(
+        settings,
+        lambda session: list_user_access(session, user_id=user_id),
+    )
     if not access:
         request.session.clear()
         return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -454,7 +497,7 @@ async def portal_billing(
     """Open Stripe Customer Portal only for an authorized organization admin/owner."""
 
     settings: Settings = request.app.state.settings
-    user_id = _require_user(request, settings)
+    user_id = await _require_user(request, settings)
     _verify_csrf(request, csrf_token)
     try:
         organization_id = UUID(organization)
