@@ -279,9 +279,7 @@ class Settings(BaseSettings):
         )
         if not core_ready:
             return False
-        if self.environment == Environment.STAGING and not self.billing_allow_livemode:
-            return True
-        if self.environment == Environment.PRODUCTION:
+        if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
             return bool(
                 self.billing_email_is_configured
                 and self.resend_webhook_is_configured
