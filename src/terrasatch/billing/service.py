@@ -723,6 +723,7 @@ async def process_verified_event(
             organization_id=provisioned.organization_id,
             activation_token=provisioned.activation_token,
             activation_email=signup.email,
+            state_applied=provisioned.state_applied,
         )
     elif event_type in {
         "customer.subscription.created",
