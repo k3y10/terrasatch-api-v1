@@ -199,7 +199,11 @@ def build_billing_email(
             ),
         ]
         detail_html = "<br>".join(item for item in details if item)
-        activation = _button(activation_url, "Activate TerraSatch account") if activation_url else ""
+        activation = (
+            _button(activation_url, "Activate TerraSatch account")
+            if activation_url
+            else ""
+        )
         text = (
             f"Hi {context.display_name or 'there'},\n\n"
             f"Your TerraSatch trial is active for {context.organization_name}.\n"
@@ -233,9 +237,19 @@ def build_billing_email(
             subject,
             (
                 f"<p>Hi {name},</p><p>Your <strong>{plan}</strong> trial"
-                f"{f' ends on <strong>{escape(trial_end)}</strong>' if trial_end else ' ends soon'}."
-                "</p>"
-                f"{f'<p>Your subscription will continue at <strong>{escape(price)}</strong> unless you cancel before the trial ends.</p>' if price else ''}"
+                (
+                    f" ends on <strong>{escape(trial_end)}</strong>"
+                    if trial_end
+                    else " ends soon"
+                )
+                + ".</p>"
+                + (
+                    "<p>Your subscription will continue at "
+                    f"<strong>{escape(price)}</strong> unless you cancel before "
+                    "the trial ends.</p>"
+                    if price
+                    else ""
+                )
                 "<p>You can manage billing from your TerraSatch organization portal.</p>"
             ),
         )
@@ -246,7 +260,11 @@ def build_billing_email(
         text = (
             f"Hi {context.display_name or 'there'},\n\n"
             f"We could not process the latest TerraSatch payment for {context.organization_name}."
-            f"{f' Your organization remains in a temporary grace period through {grace_end}.' if grace_end else ''}"
+            (
+                f" Your organization remains in a temporary grace period through {grace_end}."
+                if grace_end
+                else ""
+            )
             "\n\nPlease update the payment method from your TerraSatch organization portal."
         )
         html = _shell(
@@ -254,7 +272,12 @@ def build_billing_email(
             (
                 f"<p>Hi {name},</p><p>We could not process the latest payment for "
                 f"<strong>{organization}</strong>.</p>"
-                f"{f'<p>Your organization remains in a temporary grace period through <strong>{escape(grace_end)}</strong>.</p>' if grace_end else ''}"
+                (
+                    "<p>Your organization remains in a temporary grace period through "
+                    f"<strong>{escape(grace_end)}</strong>.</p>"
+                    if grace_end
+                    else ""
+                )
                 "<p>Please update the payment method from your TerraSatch organization portal.</p>"
             ),
         )
@@ -277,9 +300,14 @@ def build_billing_email(
             (
                 f"<p>Hi {name},</p><p>Your TerraSatch subscription for "
                 f"<strong>{organization}</strong> is scheduled to cancel"
-                f"{f' on <strong>{escape(period_end)}</strong>' if period_end else ' at the end of the current billing period'}."
-                "</p><p>Service remains available through the paid period. "
-                "TerraSatch does not automatically delete operational history when billing ends.</p>"
+                (
+                    f" on <strong>{escape(period_end)}</strong>"
+                    if period_end
+                    else " at the end of the current billing period"
+                )
+                + ".</p><p>Service remains available through the paid period. "
+                + "TerraSatch does not automatically delete operational history "
+                + "when billing ends.</p>"
             ),
         )
         return BillingEmailMessage(subject=subject, text=text, html=html)
