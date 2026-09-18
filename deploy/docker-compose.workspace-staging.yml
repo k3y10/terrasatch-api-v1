@@ -8,6 +8,7 @@ x-runtime: &runtime
   environment:
     TERRASATCH_ENV: staging
     TERRASATCH_DEPLOYMENT_NAME: workspace-staging
+    TERRASATCH_BUILD_SHA: ${TERRASATCH_BUILD_SHA:-unknown}
     TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:?Set staging database password}@postgres:5432/terrasatch_staging
     TERRASATCH_REDIS_URL: redis://redis:6379/0
     TERRASATCH_API_BASE_URL: https://staging-api.terrasatch.com
