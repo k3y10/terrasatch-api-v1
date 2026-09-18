@@ -105,6 +105,76 @@ set +a
 
 TERRASATCH_STRIPE_SECRET_KEY="${TERRASATCH_STRIPE_SECRET_KEY:-${STRIPE_SECRET_KEY:-}}"
 TERRASATCH_STRIPE_WEBHOOK_SECRET="${TERRASATCH_STRIPE_WEBHOOK_SECRET:-${STRIPE_WEBHOOK_SECRET:-}}"
+
+EXPECTED_STRIPE_ACCOUNT="${TERRASATCH_EXPECTED_STRIPE_ACCOUNT:-acct_1Txb0QPwzxCRGRdh}"
+
+stripe_key_matches_account() {
+  local candidate="$1"
+  [[ "$candidate" == sk_test_* || "$candidate" == rk_test_* ]] || return 1
+  local account_id
+  account_id="$(
+    curl --silent --show-error --fail       -u "$candidate:"       https://api.stripe.com/v1/account 2>/dev/null |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true
+  )"
+  [[ "$account_id" == "$EXPECTED_STRIPE_ACCOUNT" ]]
+}
+
+persist_staging_stripe_key() {
+  local candidate="$1"
+  local tmp
+  tmp="$(mktemp)"
+  awk '!/^TERRASATCH_STRIPE_SECRET_KEY=|^STRIPE_SECRET_KEY=/' "$staging_dir/.env.staging" >"$tmp"
+  printf 'TERRASATCH_STRIPE_SECRET_KEY=%s\n' "$candidate" >>"$tmp"
+  install -m 600 "$tmp" "$staging_dir/.env.staging"
+  rm -f "$tmp"
+  TERRASATCH_STRIPE_SECRET_KEY="$candidate"
+  export TERRASATCH_STRIPE_SECRET_KEY
+}
+
+if [[ -n "$TERRASATCH_STRIPE_SECRET_KEY" ]] && ! stripe_key_matches_account "$TERRASATCH_STRIPE_SECRET_KEY"; then
+  die "Configured Stripe test key does not belong to the TerraSatch sandbox account."
+fi
+
+if [[ -z "$TERRASATCH_STRIPE_SECRET_KEY" ]]; then
+  say "Searching existing server credentials for the TerraSatch sandbox key"
+  discovered_key=""
+
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    if stripe_key_matches_account "$candidate"; then
+      discovered_key="$candidate"
+      break
+    fi
+  done < <(
+    {
+      find /opt/terrasatch /etc/terrasatch /home/ubuntu /root         -maxdepth 6 -type f \( -name '.env' -o -name '.env.*' -o -name 'config.toml' \)         -readable -print0 2>/dev/null |
+      xargs -0 -r awk -F= '
+        /^[[:space:]]*(TERRASATCH_STRIPE_SECRET_KEY|STRIPE_SECRET_KEY|test_mode_api_key)[[:space:]]*=/ {
+          value=$0
+          sub(/^[^=]*=/,"",value)
+          gsub(/^[[:space:]"'\''"]+|[[:space:]"'\''"]+$/,"",value)
+          print value
+        }
+      '
+
+      for container in $(docker ps -q 2>/dev/null); do
+        docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null |
+          awk -F= '
+            $1=="TERRASATCH_STRIPE_SECRET_KEY" || $1=="STRIPE_SECRET_KEY" {
+              sub(/^[^=]*=/,"")
+              print
+            }
+          '
+      done
+    } | awk 'NF && !seen[$0]++'
+  )
+
+  if [[ -n "$discovered_key" ]]; then
+    persist_staging_stripe_key "$discovered_key"
+    say "Recovered an existing TerraSatch sandbox key and stored it in .env.staging"
+  fi
+fi
+
 export TERRASATCH_STRIPE_SECRET_KEY TERRASATCH_STRIPE_WEBHOOK_SECRET
 
 required=(
@@ -119,6 +189,10 @@ done
 if [[ "${#missing[@]}" -gt 0 ]]; then
   printf 'Missing staging variables (values were not printed):\n' >&2
   printf '  %s\n' "${missing[@]}" >&2
+  if printf '%s\n' "${missing[@]}" | grep -qx 'TERRASATCH_STRIPE_SECRET_KEY'; then
+    printf '\nNo existing TerraSatch sandbox key was found in server env files, Docker environments, or Stripe CLI config.\n' >&2
+    printf 'A server-side Stripe test credential for account %s is required for API-created Checkout sessions.\n' "$EXPECTED_STRIPE_ACCOUNT" >&2
+  fi
   exit 1
 fi
 
