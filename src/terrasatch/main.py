@@ -20,6 +20,7 @@ from terrasatch.admin.member_routes import router as admin_member_router
 from terrasatch.admin.routes import router as admin_router
 from terrasatch.admin.satchy_routes import router as admin_satchy_router
 from terrasatch.api.billing import router as billing_router
+from terrasatch.api.billing import staging_router as staging_billing_router
 from terrasatch.api.control_plane import router as control_plane_router
 from terrasatch.api.radio import router as radio_router
 from terrasatch.api.realtime import router as realtime_router
@@ -34,7 +35,7 @@ from terrasatch.brand import (
     TERRASATCH_LOGO_ASSET_PATH,
     apply_public_branding,
 )
-from terrasatch.config import Settings, get_settings
+from terrasatch.config import Environment, Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
 from terrasatch.landing_v3 import build_landing_page
@@ -229,6 +230,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(radio_router)
     api_v1.include_router(uac_archive_router)
     api_v1.include_router(billing_router)
+    if configured_settings.environment == Environment.STAGING:
+        api_v1.include_router(staging_billing_router)
 
     @api_v1.get("/admin/quality", tags=["admin"])
     async def get_admin_quality(
