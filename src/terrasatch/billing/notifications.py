@@ -470,16 +470,17 @@ def build_billing_email(
             if activation_url
             else ""
         )
+        setup_text = (
+            f"Finish setup: {activation_url}\n\n"
+            if activation_url
+            else "Open TerraSatch to finish setup.\n\n"
+        )
         return BillingEmailMessage(
             subject=subject,
             text=(
                 f"Hi {context.display_name or 'there'},\n\n"
                 "Your TerraSatch workspace is ready. "
-                (
-                    f"Finish setup: {activation_url}\n\n"
-                    if activation_url
-                    else "Open TerraSatch to finish setup.\n\n"
-                )
+                f"{setup_text}"
                 "If you did not request this message, you can ignore it."
             ),
             html=_shell(
