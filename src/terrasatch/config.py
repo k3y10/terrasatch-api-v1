@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     billing_grace_days: int = Field(default=7, ge=1, le=30)
     billing_checkout_ttl_minutes: int = Field(default=120, ge=30, le=1440)
     billing_activation_ttl_hours: int = Field(default=24, ge=1, le=168)
+    account_password_reset_ttl_minutes: int = Field(default=30, ge=10, le=120)
     billing_success_url: str = Field(
         default="https://terrasatch.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
         min_length=10,
