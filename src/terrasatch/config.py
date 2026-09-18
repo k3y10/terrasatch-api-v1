@@ -95,6 +95,19 @@ class Settings(BaseSettings):
     billing_staging_individual_payment_link_id: str | None = None
     billing_staging_team_payment_link_url: str | None = None
     billing_staging_team_payment_link_id: str | None = None
+    # Primary transactional email path: direct Resend delivery from the durable Oracle outbox.
+    # The protected Vercel webhook below remains a fallback for deployments that do not
+    # provide Resend credentials directly to the API/worker.
+    resend_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "resend_api_key",
+            "TERRASATCH_RESEND_API_KEY",
+            "RESEND_API_KEY",
+        ),
+    )
+    billing_from: str | None = Field(default=None, max_length=320)
+    billing_reply_to: str | None = Field(default=None, max_length=320)
     billing_email_webhook_url: AnyHttpUrl | None = None
     billing_email_webhook_secret: SecretStr | None = None
     billing_activation_signing_secret: SecretStr | None = None
@@ -138,6 +151,36 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_build_sha(cls, value: str) -> str:
         return value.strip() or "unknown"
+
+    @field_validator(
+        "billing_from",
+        "billing_reply_to",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator(
+        "resend_api_key",
+        "stripe_secret_key",
+        "stripe_webhook_secret",
+        "billing_email_webhook_secret",
+        "billing_activation_signing_secret",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_secret(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, SecretStr):
+            raw = value.get_secret_value().strip()
+            return SecretStr(raw) if raw else None
+        raw = str(value).strip()
+        return raw or None
 
     @field_validator("uac_archive_path")
     @classmethod
@@ -188,10 +231,25 @@ class Settings(BaseSettings):
         return self.staging_payment_links_are_configured
 
     @property
-    def billing_email_is_configured(self) -> bool:
-        """Return whether transactional billing email delivery is fully configured."""
+    def billing_resend_is_configured(self) -> bool:
+        """Return whether Oracle can send transactional email directly through Resend."""
+
+        return bool(self.resend_api_key and self.billing_from)
+
+    @property
+    def billing_email_webhook_is_configured(self) -> bool:
+        """Return whether the protected Vercel billing-email fallback is configured."""
 
         return bool(self.billing_email_webhook_url and self.billing_email_webhook_secret)
+
+    @property
+    def billing_email_is_configured(self) -> bool:
+        """Return whether at least one durable transactional email path is configured."""
+
+        return bool(
+            self.billing_resend_is_configured
+            or self.billing_email_webhook_is_configured
+        )
 
     @property
     def billing_is_configured(self) -> bool:
