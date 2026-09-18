@@ -535,12 +535,18 @@ async def _process_stripe_webhook(
                     and isinstance(data.get("previous_attributes"), dict)
                     else None
                 )
+                event_object = (
+                    data.get("object")
+                    if isinstance(data, dict)
+                    and isinstance(data.get("object"), dict)
+                    else None
+                )
                 kind = notification_kind(
                     stripe_event_type=event_type,
                     activation_token=result.activation_token,
                     context=context,
                     previous_attributes=previous_attributes,
-                    event_object=obj,
+                    event_object=event_object,
                 )
                 if context is not None and kind is not None:
                     await enqueue_email(
