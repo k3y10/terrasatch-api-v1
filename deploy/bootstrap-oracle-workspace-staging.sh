@@ -103,10 +103,13 @@ set -a
 source "$staging_dir/.env.staging"
 set +a
 
+TERRASATCH_STRIPE_SECRET_KEY="${TERRASATCH_STRIPE_SECRET_KEY:-${STRIPE_SECRET_KEY:-}}"
+TERRASATCH_STRIPE_WEBHOOK_SECRET="${TERRASATCH_STRIPE_WEBHOOK_SECRET:-${STRIPE_WEBHOOK_SECRET:-}}"
+export TERRASATCH_STRIPE_SECRET_KEY TERRASATCH_STRIPE_WEBHOOK_SECRET
+
 required=(
   POSTGRES_PASSWORD
   TERRASATCH_STRIPE_SECRET_KEY
-  TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET
   TERRASATCH_BILLING_ACTIVATION_SIGNING_SECRET
 )
 missing=()
@@ -130,7 +133,12 @@ fi
 say "Sandbox environment safety checks passed"
 printf 'Stripe key mode: test\n'
 printf 'Live billing: disabled\n'
-printf 'Secrets: present (values suppressed)\n'
+if [[ -n "${TERRASATCH_BILLING_EMAIL_WEBHOOK_SECRET:-}" ]]; then
+  printf 'Transactional email: configured\n'
+else
+  printf 'Transactional email: not configured (allowed in isolated staging; activation fallback enabled)\n'
+fi
+printf 'Required sandbox secrets: present (values suppressed)\n'
 
 say "Running locked dependency check, Ruff, and full pytest suite"
 cd "$staging_dir"
