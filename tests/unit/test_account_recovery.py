@@ -65,7 +65,7 @@ async def test_password_reset_is_single_use_and_replaces_password() -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as session:
-        organization, user = await seed_account(session)
+        _organization, user = await seed_account(session)
         intent = await create_password_reset_intent(
             session,
             email=user.email,
