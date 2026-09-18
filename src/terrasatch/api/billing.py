@@ -539,6 +539,7 @@ async def _process_stripe_webhook(
                     activation_token=result.activation_token,
                     context=context,
                     previous_attributes=previous_attributes,
+                    event_object=obj,
                 )
                 if context is not None and kind is not None:
                     await enqueue_email(
