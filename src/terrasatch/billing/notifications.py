@@ -638,6 +638,7 @@ async def deliver_billing_email(
     kind: str,
     context: BillingEmailContext,
     activation_token: str | None = None,
+    action_url: str | None = None,
 ) -> BillingEmailDeliveryReceipt | None:
     """Deliver one idempotent lifecycle email through the configured provider.
 
@@ -646,7 +647,7 @@ async def deliver_billing_email(
     API/worker does not hold Resend credentials.
     """
 
-    activation_url = _activation_url(settings, activation_token)
+    activation_url = action_url or _activation_url(settings, activation_token)
     if settings.billing_resend_is_configured:
         return await _deliver_direct_resend(
             settings=settings,
