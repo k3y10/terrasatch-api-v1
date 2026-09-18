@@ -302,6 +302,118 @@ async function main() {
       );
     }
 
+    const anonymousSessionResponse = await context.request.get(
+      `${BASE}/api/v1/workspace/session`,
+    );
+    if (!anonymousSessionResponse.ok()) {
+      throw new Error(
+        `Unable to initialize workspace session: HTTP ${anonymousSessionResponse.status()}`,
+      );
+    }
+    const anonymousSession = await anonymousSessionResponse.json();
+    if (
+      anonymousSession.user !== null ||
+      typeof anonymousSession.csrf_token !== "string" ||
+      anonymousSession.csrf_token.length < 16
+    ) {
+      throw new Error(
+        `Anonymous workspace session is invalid: ${JSON.stringify(anonymousSession)}`,
+      );
+    }
+
+    const loginResponse = await context.request.post(
+      `${BASE}/api/v1/workspace/login`,
+      {
+        headers: {
+          "content-type": "application/json",
+          "X-CSRF-Token": anonymousSession.csrf_token,
+        },
+        data: { email, password },
+      },
+    );
+    if (!loginResponse.ok()) {
+      throw new Error(
+        `Workspace login failed: HTTP ${loginResponse.status()} ${await loginResponse.text()}`,
+      );
+    }
+    const loginPayload = await loginResponse.json();
+    if (
+      typeof loginPayload.csrf_token !== "string" ||
+      loginPayload.csrf_token.length < 16
+    ) {
+      throw new Error("Workspace login did not rotate and return a CSRF token");
+    }
+
+    const authenticatedSessionResponse = await context.request.get(
+      `${BASE}/api/v1/workspace/session`,
+    );
+    if (!authenticatedSessionResponse.ok()) {
+      throw new Error(
+        `Authenticated workspace session failed: HTTP ${authenticatedSessionResponse.status()}`,
+      );
+    }
+    const authenticatedSession = await authenticatedSessionResponse.json();
+    const organization = Array.isArray(authenticatedSession.organizations)
+      ? authenticatedSession.organizations.find(
+          (item) => item.id === activated.organization_id,
+        )
+      : null;
+    if (
+      authenticatedSession.user?.email !== email ||
+      !organization ||
+      organization.role !== "owner"
+    ) {
+      throw new Error(
+        `Authenticated workspace identity is wrong: ${JSON.stringify(authenticatedSession)}`,
+      );
+    }
+
+    const organizationResponse = await context.request.get(
+      `${BASE}/api/v1/workspace/organizations/${encodeURIComponent(activated.organization_id)}`,
+    );
+    if (!organizationResponse.ok()) {
+      throw new Error(
+        `Authenticated organization access failed: HTTP ${organizationResponse.status()}`,
+      );
+    }
+
+    const portalResponse = await page.goto(`${BASE}/portal`, {
+      waitUntil: "domcontentloaded",
+      timeout: 90_000,
+    });
+    if (!portalResponse || !portalResponse.ok()) {
+      throw new Error(
+        `Field Workspace portal handoff failed: HTTP ${portalResponse?.status() ?? "unknown"}`,
+      );
+    }
+    if (!(await page.getByText("FIELD WORKSPACE", { exact: false }).first().isVisible())) {
+      throw new Error("Field Workspace portal did not render after authenticated handoff");
+    }
+
+    const logoutResponse = await context.request.post(
+      `${BASE}/api/v1/workspace/logout`,
+      {
+        headers: {
+          "X-CSRF-Token": authenticatedSession.csrf_token || loginPayload.csrf_token,
+        },
+      },
+    );
+    if (!logoutResponse.ok()) {
+      throw new Error(
+        `Workspace logout failed: HTTP ${logoutResponse.status()} ${await logoutResponse.text()}`,
+      );
+    }
+
+    const loggedOutSessionResponse = await context.request.get(
+      `${BASE}/api/v1/workspace/session`,
+    );
+    const loggedOutSession = await loggedOutSessionResponse.json();
+    if (!loggedOutSessionResponse.ok() || loggedOutSession.user !== null) {
+      throw new Error(
+        `Workspace logout did not clear authentication: ${JSON.stringify(loggedOutSession)}`,
+      );
+    }
+
     console.log(
       JSON.stringify(
         {
@@ -314,6 +426,10 @@ async function main() {
           subscription_status: statusAfterActivation.subscription_status,
           service_access: statusAfterActivation.service_access,
           activation_required: statusAfterActivation.activation_required,
+          workspace_login: "passed",
+          workspace_organization_access: "passed",
+          portal_handoff: "passed",
+          workspace_logout: "passed",
         },
         null,
         2,
