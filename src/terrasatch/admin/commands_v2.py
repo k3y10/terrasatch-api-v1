@@ -114,7 +114,7 @@ async def run_admin_command(
         ]
         for row in recent:
             if row.sent_at is not None:
-                state = "sent"
+                state = row.delivery_status or "accepted"
             elif row.last_error:
                 state = row.last_error
             else:
