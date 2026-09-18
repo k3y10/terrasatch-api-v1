@@ -193,3 +193,35 @@ def test_empty_email_and_stripe_secrets_are_normalized_to_none() -> None:
     assert settings.billing_from is None
     assert settings.billing_reply_to is None
     assert settings.billing_email_is_configured is False
+
+
+def test_local_billing_requires_email_sender_but_not_resend_delivery_webhook() -> None:
+    settings = Settings(
+        environment="local",
+        billing_enabled=True,
+        billing_email_webhook_url="https://example.com/api/billing-email",
+        billing_email_webhook_secret=SecretStr("test-email-secret"),
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=SecretStr("whsec_terrasatch"),
+    )
+
+    assert settings.billing_email_is_configured is True
+    assert settings.resend_webhook_is_configured is False
+    assert settings.billing_is_configured is True
+
+
+def test_production_requires_resend_delivery_webhook_reconciliation() -> None:
+    settings = Settings(
+        environment="production",
+        billing_enabled=True,
+        billing_email_webhook_url="https://example.com/api/billing-email",
+        billing_email_webhook_secret=SecretStr("test-email-secret"),
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=SecretStr("whsec_terrasatch"),
+    )
+
+    assert settings.billing_email_is_configured is True
+    assert settings.resend_webhook_is_configured is False
+    assert settings.billing_is_configured is False
