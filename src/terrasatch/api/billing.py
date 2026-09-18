@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import urlencode
 from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
