@@ -6,6 +6,8 @@ ENV_FILE="${TERRASATCH_STAGING_ENV_FILE:-$STAGING_DIR/.env.staging}"
 COMPOSE_FILE="${TERRASATCH_STAGING_COMPOSE_FILE:-$STAGING_DIR/deploy/docker-compose.workspace-staging.yml}"
 RESEND_WEBHOOK_URL="https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook"
 RESEND_WEBHOOK_ID="${TERRASATCH_RESEND_WEBHOOK_ID:-76225e17-36a9-4dc9-95a4-b28094a26d4d}"
+RESEND_DOMAIN_ID="${TERRASATCH_RESEND_DOMAIN_ID:-5876992d-002a-4b26-b53c-0c7e29f33b8f}"
+RESEND_DOMAIN_NAME="terrasatch.com"
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -31,6 +33,50 @@ printf '\n'
 [[ -n "$resend_admin_api_key" ]] || die "Resend admin API key is required for webhook setup."
 [[ "$resend_admin_api_key" == re_* ]] ||
   die "Resend admin API key must use the expected re_ prefix."
+
+say "Verifying the TerraSatch Resend sending domain"
+curl --silent --show-error --fail-with-body \
+  -X POST \
+  -H "Authorization: Bearer $resend_admin_api_key" \
+  -H 'Content-Type: application/json' \
+  "https://api.resend.com/domains/$RESEND_DOMAIN_ID/verify" >/dev/null || true
+
+domain_status=""
+domain_name=""
+for attempt in $(seq 1 6); do
+  domain_response="$(
+    curl --silent --show-error --fail-with-body \
+      -H "Authorization: Bearer $resend_admin_api_key" \
+      "https://api.resend.com/domains/$RESEND_DOMAIN_ID"
+  )" || die "Unable to retrieve the TerraSatch Resend domain."
+
+  read -r domain_name domain_status < <(
+    python3 - "$domain_response" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+print(str(payload.get("name") or ""), str(payload.get("status") or ""))
+PY
+  )
+  unset domain_response
+
+  [[ "$domain_name" == "$RESEND_DOMAIN_NAME" ]] ||
+    die "Configured Resend domain ID does not resolve to terrasatch.com."
+
+  if [[ "$domain_status" == "verified" ]]; then
+    break
+  fi
+
+  if [[ "$attempt" -lt 6 ]]; then
+    sleep 5
+  fi
+done
+
+[[ "$domain_status" == "verified" ]] ||
+  die "terrasatch.com is not verified in Resend yet. Add the required GoDaddy DNS records, wait for propagation, then rerun this helper."
+
+printf 'Resend sending domain: terrasatch.com (verified)\n'
 
 say "Rotating the staging Resend webhook signing secret"
 rotate_response="$(
@@ -58,15 +104,10 @@ unset rotate_response
   die "Resend webhook signing-secret rotation did not return the expected secret."
 printf 'Resend webhook signing secret rotated and captured without printing it.\n'
 
-default_from='TerraSatch Staging <onboarding@resend.dev>'
-read -r -p "Billing From [$default_from]: " billing_from
-billing_from="${billing_from:-$default_from}"
-[[ "$billing_from" == *"@"* ]] || die "Billing From must contain an email address."
-
-default_reply_to='support@terrasatch.com'
-read -r -p "Billing Reply-To [$default_reply_to]: " billing_reply_to
-billing_reply_to="${billing_reply_to:-$default_reply_to}"
-[[ "$billing_reply_to" == *"@"* ]] || die "Billing Reply-To must contain an email address."
+billing_from='TerraSatch Billing <billing@terrasatch.com>'
+billing_reply_to='support@terrasatch.com'
+printf 'Billing sender: %s\n' "$billing_from"
+printf 'Billing reply-to: %s\n' "$billing_reply_to"
 
 quote_env_value() {
   python3 - "$1" <<'PY'
@@ -126,7 +167,12 @@ webhook = os.environ.get("TERRASATCH_RESEND_WEBHOOK_SECRET", "").strip()
 if webhook and not webhook.startswith("whsec_"):
     raise SystemExit("Resend webhook secret does not use the expected whsec_ prefix")
 
+billing_from = os.environ["TERRASATCH_BILLING_FROM"].strip()
+if "@terrasatch.com" not in billing_from.casefold():
+    raise SystemExit("Billing sender must use the verified terrasatch.com domain")
+
 print("Direct Resend sender configuration: present")
+print("Billing sender domain: terrasatch.com")
 print("Resend webhook verification: " + ("configured" if webhook else "not configured"))
 PY
 
@@ -173,7 +219,9 @@ else
 fi
 
 say "RESEND STAGING CONFIGURATION PASSED"
+printf 'Resend domain: %s (%s)\n' "$RESEND_DOMAIN_NAME" "$RESEND_DOMAIN_ID"
 printf 'Resend webhook: %s\n' "$RESEND_WEBHOOK_ID"
 printf 'Webhook URL: %s\n' "$RESEND_WEBHOOK_URL"
 printf 'Admin key was used only for setup and was not persisted.\n'
-printf 'Staging sender uses Resend test infrastructure; production still requires a verified TerraSatch domain.\n'\nprintf 'Live Stripe billing remains disabled.\n'
+printf 'Billing sender: TerraSatch Billing <billing@terrasatch.com>\n'
+printf 'Live Stripe billing remains disabled.\n'
