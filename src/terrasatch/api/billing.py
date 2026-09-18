@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 import json
+from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
