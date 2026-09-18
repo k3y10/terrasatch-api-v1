@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.auth.dependencies import Principal, require_any_scope
@@ -382,6 +383,126 @@ async def post_stripe_webhook(
     """Verify and apply Stripe lifecycle events with transactional email retry safety."""
 
     return await _process_stripe_webhook(request, stripe_signature)
+
+
+@staging_router.get("/checkout/status", response_model=CheckoutStatusResponse)
+async def get_staging_billing_checkout_status(
+    request: Request,
+    session_id: Annotated[str, Query(min_length=10, max_length=255)],
+) -> CheckoutStatusResponse:
+    """Staging alias for polling committed Checkout/webhook provisioning state."""
+
+    return await get_billing_checkout_status(request=request, session_id=session_id)
+
+
+@staging_router.post("/activate", response_model=ActivationResponse)
+async def post_staging_billing_activation(
+    payload: ActivationRequest,
+    request: Request,
+) -> ActivationResponse:
+    """Staging alias for consuming the same single-use activation token."""
+
+    return await post_billing_activation(payload=payload, request=request)
+
+
+@staging_router.get("/success", response_class=HTMLResponse, include_in_schema=False)
+async def get_staging_billing_success() -> HTMLResponse:
+    """Render a self-contained staging success page without Vercel preview access."""
+
+    return HTMLResponse(
+        """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TerraSatch staging checkout</title></head>
+<body style="font-family:system-ui;max-width:760px;margin:64px auto;padding:0 24px">
+<h1>TerraSatch staging checkout</h1>
+<p id="status">Confirming subscription provisioning…</p>
+<script>
+const id = new URLSearchParams(location.search).get("session_id");
+const target = document.getElementById("status");
+async function check() {
+  if (!id) { target.textContent = "Missing Checkout session ID."; return; }
+  const response = await fetch(
+    "/api/v1/workspace/billing/checkout/status?session_id=" + encodeURIComponent(id),
+    {credentials: "same-origin"}
+  );
+  if (!response.ok) {
+    target.textContent = "Checkout returned, but provisioning is not confirmed yet.";
+    return;
+  }
+  const data = await response.json();
+  target.textContent = data.provisioned
+    ? "Subscription webhook processed. Account provisioning is complete."
+    : "Checkout returned. Waiting for the Stripe webhook to finish provisioning.";
+  if (!data.provisioned) setTimeout(check, 1500);
+}
+check();
+</script></body></html>"""
+    )
+
+
+@staging_router.get("/cancel", response_class=HTMLResponse, include_in_schema=False)
+async def get_staging_billing_cancel() -> HTMLResponse:
+    """Render a staging Checkout cancellation landing page."""
+
+    return HTMLResponse(
+        """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TerraSatch staging checkout</title></head>
+<body style="font-family:system-ui;max-width:760px;margin:64px auto;padding:0 24px">
+<h1>Checkout canceled</h1><p>No subscription change was completed.</p></body></html>"""
+    )
+
+
+@staging_router.get("/portal-return", response_class=HTMLResponse, include_in_schema=False)
+async def get_staging_billing_portal_return() -> HTMLResponse:
+    """Render a safe return target for Stripe Customer Portal acceptance."""
+
+    return HTMLResponse(
+        """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TerraSatch staging billing</title></head>
+<body style="font-family:system-ui;max-width:760px;margin:64px auto;padding:0 24px">
+<h1>Billing settings updated</h1>
+<p>You can close this staging page and continue the acceptance run.</p></body></html>"""
+    )
+
+
+@staging_router.get("/activate", response_class=HTMLResponse, include_in_schema=False)
+async def get_staging_billing_activation() -> HTMLResponse:
+    """Render a minimal staging-only activation form using the token URL fragment."""
+
+    return HTMLResponse(
+        """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activate TerraSatch staging account</title></head>
+<body style="font-family:system-ui;max-width:760px;margin:64px auto;padding:0 24px">
+<h1>Activate TerraSatch staging account</h1>
+<form id="activation">
+<label>Password <input id="password" type="password" minlength="12" required></label>
+<button type="submit">Activate account</button>
+</form>
+<p id="result"></p>
+<script>
+const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const form = document.getElementById("activation");
+const result = document.getElementById("result");
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!token) { result.textContent = "Activation token is missing."; return; }
+  const response = await fetch("/api/v1/workspace/billing/activate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({token, password: document.getElementById("password").value})
+  });
+  const data = await response.json();
+  result.textContent = response.ok
+    ? "Account activated successfully."
+    : (data?.error?.message || data?.detail || "Activation failed.");
+});
+</script></body></html>"""
+    )
 
 
 @staging_router.post("/stripe/webhook", response_model=WebhookResponse)
