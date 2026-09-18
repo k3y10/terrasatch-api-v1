@@ -62,7 +62,7 @@ The canonical production route remains `/api/v1/billing/stripe/webhook`. The wor
 
 Production continues to require normal Stripe HMAC signature verification. Isolated staging can instead verify test-mode events by retrieving the received `evt_*` directly from Stripe using the server-side test key and processing the provider-returned event. This fallback is allowed only when environment is staging, live billing is false, and the Stripe key is test-mode. The event ledger still provides replay/idempotency protection.
 
-The staging Compose file now enables billing only in the isolated staging stack and points success, cancellation, activation, portal-return, and billing-email URLs at the persistent subscription-billing preview. Secrets remain in the owner-only `.env.staging`; none are committed.
+The staging Compose file now enables billing only in the isolated staging stack. Checkout success, cancellation, status polling, activation, and Customer Portal return URLs stay entirely on `staging-api.terrasatch.com` under `/api/v1/workspace/billing/*`, so sandbox acceptance does not depend on Vercel Preview protection. Transactional email remains the separate protected provider boundary. Secrets remain in the owner-only `.env.staging`; none are committed.
 
 Deploy only from an isolated `feat/subscription-billing` worktree:
 
