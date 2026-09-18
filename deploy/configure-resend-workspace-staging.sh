@@ -58,7 +58,7 @@ unset rotate_response
   die "Resend webhook signing-secret rotation did not return the expected secret."
 printf 'Resend webhook signing secret rotated and captured without printing it.\n'
 
-default_from='TerraSatch Billing <billing@terrasatch.com>'
+default_from='TerraSatch Staging <onboarding@resend.dev>'
 read -r -p "Billing From [$default_from]: " billing_from
 billing_from="${billing_from:-$default_from}"
 [[ "$billing_from" == *"@"* ]] || die "Billing From must contain an email address."
@@ -176,4 +176,4 @@ say "RESEND STAGING CONFIGURATION PASSED"
 printf 'Resend webhook: %s\n' "$RESEND_WEBHOOK_ID"
 printf 'Webhook URL: %s\n' "$RESEND_WEBHOOK_URL"
 printf 'Admin key was used only for setup and was not persisted.\n'
-printf 'Live Stripe billing remains disabled.\n'
+printf 'Staging sender uses Resend test infrastructure; production still requires a verified TerraSatch domain.\n'\nprintf 'Live Stripe billing remains disabled.\n'
