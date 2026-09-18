@@ -174,6 +174,7 @@ def test_price_integrity_rejects_wrong_amount_currency_key_and_cadence(patch):
         "billing_email_webhook_url",
         "billing_email_webhook_secret",
         "billing_activation_signing_secret",
+        "resend_webhook_secret",
         "stripe_secret_key",
         "stripe_webhook_secret",
     ],
@@ -184,6 +185,7 @@ def test_readiness_requires_every_dependency(missing):
         billing_email_webhook_url="https://example.com/email",
         billing_email_webhook_secret="test",
         billing_activation_signing_secret="test",
+        resend_webhook_secret="whsec_dGVzdA==",
         stripe_secret_key="test",
         stripe_webhook_secret="test",
     )
