@@ -550,6 +550,16 @@ async def _sync_checkout_completed(
         signup_id=signup_id or None,
         checkout_session_id=checkout_id,
     )
+
+    customer_details = checkout.get("customer_details")
+    checkout_email = None
+    if isinstance(customer_details, dict):
+        checkout_email = customer_details.get("email")
+    if not checkout_email:
+        checkout_email = checkout.get("customer_email")
+    if not isinstance(checkout_email, str) or checkout_email.strip().casefold() != signup.email:
+        raise InvalidConfiguration("Completed Checkout email does not match the TerraSatch signup")
+
     if not customer_id and subscription_snapshot is not None:
         customer_id = _object_id(subscription_snapshot.get("customer"))
     if not customer_id:
