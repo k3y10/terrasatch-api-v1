@@ -103,3 +103,37 @@ def test_production_billing_still_requires_transactional_email() -> None:
 
     assert settings.billing_email_is_configured is False
     assert settings.billing_is_configured is False
+
+
+def test_staging_payment_links_can_run_without_any_stripe_api_secret() -> None:
+    settings = Settings(
+        environment="staging",
+        billing_enabled=True,
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        billing_staging_trust_caddy_stripe_ips=True,
+        billing_staging_individual_payment_link_url="https://buy.stripe.com/test_individual",
+        billing_staging_individual_payment_link_id="plink_individual",
+        billing_staging_team_payment_link_url="https://buy.stripe.com/test_team",
+        billing_staging_team_payment_link_id="plink_team",
+    )
+
+    assert settings.stripe_secret_key is None
+    assert settings.staging_payment_links_are_configured is True
+    assert settings.stripe_webhook_is_configured is True
+    assert settings.billing_is_configured is True
+
+
+def test_payment_link_mode_cannot_enable_production_billing() -> None:
+    settings = Settings(
+        environment="production",
+        billing_enabled=True,
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        billing_staging_trust_caddy_stripe_ips=True,
+        billing_staging_individual_payment_link_url="https://buy.stripe.com/test_individual",
+        billing_staging_individual_payment_link_id="plink_individual",
+        billing_staging_team_payment_link_url="https://buy.stripe.com/test_team",
+        billing_staging_team_payment_link_id="plink_team",
+    )
+
+    assert settings.staging_payment_links_are_configured is False
+    assert settings.billing_is_configured is False
