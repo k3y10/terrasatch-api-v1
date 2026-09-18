@@ -61,6 +61,22 @@ async def authenticate_user(
     return user if memberships is not None else None
 
 
+async def validate_browser_session(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    credential_version: int,
+) -> User | None:
+    """Return the user only when the signed browser session matches current credentials."""
+
+    user = await session.scalar(
+        select(User).where(User.id == user_id, User.enabled.is_(True))
+    )
+    if user is None or user.credential_version != credential_version:
+        return None
+    return user
+
+
 async def list_user_access(
     session: AsyncSession,
     *,
@@ -205,6 +221,7 @@ async def create_or_update_organization_member(
             email=normalized_email,
             display_name=normalized_name,
             password_hash=password_hash,
+            credential_version=1,
             enabled=True,
         )
         session.add(user)
@@ -212,6 +229,7 @@ async def create_or_update_organization_member(
     else:
         user.display_name = normalized_name
         user.password_hash = password_hash
+        user.credential_version += 1
         user.enabled = True
 
     if membership is None:
