@@ -76,3 +76,23 @@ The script refuses `main`, refuses a dirty tracked worktree, loads `.env.staging
 Caddy reference: `deploy/examples/Caddyfile.workspace-staging`. It exposes only `/api/v1/workspace/*` from port 8012 and returns 404 elsewhere.
 
 Do not describe the webhook as end-to-end accepted until the Oracle staging process is running the current branch head and an actual Stripe sandbox delivery has been observed successfully. Live billing remains disabled.
+
+
+## Secretless sandbox Checkout lane — September 18, 2026
+
+Oracle staging did not contain a TerraSatch Stripe test API key. Instead of copying or exposing an account secret, isolated staging now uses Stripe-hosted sandbox Payment Links while production retains the server-side Stripe API/HMAC design.
+
+Sandbox Payment Links:
+- Individual: `plink_1UH5n8PwzxCRGRdhckplOIz0`, $24/month, 30-day trial.
+- Team: `plink_1UH5nAPwzxCRGRdhTJE7crl5`, $399/month, 30-day trial.
+- Both redirect to the isolated staging success URL with `{CHECKOUT_SESSION_ID}`.
+- TerraSatch appends a non-sensitive signup UUID using Stripe's supported `client_reference_id` URL parameter and locks the signup email with `locked_prefilled_email`.
+- Payment Link metadata and subscription metadata are restricted to `product=terrasatch`, `billing_version=v2`, `environment=staging`, the expected plan code, and monthly cadence.
+
+The staging webhook route is restricted in Caddy to Stripe's published webhook source IPv4 addresses and then re-validates `livemode=false`, event type, Payment Link ID, and TerraSatch metadata in the API. This reduced-auth mode exists only when `TERRASATCH_ENV=staging`, live billing is false, and the explicit staging Payment Link/Caddy trust flag is enabled. Production does not use this path and still requires normal Stripe signature verification.
+
+Checkout completion provisions the signup using `client_reference_id` and the locked email. Subscription lifecycle events bind by the Stripe customer ID if no signup ID is present in static Payment Link metadata. If Stripe delivers the subscription event before Checkout completion, processing fails without recording the event so Stripe can retry after customer binding exists.
+
+Transactional email remains optional only for isolated sandbox acceptance. The staging success page can recover the pending activation token by Checkout Session ID so Checkout -> webhook -> provisioning -> activation can be tested before the separate TerraSatch Resend account is ready.
+
+Customer Portal remains a separate Stripe account configuration. The connected Stripe credential can read portal configurations but does not have permission to create one; no portal configuration currently exists in the TerraSatch sandbox.
