@@ -13,6 +13,7 @@ from terrasatch.billing.notifications import (
     BillingEmailDeliveryReceipt,
     build_billing_email,
     deliver_billing_email,
+    notification_kind,
 )
 from terrasatch.config import Settings
 
@@ -121,3 +122,75 @@ def test_trial_started_message_contains_activation_and_no_card_claims() -> None:
     assert "Activate your account" in message.text
     assert "https://example.com/activate#token=test" in message.text
     assert "does not store card data" in message.html
+
+def test_account_recovery_and_confirmation_messages() -> None:
+    activation = build_billing_email(
+        kind="activation_resend",
+        context=context(),
+        activation_url="https://staging-api.terrasatch.com/activate#token=test",
+    )
+    reset = build_billing_email(
+        kind="password_reset",
+        context=context(),
+        activation_url="https://staging-api.terrasatch.com/portal/reset-password#token=test",
+    )
+    paid = build_billing_email(
+        kind="payment_confirmed",
+        context=context(),
+        activation_url=None,
+    )
+    updated = build_billing_email(
+        kind="subscription_updated",
+        context=context(),
+        activation_url=None,
+    )
+
+    assert activation.subject == "Finish setting up your TerraSatch account"
+    assert "Finish setup" in activation.text
+    assert reset.subject == "Reset your TerraSatch password"
+    assert "single-use" in reset.text
+    assert paid.subject == "TerraSatch payment received"
+    assert updated.subject == "Your TerraSatch subscription was updated"
+
+
+def test_notification_mapping_suppresses_zero_dollar_invoice() -> None:
+    assert (
+        notification_kind(
+            stripe_event_type="invoice.paid",
+            activation_token=None,
+            context=context(),
+            event_object={"amount_paid": 0},
+        )
+        is None
+    )
+    assert (
+        notification_kind(
+            stripe_event_type="invoice.paid",
+            activation_token=None,
+            context=context(),
+            event_object={"amount_paid": 2400},
+        )
+        == "payment_confirmed"
+    )
+
+
+def test_subscription_update_email_requires_meaningful_previous_attributes() -> None:
+    assert (
+        notification_kind(
+            stripe_event_type="customer.subscription.updated",
+            activation_token=None,
+            context=context(),
+            previous_attributes={"metadata": {"example": "change"}},
+        )
+        is None
+    )
+    assert (
+        notification_kind(
+            stripe_event_type="customer.subscription.updated",
+            activation_token=None,
+            context=context(),
+            previous_attributes={"items": {"data": []}},
+        )
+        == "subscription_updated"
+    )
+
