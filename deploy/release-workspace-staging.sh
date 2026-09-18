@@ -49,10 +49,26 @@ docker compose -f "$COMPOSE_FILE" up -d --force-recreate api worker
 
 for attempt in $(seq 1 30); do
   if curl --fail --silent --show-error "$HEALTH_URL" >/tmp/terrasatch-workspace-staging-health.json; then
-    cat /tmp/terrasatch-workspace-staging-health.json
-    echo
-    echo "Workspace staging is healthy at revision $TERRASATCH_BUILD_SHA"
-    exit 0
+    reported_revision="$(
+      python3 - <<'PY'
+import json
+from pathlib import Path
+
+try:
+    payload = json.loads(Path("/tmp/terrasatch-workspace-staging-health.json").read_text())
+except (OSError, json.JSONDecodeError):
+    print("")
+else:
+    print(str(payload.get("revision") or ""))
+PY
+    )"
+    if [[ "$reported_revision" == "$TERRASATCH_BUILD_SHA" ]]; then
+      cat /tmp/terrasatch-workspace-staging-health.json
+      echo
+      echo "Workspace staging is healthy at revision $TERRASATCH_BUILD_SHA"
+      exit 0
+    fi
+    echo "Staging health is up but reports revision '$reported_revision'; waiting for $TERRASATCH_BUILD_SHA." >&2
   fi
   sleep 2
 done
