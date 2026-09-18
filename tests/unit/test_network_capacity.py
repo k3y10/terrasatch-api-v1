@@ -54,6 +54,7 @@ async def test_existing_counted_member_can_be_updated_at_capacity(
         email="field@example.com",
         display_name="Field User",
         password_hash="existing",
+        credential_version=1,
         enabled=True,
     )
     membership = SimpleNamespace(role=MembershipRole.VIEWER, enabled=True)
