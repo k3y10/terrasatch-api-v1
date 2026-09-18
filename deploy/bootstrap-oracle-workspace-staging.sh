@@ -369,9 +369,18 @@ printf 'public Resend webhook unsigned request: %s (expected 400)\n' "$resend_we
   die "Configured Resend webhook did not reject an unsigned request."
 
 printf 'Synthetic checkout creation: skipped (deployment verification is non-destructive)\n'
+
+portal_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/login || true)"
+printf 'public organization portal login: %s (expected 200)\n' "$portal_code"
+[[ "$portal_code" == "200" ]] || die "Staging organization portal is not reachable."
+
+asset_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/assets/satchy.png || true)"
+printf 'public TerraSatch brand asset: %s (expected 200)\n' "$asset_code"
+[[ "$asset_code" == "200" ]] || die "Staging TerraSatch brand assets are not reachable."
+
 public_root_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/health || true)"
-printf 'public non-workspace route /health: %s (expected 404)\n' "$public_root_code"
-[[ "$public_root_code" == "404" ]] || die "Staging Caddy is exposing more than /api/v1/workspace/*."
+printf 'public unrelated route /health: %s (expected 404)\n' "$public_root_code"
+[[ "$public_root_code" == "404" ]] || die "Staging Caddy exposed an unrelated API route."
 
 say "Checking recent staging logs"
 docker compose -f "$staging_dir/deploy/docker-compose.workspace-staging.yml" logs --tail=80 api worker |
