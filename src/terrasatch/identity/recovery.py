@@ -45,7 +45,7 @@ async def create_password_reset_intent(
     user = await session.scalar(
         select(User).where(User.email == normalized, User.enabled.is_(True))
     )
-    if user is None:
+    if user is None or not user.password_hash:
         return None
 
     membership_id = await session.scalar(
