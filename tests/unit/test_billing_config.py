@@ -9,6 +9,8 @@ def test_billing_secrets_can_be_supplied_by_field_name_for_internal_configuratio
         billing_enabled=True,
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
+        resend_api_key=SecretStr("re_test_terrasatch"),
+        billing_from="TerraSatch <billing@terrasatch.com>",
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
         resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
@@ -41,6 +43,8 @@ def test_staging_can_verify_test_webhooks_by_event_retrieval_without_signing_sec
         billing_enabled=True,
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
+        resend_api_key=SecretStr("re_test_terrasatch"),
+        billing_from="TerraSatch <billing@terrasatch.com>",
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
         resend_webhook_secret=SecretStr("whsec_resend"),
         stripe_secret_key=SecretStr("sk_test_terrasatch"),
@@ -116,6 +120,8 @@ def test_staging_payment_links_can_run_without_any_stripe_api_secret() -> None:
         billing_enabled=True,
         billing_email_webhook_url="https://example.com/api/billing-email",
         billing_email_webhook_secret=SecretStr("test-email-secret"),
+        resend_api_key=SecretStr("re_test_terrasatch"),
+        billing_from="TerraSatch <billing@terrasatch.com>",
         resend_webhook_secret=SecretStr("whsec_resend"),
         billing_activation_signing_secret=SecretStr("test-activation-secret"),
         billing_staging_trust_caddy_stripe_ips=True,
@@ -181,6 +187,23 @@ def test_staging_direct_resend_rejects_non_terrasatch_sender() -> None:
 
     assert settings.billing_resend_is_configured is False
     assert settings.billing_email_is_configured is False
+    assert settings.billing_is_configured is False
+
+
+def test_production_fallback_alone_does_not_satisfy_billing_readiness() -> None:
+    settings = Settings(
+        environment="production",
+        billing_enabled=True,
+        billing_email_webhook_url="https://example.com/api/billing-email",
+        billing_email_webhook_secret=SecretStr("test-email-secret"),
+        resend_webhook_secret=SecretStr("whsec_resend"),
+        billing_activation_signing_secret=SecretStr("test-activation-secret"),
+        stripe_secret_key=SecretStr("sk_test_terrasatch"),
+        stripe_webhook_secret=SecretStr("whsec_terrasatch"),
+    )
+
+    assert settings.billing_email_webhook_is_configured is True
+    assert settings.billing_resend_is_configured is False
     assert settings.billing_is_configured is False
 
 
