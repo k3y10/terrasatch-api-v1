@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlencode
 from collections.abc import Awaitable, Callable
 from typing import Annotated, TypeVar
 
@@ -88,7 +89,6 @@ async def post_billing_checkout(
     """Create a 30-day subscription trial in Stripe Checkout without trusting price IDs."""
 
     settings: Settings = request.app.state.settings
-    stripe = _gateway(settings)
     if not settings.billing_is_configured:
         raise ProviderUnavailable("Billing activation and provider configuration is incomplete")
     plan = get_plan(payload.plan_code)
@@ -109,6 +109,37 @@ async def post_billing_checkout(
         settings,
         lambda session: create_signup(session, payload=payload, settings=settings),
     )
+
+    if settings.staging_payment_links_are_configured and settings.stripe_secret_key is None:
+        if payload.billing_interval.value != "monthly":
+            raise InvalidConfiguration("Staging Payment Link checkout currently supports monthly plans")
+        if payload.plan_code.value == "field":
+            payment_link_url = settings.billing_staging_individual_payment_link_url
+        elif payload.plan_code.value == "team":
+            payment_link_url = settings.billing_staging_team_payment_link_url
+        else:
+            payment_link_url = None
+        if not payment_link_url:
+            raise ProviderUnavailable("Staging Payment Link checkout is not configured")
+        query = urlencode(
+            {
+                "client_reference_id": str(signup.id),
+                "locked_prefilled_email": signup.email,
+            }
+        )
+        separator = "&" if "?" in payment_link_url else "?"
+        return CheckoutSessionResponse(
+            signup_id=signup.id,
+            checkout_session_id=None,
+            checkout_url=f"{payment_link_url}{separator}{query}",
+            expires_at=signup.expires_at,
+            plan_code=payload.plan_code,
+            billing_interval=payload.billing_interval,
+            trial_days=plan.trial_days,
+            recurring_amount_cents=recurring_amount,
+        )
+
+    stripe = _gateway(settings)
     if signup.stripe_checkout_session_id:
         from datetime import UTC, datetime
 
@@ -249,16 +280,77 @@ async def post_billing_activation(
     return ActivationResponse(activated=True, organization_id=organization_id)
 
 
+def _validate_staging_payment_link_event(
+    *,
+    settings: Settings,
+    event: dict[str, object],
+) -> None:
+    """Validate the strict test-mode Payment Link envelope after Caddy IP allowlisting."""
+
+    if bool(event.get("livemode", False)):
+        raise ProviderUnavailable("Live Stripe events are disabled in staging")
+    event_type = str(event.get("type") or "")
+    allowed = {
+        "checkout.session.completed",
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "customer.subscription.trial_will_end",
+        "invoice.paid",
+        "invoice.payment_failed",
+    }
+    if event_type not in allowed:
+        raise InvalidConfiguration("Stripe event type is not enabled for TerraSatch staging")
+
+    data = event.get("data")
+    obj = data.get("object") if isinstance(data, dict) else None
+    if not isinstance(obj, dict):
+        raise InvalidConfiguration("Stripe webhook event is missing its data object")
+
+    if event_type == "checkout.session.completed":
+        payment_link = str(obj.get("payment_link") or "")
+        expected_links = {
+            str(settings.billing_staging_individual_payment_link_id): "field",
+            str(settings.billing_staging_team_payment_link_id): "team",
+        }
+        expected_plan = expected_links.get(payment_link)
+        metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        if (
+            expected_plan is None
+            or obj.get("mode") != "subscription"
+            or not obj.get("client_reference_id")
+            or str(metadata.get("product") or "") != "terrasatch"
+            or str(metadata.get("billing_version") or "") != "v2"
+            or str(metadata.get("environment") or "") != "staging"
+            or str(metadata.get("plan_code") or "") != expected_plan
+            or str(metadata.get("billing_interval") or "") != "monthly"
+        ):
+            raise InvalidConfiguration("Checkout Session is not an approved TerraSatch staging Payment Link")
+
+    if event_type.startswith("customer.subscription."):
+        metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+        if (
+            str(metadata.get("product") or "") != "terrasatch"
+            or str(metadata.get("billing_version") or "") != "v2"
+            or str(metadata.get("environment") or "") != "staging"
+            or str(metadata.get("plan_code") or "") not in {"field", "team"}
+            or str(metadata.get("billing_interval") or "") != "monthly"
+        ):
+            raise InvalidConfiguration("Subscription is not an approved TerraSatch staging record")
+
+
 async def _verified_stripe_event(
     *,
     settings: Settings,
-    stripe: StripeGateway,
+    stripe: StripeGateway | None,
     raw_payload: bytes,
     stripe_signature: str | None,
 ) -> tuple[dict[str, object], bytes]:
     """Verify Stripe input with HMAC, or by test-event retrieval in staging only."""
 
     if stripe_signature and settings.stripe_webhook_secret is not None:
+        if stripe is None:
+            raise ProviderUnavailable("Stripe verification gateway is unavailable")
         event = stripe.construct_event(payload=raw_payload, signature=stripe_signature)
         return event, raw_payload
 
@@ -267,8 +359,6 @@ async def _verified_stripe_event(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stripe-Signature header required",
         )
-    if not stripe.secret_key.startswith(("sk_test_", "rk_test_")):
-        raise ProviderUnavailable("Staging webhook verification requires a Stripe test key")
 
     try:
         untrusted = json.loads(raw_payload)
@@ -276,17 +366,24 @@ async def _verified_stripe_event(
         raise InvalidConfiguration("Stripe webhook payload is invalid JSON") from error
     if not isinstance(untrusted, dict):
         raise InvalidConfiguration("Stripe webhook payload is invalid")
-    event_id = str(untrusted.get("id") or "")
-    event = await stripe.retrieve_event(event_id)
-    if bool(event.get("livemode", False)):
-        raise ProviderUnavailable("Live Stripe events are disabled in staging")
 
-    verified_payload = json.dumps(
-        event,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return event, verified_payload
+    if stripe is not None and stripe.secret_key.startswith(("sk_test_", "rk_test_")):
+        event_id = str(untrusted.get("id") or "")
+        event = await stripe.retrieve_event(event_id)
+        if bool(event.get("livemode", False)):
+            raise ProviderUnavailable("Live Stripe events are disabled in staging")
+        verified_payload = json.dumps(
+            event,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return event, verified_payload
+
+    if settings.staging_payment_links_are_configured:
+        _validate_staging_payment_link_event(settings=settings, event=untrusted)
+        return untrusted, raw_payload
+
+    raise ProviderUnavailable("Staging webhook verification is not configured")
 
 
 async def _process_stripe_webhook(
@@ -307,7 +404,7 @@ async def _process_stripe_webhook(
             detail="Stripe-Signature header required",
         )
 
-    stripe = _gateway(settings)
+    stripe = _gateway(settings) if settings.stripe_secret_key is not None else None
     raw_payload = await request.body()
     event, verified_payload = await _verified_stripe_event(
         settings=settings,
@@ -338,7 +435,8 @@ async def _process_stripe_webhook(
                 subscription_id = str(subscription["id"])
         if not subscription_id:
             raise InvalidConfiguration("Completed Checkout is missing a subscription")
-        subscription_snapshot = await stripe.retrieve_subscription(subscription_id)
+        if stripe is not None:
+            subscription_snapshot = await stripe.retrieve_subscription(subscription_id)
 
     session_factory = create_session_factory(settings)
     async with session_factory() as database:
@@ -388,6 +486,27 @@ async def post_stripe_webhook(
     """Verify and apply Stripe lifecycle events with transactional email retry safety."""
 
     return await _process_stripe_webhook(request, stripe_signature)
+
+
+@staging_router.get("/plans", response_model=list[BillingPlanResponse])
+async def get_staging_billing_plans() -> list[BillingPlanResponse]:
+    """Expose customer-safe plan definitions on the isolated staging surface."""
+
+    return await get_billing_plans()
+
+
+@staging_router.post(
+    "/checkout",
+    response_model=CheckoutSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_staging_billing_checkout(
+    payload: CheckoutRequest,
+    request: Request,
+) -> CheckoutSessionResponse:
+    """Create an isolated staging Checkout using the configured sandbox provider."""
+
+    return await post_billing_checkout(payload=payload, request=request)
 
 
 @staging_router.get("/checkout/status", response_model=CheckoutStatusResponse)
