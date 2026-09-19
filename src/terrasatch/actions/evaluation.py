@@ -208,6 +208,30 @@ async def _radio_decision(
     return f"{speaker.name} approved the pending Satchy action", payload, action
 
 
+async def _latest_conversation_event(
+    session: AsyncSession,
+    *,
+    transmission: Transmission,
+    conversation: RadioConversation,
+) -> OperationalEvent | None:
+    """Return the latest prior structured event from this exact radio conversation."""
+
+    return await session.scalar(
+        select(OperationalEvent)
+        .join(Transmission, Transmission.id == OperationalEvent.transmission_id)
+        .where(
+            OperationalEvent.organization_id == transmission.organization_id,
+            OperationalEvent.site_id == transmission.site_id,
+            Transmission.organization_id == transmission.organization_id,
+            Transmission.site_id == transmission.site_id,
+            Transmission.conversation_id == conversation.id,
+            Transmission.id != transmission.id,
+        )
+        .order_by(OperationalEvent.created_at.desc())
+        .limit(1)
+    )
+
+
 async def _conversation_summary(
     session: AsyncSession,
     *,
@@ -529,6 +553,56 @@ async def process_transmission_control_plane(
             )
             proposed_message = f"{radio_prefix(caller)} {mission_feedback}"
             interpretation = mission_feedback
+        elif intent.intent == SatchyIntent.LOG_OBSERVATION:
+            if operational_event is not None and operational_event.event_type != "GENERAL_UPDATE":
+                action_type = ActionType.REPLY_RADIO
+                proposed_message = observation_logged(
+                    callsign=caller,
+                    location=operational_event.location_text,
+                    detail=operational_event.summary,
+                )
+                interpretation = "Satchy logged the current structured field report"
+            else:
+                previous = await _latest_conversation_event(
+                    session,
+                    transmission=transmission,
+                    conversation=conversation,
+                )
+                action_type = ActionType.REPLY_RADIO
+                if previous is None:
+                    proposed_message = (
+                        f"{radio_prefix(caller)} I don't have a previous structured report to log."
+                    )
+                    interpretation = "No prior structured report exists in this conversation"
+                else:
+                    proposed_message = (
+                        f"{radio_prefix(caller)} Last report is already logged. "
+                        f"{previous.summary.strip().rstrip('.')}."
+                    )
+                    interpretation = (
+                        f"Referenced prior event {previous.id}; no duplicate observation created"
+                    )
+        elif intent.intent == SatchyIntent.REPEAT:
+            previous = await _latest_conversation_event(
+                session,
+                transmission=transmission,
+                conversation=conversation,
+            )
+            action_type = ActionType.REPLY_RADIO
+            if previous is None:
+                proposed_message = f"{radio_prefix(caller)} No previous structured report to repeat."
+                interpretation = "No prior structured report exists in this conversation"
+            else:
+                location = (
+                    f" {previous.location_text.strip().rstrip('.')}."
+                    if previous.location_text
+                    else ""
+                )
+                proposed_message = (
+                    f"{radio_prefix(caller)} Last report.{location} "
+                    f"{previous.summary.strip().rstrip('.')}."
+                )
+                interpretation = f"Repeated prior source-backed event {previous.id}"
         elif intent.intent == SatchyIntent.SUMMARIZE:
             location, summaries, count = await _conversation_summary(
                 session,
