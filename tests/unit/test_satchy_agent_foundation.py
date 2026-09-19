@@ -60,6 +60,7 @@ def test_radio_intent_and_workflow_are_conservative() -> None:
 
     assert approve.intent == SatchyIntent.APPROVE_ACTION
     assert resolve_workflow(approve) == WorkflowMode.CONFIRM
+    assert resolve_intent("Satchy, Control 2. Do not approve.").intent == SatchyIntent.REJECT_ACTION
 
     assert mission.intent == SatchyIntent.REQUEST_MISSION
     assert resolve_workflow(mission) == WorkflowMode.CONFIRM
@@ -138,7 +139,7 @@ async def test_assets_are_scoped_and_preauthorized_mission_can_be_planned() -> N
             state="available",
             policy={
                 "autonomous_mission_types": ["inspection"],
-                "mission_execution_enabled": False,
+                "mission_execution_enabled": True,
             },
             enabled=True,
         )
