@@ -12,12 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
 from terrasatch.actions.service import approve_action, queue_approved_action, reject_action
 from terrasatch.actions.state import transition_action
+from terrasatch.config import Settings
 from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.organizations.models import OrganizationOperationalProfile
 from terrasatch.organizations.profiles import get_operational_profile
 from terrasatch.radio.conversations import associate_transmission
 from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transmission
+from terrasatch.satchy.agent import resolve_radio_intent
 from terrasatch.satchy.assets import create_mission_plan, queue_field_mission
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.radio import observation_logged, radio_prefix
@@ -216,6 +218,7 @@ async def process_transmission_control_plane(
     text: str,
     callsign_hint: str | None,
     operational_event: OperationalEvent | None,
+    settings: Settings | None = None,
 ) -> EvaluationOutcome:
     """Associate, understand and propose; explicit radio decisions remain human decisions."""
 
@@ -261,6 +264,32 @@ async def process_transmission_control_plane(
         emergency_terms=terms,
     )
     intent = resolve_intent(text)
+    if settings is not None and addressing.addressed_to_agent:
+        radio_context: dict[str, object] = {
+            "conversation": {
+                "active_location": conversation.active_location,
+                "primary_topic": conversation.primary_topic,
+                "participants": conversation.participants,
+            },
+            "profile": {
+                "industry": profile.industry if profile else None,
+                "operation_type": profile.operation_type if profile else None,
+                "terminology": profile.terminology if profile else {},
+                "location_aliases": profile.location_aliases if profile else {},
+            },
+        }
+        if operational_event is not None:
+            radio_context["current_event"] = {
+                "type": operational_event.event_type,
+                "summary": operational_event.summary,
+                "location": operational_event.location_text,
+                "confidence": operational_event.confidence,
+            }
+        intent = await resolve_radio_intent(
+            settings=settings,
+            text=text,
+            context=radio_context,
+        )
 
     decision = await _radio_decision(
         session,
