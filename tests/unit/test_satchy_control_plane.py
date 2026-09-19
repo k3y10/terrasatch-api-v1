@@ -36,7 +36,7 @@ from terrasatch.edge.command_service import (
 from terrasatch.edge.models import EdgeCommand, EdgeDevice
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound, TenantAccessDenied
 from terrasatch.identity import models as identity_models
-from terrasatch.identity.models import Account, Organization, Site
+from terrasatch.identity.models import Account, Organization, Site, Team
 from terrasatch.masterdata import models as masterdata_models
 from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
@@ -364,6 +364,42 @@ async def test_radio_mission_status_reports_stored_mission_state() -> None:
                 target={"location_text": "Cardiff Bowl"},
                 approval_required=False,
                 status="deploying",
+            )
+        )
+        await session.flush()
+
+        other_team = Team(
+            organization_id=organization.id,
+            site_id=site.id,
+            name=f"Other Patrol {uuid4().hex[:6]}",
+            enabled=True,
+        )
+        session.add(other_team)
+        await session.flush()
+        private_asset = FieldAsset(
+            organization_id=organization.id,
+            site_id=site.id,
+            team_id=other_team.id,
+            name="Other Team Drone",
+            asset_type="drone",
+            provider="test-drone",
+            capabilities=["drone:mission"],
+            state="available",
+            enabled=True,
+        )
+        session.add(private_asset)
+        await session.flush()
+        session.add(
+            FieldMission(
+                organization_id=organization.id,
+                site_id=site.id,
+                asset_id=private_asset.id,
+                objective="Other team inspection",
+                mission_type="inspection",
+                required_capabilities=["drone:mission"],
+                target={"location_text": "Other terrain"},
+                approval_required=False,
+                status="active",
             )
         )
         await session.flush()
