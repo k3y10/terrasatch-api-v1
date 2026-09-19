@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SatchyIntent(StrEnum):
@@ -41,6 +41,12 @@ class ActiveMapContext(BaseModel):
     zoom: float | None = Field(default=None, ge=0, le=30)
     selected_layers: list[str] = Field(default_factory=list, max_length=64)
     selected_terrain: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def coordinate_pair(self):
+        if (self.center_latitude is None) != (self.center_longitude is None):
+            raise ValueError("Map center requires both latitude and longitude")
+        return self
 
 
 class IntentResolution(BaseModel):
