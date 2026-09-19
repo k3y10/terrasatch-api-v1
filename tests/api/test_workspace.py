@@ -175,6 +175,54 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
                 headers=headers,
             )
         ).status_code == 404
+
+        asset_payload = {
+            "name": "Cardiff Camera",
+            "asset_type": "camera",
+            "provider": "camera-provider",
+            "site_id": str(site_id),
+            "owner_user_id": str(user_id),
+            "capabilities": [" Camera:Capture ", "camera:capture"],
+            "state": "available",
+            "location": {"label": "Cardiff Bowl"},
+            "policy": {"mission_execution_enabled": False},
+        }
+        created_asset = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/assets",
+            json=asset_payload,
+            headers=headers,
+        )
+        assert created_asset.status_code == 201
+        asset = created_asset.json()
+        assert asset["site_id"] == str(site_id)
+        assert asset["owner_user_id"] == str(user_id)
+        assert asset["capabilities"] == ["camera:capture"]
+        assert asset["state"] == "available"
+
+        visible_assets = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()["assets"]
+        assert [item["id"] for item in visible_assets] == [asset["id"]]
+
+        patched_asset = await client.patch(
+            f"/api/v1/workspace/organizations/{organization_id}/assets/{asset['id']}",
+            json={"state": "busy", "location": {"label": "Cardiff Bowl", "source": "workspace"}},
+            headers=headers,
+        )
+        assert patched_asset.status_code == 200
+        assert patched_asset.json()["state"] == "busy"
+        assert patched_asset.json()["location"]["source"] == "workspace"
+
+        bad_asset = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/assets",
+            json={
+                **asset_payload,
+                "name": "Foreign Site Camera",
+                "site_id": str(uuid4()),
+            },
+            headers=headers,
+        )
+        assert bad_asset.status_code == 404
         async with factory() as session:
             user = await session.get(User, user_id)
             user.enabled = False
