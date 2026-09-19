@@ -9,7 +9,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from terrasatch.actions import models as action_models
-from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
+from terrasatch.actions.models import (
+    ActionApproval,
+    ActionStatus,
+    ActionType,
+    SatchyAction,
+    SatchyEvaluation,
+)
 from terrasatch.actions.service import (
     approve_action,
     approve_and_queue_action,
@@ -231,12 +237,85 @@ async def test_ingest_associates_conversation_and_proposes_expected_reply() -> N
         assert first.addressed_to_agent is True
         assert first.conversation_id == second.conversation_id
         assert first_action.status == ActionStatus.AWAITING_APPROVAL.value
-        assert first_action.proposed_message == "Control 2, Satchy. Go ahead."
+        assert first_action.proposed_message == "Control 2, Satchy. Copy. Go ahead."
         assert evaluation is not None
         assert evaluation.proposed_action == {
             "type": "reply_radio",
-            "message": "Control 2, Satchy. Go ahead.",
+            "message": "Control 2, Satchy. Copy. Go ahead.",
         }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_explicit_authorized_radio_approval_queues_only_active_conversation_action() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        agent = seeded["agent"]
+        channel = seeded["channel"]
+        control = seeded["control"]
+        devices = seeded["devices"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+        assert isinstance(agent, Agent)
+        assert isinstance(channel, Channel)
+        assert isinstance(control, Callsign)
+        assert isinstance(devices, list)
+
+        for device in devices:
+            assert isinstance(device, EdgeDevice)
+            device.remote_config = {
+                "radio": {
+                    "ai_channel": {
+                        "radio_approval_enabled": True,
+                        "authorized_approver_callsigns": ["Control 2"],
+                        "response_mode": "suggest",
+                    }
+                }
+            }
+        await session.flush()
+
+        first, action = await _ingest(session, seeded, "Satchy, Control 2.")
+        assert action.status == ActionStatus.AWAITING_APPROVAL.value
+
+        second, _transcript, _events, duplicate = await ingest_transmission(
+            session,
+            settings=Settings(intelligence_provider="deterministic"),
+            organization_id=organization.id,
+            payload=TransmissionCreateRequest(
+                site_id=site.id,
+                agent_id=agent.id,
+                channel_id=channel.id,
+                text="Satchy, Control 2. Approve.",
+                source="terrasatch-edge-stt",
+                source_message_id=f"satchy-approval-{uuid4()}",
+                transcript_provider="faster_whisper",
+            ),
+        )
+        assert duplicate is False
+        assert second.conversation_id == first.conversation_id
+        assert action.status == ActionStatus.QUEUED.value
+
+        approval = await session.scalar(
+            select(ActionApproval)
+            .where(
+                ActionApproval.organization_id == organization.id,
+                ActionApproval.action_id == action.id,
+            )
+            .order_by(ActionApproval.created_at.desc())
+            .limit(1)
+        )
+        assert approval is not None
+        assert approval.approval_source == "radio"
+        assert approval.approver_callsign_id == control.id
+        assert approval.source_transmission_id == second.id
+        assert approval.decision == "approved"
+        assert await session.scalar(select(func.count(OutboundTransmission.id))) == 1
+        assert await session.scalar(select(func.count(EdgeCommand.id))) == 1
     finally:
         await session.close()
         await engine.dispose()
