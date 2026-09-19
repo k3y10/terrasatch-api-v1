@@ -59,16 +59,24 @@ async def list_actions(
     )
 
 
-def _authorize_console_approval(
+def _authorize_approval(
     *,
     approval_source: str,
     approver_role: str,
     authorized_roles: set[str] | frozenset[str],
+    approver_callsign_id: UUID | None = None,
+    source_transmission_id: UUID | None = None,
 ) -> None:
-    if approval_source != "console":
-        raise InvalidConfiguration("Only console approval can authorize execution in this release")
+    if approval_source not in {"console", "radio"}:
+        raise InvalidConfiguration("Unsupported Satchy approval source")
     if approver_role.casefold() not in {item.casefold() for item in authorized_roles}:
         raise TenantAccessDenied("Approver role is not authorized for Satchy actions")
+    if approval_source == "radio" and (
+        approver_callsign_id is None or source_transmission_id is None
+    ):
+        raise InvalidConfiguration(
+            "Radio approval requires an attributed callsign and source transmission"
+        )
 
 
 async def approve_action(
@@ -112,10 +120,12 @@ async def approve_action(
             if isinstance(configured_roles, list)
             else DEFAULT_AUTHORIZED_APPROVER_ROLES
         )
-    _authorize_console_approval(
+    _authorize_approval(
         approval_source=approval_source,
         approver_role=approver_role,
         authorized_roles=authorized_roles,
+        approver_callsign_id=approver_callsign_id,
+        source_transmission_id=source_transmission_id,
     )
     if ActionStatus(action.status) != ActionStatus.AWAITING_APPROVAL:
         raise InvalidConfiguration("Only actions awaiting approval can be approved")
@@ -152,13 +162,19 @@ async def reject_action(
     approver_role: str,
     notes: str | None = None,
     approver_user_id: UUID | None = None,
+    approval_source: str = "console",
+    approver_callsign_id: UUID | None = None,
+    source_transmission_id: UUID | None = None,
+    authorized_roles: set[str] | frozenset[str] | None = None,
 ) -> tuple[SatchyAction, ActionApproval]:
     """Reject an awaiting proposal without producing outbound work."""
 
-    _authorize_console_approval(
-        approval_source="console",
+    _authorize_approval(
+        approval_source=approval_source,
         approver_role=approver_role,
-        authorized_roles=DEFAULT_AUTHORIZED_APPROVER_ROLES,
+        authorized_roles=authorized_roles or DEFAULT_AUTHORIZED_APPROVER_ROLES,
+        approver_callsign_id=approver_callsign_id,
+        source_transmission_id=source_transmission_id,
     )
     action = await get_action(
         session,
@@ -174,10 +190,10 @@ async def reject_action(
         action_id=action.id,
         organization_id=organization_id,
         approver_user_id=approver_user_id,
-        approver_callsign_id=None,
+        approver_callsign_id=approver_callsign_id,
         approver_role=approver_role.casefold(),
-        approval_source="console",
-        source_transmission_id=None,
+        approval_source=approval_source,
+        source_transmission_id=source_transmission_id,
         decision="rejected",
         notes=notes.strip() if notes and notes.strip() else None,
         created_at=now,

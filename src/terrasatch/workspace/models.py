@@ -16,6 +16,9 @@ class WorkspacePreference(TimestampMixin, Base):
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
     modules: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    satchy_preferences: Mapped[dict[str, object]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
 
 
 class WorkspaceMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):

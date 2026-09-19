@@ -637,6 +637,7 @@ async def ingest_transmission(
         text=normalized_text,
         callsign_hint=payload.callsign,
         operational_event=events[0] if events else None,
+        settings=settings,
     )
     return transmission, transcript, events, False
 

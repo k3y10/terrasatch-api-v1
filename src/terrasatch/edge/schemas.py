@@ -119,6 +119,5 @@ class EdgeCommandResponse(BaseModel):
 
 
 class EdgeCommandResultRequest(BaseModel):
-    status: Literal["simulated", "transmitted", "failed"]
+    status: Literal["simulated", "transmitted", "completed", "aborted", "failed"]
     detail: str | None = Field(default=None, max_length=2000)
-

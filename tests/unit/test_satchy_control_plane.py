@@ -9,7 +9,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from terrasatch.actions import models as action_models
-from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
+from terrasatch.actions.models import (
+    ActionApproval,
+    ActionStatus,
+    ActionType,
+    SatchyAction,
+    SatchyEvaluation,
+)
 from terrasatch.actions.service import (
     approve_action,
     approve_and_queue_action,
@@ -30,7 +36,7 @@ from terrasatch.edge.command_service import (
 from terrasatch.edge.models import EdgeCommand, EdgeDevice
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound, TenantAccessDenied
 from terrasatch.identity import models as identity_models
-from terrasatch.identity.models import Account, Organization, Site
+from terrasatch.identity.models import Account, Organization, Site, Team
 from terrasatch.masterdata import models as masterdata_models
 from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
@@ -40,6 +46,7 @@ from terrasatch.radio.addressing import CallsignCandidate, parse_radio_addressin
 from terrasatch.radio.models import Agent, Callsign, Channel, Transmission
 from terrasatch.radio.schemas import TransmissionCreateRequest
 from terrasatch.radio.service import ingest_transmission
+from terrasatch.satchy.models import FieldAsset, FieldMission
 
 _MODEL_MODULES = (
     action_models,
@@ -231,12 +238,255 @@ async def test_ingest_associates_conversation_and_proposes_expected_reply() -> N
         assert first.addressed_to_agent is True
         assert first.conversation_id == second.conversation_id
         assert first_action.status == ActionStatus.AWAITING_APPROVAL.value
-        assert first_action.proposed_message == "Control 2, Satchy. Go ahead."
+        assert first_action.proposed_message == "Control 2, Satchy. Copy. Go ahead."
         assert evaluation is not None
         assert evaluation.proposed_action == {
             "type": "reply_radio",
-            "message": "Control 2, Satchy. Go ahead.",
+            "message": "Control 2, Satchy. Copy. Go ahead.",
         }
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_log_that_uses_previous_structured_report_without_duplicate_workflow() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, log_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Log that last report.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert log_action.action_type == ActionType.REPLY_RADIO.value
+        assert log_action.proposed_message is not None
+        assert "Last report is already logged" in log_action.proposed_message
+        assert "No avalanche activity observed" in log_action.proposed_message
+        assert log_action.structured_payload["satchy_intent"] == "log_observation"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_say_again_repeats_previous_source_backed_event() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, repeat_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Say again.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert repeat_action.proposed_message is not None
+        assert "Last report" in repeat_action.proposed_message
+        assert "Cardiff Bowl" in repeat_action.proposed_message
+        assert "No avalanche activity observed" in repeat_action.proposed_message
+        assert repeat_action.structured_payload["satchy_intent"] == "repeat"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_radio_summary_uses_active_conversation_records() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, summary_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Summarize.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert summary_action.action_type == ActionType.REPLY_RADIO.value
+        assert summary_action.proposed_message is not None
+        assert "1 related report" in summary_action.proposed_message
+        assert "Cardiff Bowl" in summary_action.proposed_message
+        assert "No avalanche activity observed" in summary_action.proposed_message
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_radio_mission_status_reports_stored_mission_state() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+
+        first, _first_action = await _ingest(session, seeded, "Satchy, Control 2.")
+        assert first.conversation_id is not None
+
+        asset = FieldAsset(
+            organization_id=organization.id,
+            site_id=site.id,
+            name="Drone 2",
+            asset_type="drone",
+            provider="test-drone",
+            capabilities=["drone:mission", "camera:capture"],
+            state="available",
+            enabled=True,
+        )
+        session.add(asset)
+        await session.flush()
+        session.add(
+            FieldMission(
+                organization_id=organization.id,
+                site_id=site.id,
+                asset_id=asset.id,
+                conversation_id=first.conversation_id,
+                objective="Inspect Cardiff Bowl",
+                mission_type="inspection",
+                required_capabilities=["camera:capture"],
+                target={"location_text": "Cardiff Bowl"},
+                approval_required=False,
+                status="deploying",
+            )
+        )
+        await session.flush()
+
+        other_team = Team(
+            organization_id=organization.id,
+            site_id=site.id,
+            name=f"Other Patrol {uuid4().hex[:6]}",
+            enabled=True,
+        )
+        session.add(other_team)
+        await session.flush()
+        private_asset = FieldAsset(
+            organization_id=organization.id,
+            site_id=site.id,
+            team_id=other_team.id,
+            name="Other Team Drone",
+            asset_type="drone",
+            provider="test-drone",
+            capabilities=["drone:mission"],
+            state="available",
+            enabled=True,
+        )
+        session.add(private_asset)
+        await session.flush()
+        session.add(
+            FieldMission(
+                organization_id=organization.id,
+                site_id=site.id,
+                asset_id=private_asset.id,
+                objective="Other team inspection",
+                mission_type="inspection",
+                required_capabilities=["drone:mission"],
+                target={"location_text": "Other terrain"},
+                approval_required=False,
+                status="active",
+            )
+        )
+        await session.flush()
+
+        second, status_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. What's the drone doing?",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert status_action.action_type == ActionType.REPLY_RADIO.value
+        assert status_action.proposed_message is not None
+        assert "Drone 2 mission is deploying" in status_action.proposed_message
+        assert "Inspect Cardiff Bowl" in status_action.proposed_message
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_explicit_authorized_radio_approval_queues_only_active_conversation_action() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        agent = seeded["agent"]
+        channel = seeded["channel"]
+        control = seeded["control"]
+        devices = seeded["devices"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+        assert isinstance(agent, Agent)
+        assert isinstance(channel, Channel)
+        assert isinstance(control, Callsign)
+        assert isinstance(devices, list)
+
+        for device in devices:
+            assert isinstance(device, EdgeDevice)
+            device.remote_config = {
+                "radio": {
+                    "ai_channel": {
+                        "radio_approval_enabled": True,
+                        "authorized_approver_callsigns": ["Control 2"],
+                        "response_mode": "suggest",
+                    }
+                }
+            }
+        await session.flush()
+
+        first, action = await _ingest(session, seeded, "Satchy, Control 2.")
+        assert action.status == ActionStatus.AWAITING_APPROVAL.value
+
+        second, _transcript, _events, duplicate = await ingest_transmission(
+            session,
+            settings=Settings(intelligence_provider="deterministic"),
+            organization_id=organization.id,
+            payload=TransmissionCreateRequest(
+                site_id=site.id,
+                agent_id=agent.id,
+                channel_id=channel.id,
+                text="Satchy, Control 2. Approve.",
+                source="terrasatch-edge-stt",
+                source_message_id=f"satchy-approval-{uuid4()}",
+                transcript_provider="faster_whisper",
+            ),
+        )
+        assert duplicate is False
+        assert second.conversation_id == first.conversation_id
+        assert action.status == ActionStatus.QUEUED.value
+
+        approval = await session.scalar(
+            select(ActionApproval)
+            .where(
+                ActionApproval.organization_id == organization.id,
+                ActionApproval.action_id == action.id,
+            )
+            .order_by(ActionApproval.created_at.desc())
+            .limit(1)
+        )
+        assert approval is not None
+        assert approval.approval_source == "radio"
+        assert approval.approver_callsign_id == control.id
+        assert approval.source_transmission_id == second.id
+        assert approval.decision == "approved"
+        assert await session.scalar(select(func.count(OutboundTransmission.id))) == 1
+        assert await session.scalar(select(func.count(EdgeCommand.id))) == 1
     finally:
         await session.close()
         await engine.dispose()

@@ -262,7 +262,16 @@ async def get_command_capabilities(
             api_key_id=principal.api_key_id,
         ),
     )
-    return {"version": 1, "result_statuses": ["simulated", "transmitted", "failed"]}
+    return {
+        "version": 1,
+        "result_statuses": [
+            "simulated",
+            "transmitted",
+            "completed",
+            "aborted",
+            "failed",
+        ],
+    }
 
 
 @router.get("/commands", response_model=list[EdgeCommandResponse])
