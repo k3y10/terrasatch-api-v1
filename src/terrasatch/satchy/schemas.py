@@ -76,6 +76,7 @@ class SatchyContext(BaseModel):
     objective: str | None = Field(default=None, max_length=2000)
     active_map: ActiveMapContext | None = None
     workspace_modules: list[str] = Field(default_factory=list)
+    user_preferences: dict[str, object] = Field(default_factory=dict)
     operational_profile: dict[str, object] = Field(default_factory=dict)
     edge_context: dict[str, object] = Field(default_factory=dict)
     rf_context: dict[str, object] = Field(default_factory=dict)
