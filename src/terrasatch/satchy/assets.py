@@ -279,6 +279,23 @@ async def update_field_asset(
     return asset
 
 
+async def list_field_assets(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID | None = None,
+    enabled: bool | None = None,
+) -> list[FieldAsset]:
+    """Administrative tenant inventory; caller must enforce an admin role."""
+
+    query = select(FieldAsset).where(FieldAsset.organization_id == organization_id)
+    if site_id is not None:
+        query = query.where(FieldAsset.site_id == site_id)
+    if enabled is not None:
+        query = query.where(FieldAsset.enabled.is_(enabled))
+    return list(await session.scalars(query.order_by(FieldAsset.name)))
+
+
 async def list_authorized_assets(
     session: AsyncSession,
     *,
