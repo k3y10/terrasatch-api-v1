@@ -21,6 +21,7 @@ class ActionType(StrEnum):
     NOTIFY_TEAM = "notify_team"
     GENERATE_REPORT = "generate_report"
     EMERGENCY_REVIEW = "emergency_review"
+    ASSET_MISSION = "asset_mission"
 
 
 class ActionStatus(StrEnum):

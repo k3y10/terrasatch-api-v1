@@ -15,6 +15,7 @@ from terrasatch.edge.models import EdgeCommand
 from terrasatch.edge.service import get_device_for_api_key
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.outbound.models import OutboundStatus, OutboundTransmission
+from terrasatch.satchy.models import FieldMission
 
 
 async def _owned_command(
@@ -73,19 +74,53 @@ async def _linked_records(
     return outbound, action
 
 
+async def _linked_mission(
+    session: AsyncSession,
+    *,
+    command: EdgeCommand,
+) -> tuple[FieldMission | None, SatchyAction | None]:
+    if command.command_type != "asset_mission":
+        return None, None
+    mission = await session.scalar(
+        select(FieldMission).where(
+            FieldMission.edge_command_id == command.id,
+            FieldMission.organization_id == command.organization_id,
+            FieldMission.site_id == command.site_id,
+        )
+    )
+    if mission is None:
+        raise RuntimeError("Asset mission command is missing its FieldMission")
+    action = None
+    if mission.action_id is not None:
+        action = await session.scalar(
+            select(SatchyAction).where(
+                SatchyAction.id == mission.action_id,
+                SatchyAction.organization_id == command.organization_id,
+                SatchyAction.site_id == command.site_id,
+            )
+        )
+        if action is None:
+            raise RuntimeError("Field mission is missing its Satchy action")
+    return mission, action
+
+
 async def _expire_command(session: AsyncSession, command: EdgeCommand, now: datetime) -> None:
     command.status = "expired"
     outbound, action = await _linked_records(session, command=command)
+    mission, mission_action = await _linked_mission(session, command=command)
     if outbound is not None and outbound.status not in {
         OutboundStatus.SIMULATED.value,
         OutboundStatus.TRANSMITTED.value,
     }:
         outbound.status = OutboundStatus.EXPIRED.value
-    if action is not None and ActionStatus(action.status) in {
-        ActionStatus.APPROVED,
-        ActionStatus.QUEUED,
-    }:
-        transition_action(action, ActionStatus.EXPIRED, now=now)
+    if mission is not None and mission.status in {"queued", "ready"}:
+        mission.status = "expired"
+    for linked_action in (action, mission_action):
+        if linked_action is not None and ActionStatus(linked_action.status) in {
+            ActionStatus.APPROVED,
+            ActionStatus.QUEUED,
+        }:
+            transition_action(linked_action, ActionStatus.EXPIRED, now=now)
 
 
 def _deadline_passed(value: datetime | None, now: datetime) -> bool:
@@ -123,9 +158,6 @@ async def list_device_commands(
                 EdgeCommand.organization_id == organization_id,
                 EdgeCommand.site_id == device.site_id,
                 EdgeCommand.edge_device_id == device.id,
-                # Keep acknowledged work visible until Edge reports a terminal result.
-                # This lets a device recover after it ACKs successfully but loses the
-                # network response while posting the result.
                 EdgeCommand.status.in_(("queued", "dispatched", "acknowledged")),
             )
             .order_by(EdgeCommand.priority, EdgeCommand.created_at)
@@ -174,7 +206,9 @@ async def acknowledge_command(
 
     if (command.payload or {}).get("reply_route") == "rf":
         device = await get_device_for_api_key(
-            session, organization_id=organization_id, api_key_id=api_key_id,
+            session,
+            organization_id=organization_id,
+            api_key_id=api_key_id,
         )
         if not rf_reply_policy_allows(device):
             raise InvalidConfiguration("RF reply policy was revoked before acknowledgement")
@@ -182,14 +216,19 @@ async def acknowledge_command(
     command.status = "acknowledged"
     command.acknowledged_at = command.acknowledged_at or now
     outbound, action = await _linked_records(session, command=command)
+    mission, mission_action = await _linked_mission(session, command=command)
     if outbound is not None and outbound.status in {
         OutboundStatus.QUEUED.value,
         OutboundStatus.DISPATCHED.value,
     }:
         outbound.status = OutboundStatus.EDGE_RECEIVED.value
         outbound.edge_received_at = outbound.edge_received_at or now
-    if action is not None and ActionStatus(action.status) == ActionStatus.QUEUED:
-        transition_action(action, ActionStatus.EXECUTING, now=now)
+    if mission is not None:
+        mission.status = "deploying"
+        mission.started_at = mission.started_at or now
+    for linked_action in (action, mission_action):
+        if linked_action is not None and ActionStatus(linked_action.status) == ActionStatus.QUEUED:
+            transition_action(linked_action, ActionStatus.EXECUTING, now=now)
     await session.flush()
     return command
 
@@ -203,7 +242,7 @@ async def complete_command(
     result: str,
     detail: str | None = None,
 ) -> EdgeCommand:
-    """Accept the initial simulated result or a failure exactly once."""
+    """Record one terminal command result without permitting uncertain replays."""
 
     command = await _owned_command(
         session,
@@ -213,12 +252,11 @@ async def complete_command(
         for_update=True,
     )
     now = datetime.now(UTC)
-    if result not in {"simulated", "transmitted", "failed"}:
+    supported = {"simulated", "transmitted", "completed", "aborted", "failed"}
+    if result not in supported:
         raise InvalidConfiguration("Unsupported Edge command result")
-    # A result is evidence about an already acknowledged operation. Accept late
-    # results and identical retries; expiration must never force an RF replay.
     if command.status in {"completed", "failed"}:
-        previous = str((command.payload or {}).get("result", "simulated"))
+        previous = str((command.payload or {}).get("result", "failed"))
         if previous != result:
             raise InvalidConfiguration("Completed Edge command result cannot be changed")
         return command
@@ -226,38 +264,82 @@ async def complete_command(
         raise InvalidConfiguration("Edge command must be acknowledged before reporting a result")
 
     outbound, action = await _linked_records(session, command=command)
+    mission, mission_action = await _linked_mission(session, command=command)
     payload = dict(command.payload or {})
-    if result == "transmitted" and (
-        command.command_type != "radio_reply"
-        or payload.get("simulate_only") is not False
-        or payload.get("reply_route") != "rf"
-        or outbound is None or outbound.reply_route != "rf"
-        or action is None or ActionStatus(action.status) != ActionStatus.EXECUTING
-    ):
-        raise InvalidConfiguration("Only acknowledged approved RF actions can report transmitted")
-    if result == "simulated" and payload.get("simulate_only") is not True:
-        raise InvalidConfiguration("RF execution cannot be reported as simulated")
+
+    if command.command_type == "radio_reply":
+        if result not in {"simulated", "transmitted", "failed"}:
+            raise InvalidConfiguration("Radio commands cannot report an asset mission result")
+        if result == "transmitted" and (
+            payload.get("simulate_only") is not False
+            or payload.get("reply_route") != "rf"
+            or outbound is None
+            or outbound.reply_route != "rf"
+            or action is None
+            or ActionStatus(action.status) != ActionStatus.EXECUTING
+        ):
+            raise InvalidConfiguration(
+                "Only acknowledged approved RF actions can report transmitted"
+            )
+        if result == "simulated" and payload.get("simulate_only") is not True:
+            raise InvalidConfiguration("RF execution cannot be reported as simulated")
+    elif command.command_type == "asset_mission":
+        if result not in {"completed", "aborted", "failed"}:
+            raise InvalidConfiguration("Asset missions require completed, aborted or failed result")
+        if mission is None:
+            raise InvalidConfiguration("Asset mission result has no linked mission")
+    else:
+        raise InvalidConfiguration("Unsupported Edge command type")
+
     payload["result"] = result
     if detail:
         payload["result_detail"] = detail[:2000]
     command.payload = payload
     command.completed_at = now
 
-    if result in {"simulated", "transmitted"}:
-        command.status = "completed"
-        if outbound is not None:
-            outbound.status = result
-            if result == "transmitted":
-                outbound.transmitted_at = now
-        if action is not None and ActionStatus(action.status) == ActionStatus.EXECUTING:
-            transition_action(action, ActionStatus.COMPLETED, now=now)
+    if command.command_type == "radio_reply":
+        if result in {"simulated", "transmitted"}:
+            command.status = "completed"
+            if outbound is not None:
+                outbound.status = result
+                if result == "transmitted":
+                    outbound.transmitted_at = now
+            if action is not None and ActionStatus(action.status) == ActionStatus.EXECUTING:
+                transition_action(action, ActionStatus.COMPLETED, now=now)
+        else:
+            command.status = "failed"
+            if outbound is not None:
+                outbound.status = OutboundStatus.FAILED.value
+                outbound.failed_at = now
+            if action is not None and ActionStatus(action.status) == ActionStatus.EXECUTING:
+                transition_action(action, ActionStatus.FAILED, now=now)
     else:
-        command.status = "failed"
-        if outbound is not None:
-            outbound.status = OutboundStatus.FAILED.value
-            outbound.failed_at = now
-        if action is not None and ActionStatus(action.status) == ActionStatus.EXECUTING:
-            transition_action(action, ActionStatus.FAILED, now=now)
+        assert mission is not None
+        mission.completed_at = now
+        mission.result = {"status": result, "detail": detail}
+        if result == "completed":
+            mission.status = "completed"
+            command.status = "completed"
+            if (
+                mission_action is not None
+                and ActionStatus(mission_action.status) == ActionStatus.EXECUTING
+            ):
+                transition_action(mission_action, ActionStatus.COMPLETED, now=now)
+        elif result == "aborted":
+            mission.status = "aborted"
+            command.status = "completed"
+            if (
+                mission_action is not None
+                and ActionStatus(mission_action.status) == ActionStatus.EXECUTING
+            ):
+                transition_action(mission_action, ActionStatus.CANCELLED, now=now)
+        else:
+            mission.status = "failed"
+            command.status = "failed"
+            if (
+                mission_action is not None
+                and ActionStatus(mission_action.status) == ActionStatus.EXECUTING
+            ):
+                transition_action(mission_action, ActionStatus.FAILED, now=now)
     await session.flush()
     return command
-
