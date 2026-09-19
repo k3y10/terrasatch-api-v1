@@ -24,6 +24,7 @@ _DEFAULT_ACTION_TYPES = (
     "notify_team",
     "generate_report",
     "emergency_review",
+    "asset_mission",
 )
 _DEFAULT_APPROVER_ROLES = ("owner", "admin", "operator")
 
@@ -43,6 +44,8 @@ DEFAULT_AI_CHANNEL: dict[str, object] = {
     "response_mode": "suggest",
     "allowed_action_types": list(_DEFAULT_ACTION_TYPES),
     "authorized_approver_roles": list(_DEFAULT_APPROVER_ROLES),
+    "radio_approval_enabled": False,
+    "authorized_approver_callsigns": [],
     "max_reply_seconds": 15,
     "response_cooldown_seconds": 10,
     "conversation_timeout_seconds": 300,
@@ -76,6 +79,7 @@ def default_ai_channel_config() -> dict[str, object]:
         **DEFAULT_AI_CHANNEL,
         "allowed_action_types": list(_DEFAULT_ACTION_TYPES),
         "authorized_approver_roles": list(_DEFAULT_APPROVER_ROLES),
+        "authorized_approver_callsigns": [],
     }
 
 
@@ -100,6 +104,9 @@ def ai_channel_lines(device: EdgeDevice) -> list[str]:
     approver_roles = ai.get("authorized_approver_roles")
     if not isinstance(approver_roles, list):
         approver_roles = list(_DEFAULT_APPROVER_ROLES)
+    approver_callsigns = ai.get("authorized_approver_callsigns")
+    if not isinstance(approver_callsigns, list):
+        approver_callsigns = []
     return [
         f"AI       {ai['name']}",
         f"AGENT    {ai['agent_name']}",
@@ -116,6 +123,15 @@ def ai_channel_lines(device: EdgeDevice) -> list[str]:
         f"MODE     {ai['response_mode']}",
         f"ACTIONS  {', '.join(str(item) for item in allowed_actions)}",
         f"APPROVERS {', '.join(str(item) for item in approver_roles)}",
+        (
+            "RADIO APPROVAL "
+            f"{'on' if ai.get('radio_approval_enabled') else 'off'}"
+            + (
+                f" ({', '.join(str(item) for item in approver_callsigns)})"
+                if approver_callsigns
+                else ""
+            )
+        ),
         (
             f"TIMEOUT  conversation={ai['conversation_timeout_seconds']}s "
             f"cooldown={ai['response_cooldown_seconds']}s"
@@ -252,6 +268,47 @@ async def run_ai_channel_command(
         updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
         return [f"[ok] {updated.name}: AI channel modulation -> {modulation}"]
 
+
+    if action in {"radio-approval", "approvals"} and len(args) >= 2:
+        enabled = _parse_on_off(args[1])
+        if enabled and not _confirmed(args):
+            raise InvalidConfiguration(
+                "Confirmation required: rerun with --confirm to enable radio approval"
+            )
+        ai["radio_approval_enabled"] = enabled
+        updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
+        state = "on" if enabled else "off"
+        return [f"[ok] {updated.name}: radio approval -> {state}"]
+
+    if action == "approver" and len(args) >= 3:
+        operation = args[1].lower()
+        callsign = " ".join(item for item in args[2:] if item != "--confirm").strip()
+        if operation not in {"add", "remove"}:
+            raise InvalidConfiguration("approver operation must be add or remove")
+        if not callsign:
+            raise InvalidConfiguration("approver callsign cannot be empty")
+        if not _confirmed(args):
+            raise InvalidConfiguration(
+                "Confirmation required: rerun with --confirm to change radio approvers"
+            )
+        configured = ai.get("authorized_approver_callsigns")
+        current = [
+            str(item).strip()
+            for item in configured
+            if isinstance(configured, list) and isinstance(item, str) and str(item).strip()
+        ] if isinstance(configured, list) else []
+        by_key = {item.casefold(): item for item in current}
+        if operation == "add":
+            by_key[callsign.casefold()] = callsign
+        else:
+            by_key.pop(callsign.casefold(), None)
+        ai["authorized_approver_callsigns"] = sorted(by_key.values(), key=str.casefold)
+        updated = await _save(session, organization_id=organization_id, device=device, ai=ai)
+        return [
+            f"[ok] {updated.name}: radio approvers -> "
+            + (", ".join(ai["authorized_approver_callsigns"]) or "none")
+        ]
+
     if action == "reply" and len(args) >= 2:
         route = args[1].lower()
         if route not in _ALLOWED_REPLY_ROUTES:
@@ -285,5 +342,5 @@ async def run_ai_channel_command(
 
     raise InvalidConfiguration(
         "Usage: edge ai <device> show|bind|unbind|name|agent|trigger|enforce|"
-        "provider-channel|frequency|modulation|reply ..."
+        "provider-channel|frequency|modulation|radio-approval|approver|reply ..."
     )
