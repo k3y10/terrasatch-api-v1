@@ -62,6 +62,7 @@ async def resolve_radio_intent(
     settings,
     text: str,
     context: dict[str, object] | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> IntentResolution:
     """Use deterministic commands first, then a schema-bound model for conversational intent."""
 
@@ -90,6 +91,7 @@ async def resolve_radio_intent(
     try:
         async with httpx.AsyncClient(
             timeout=settings.intelligence_timeout_seconds,
+            transport=transport,
         ) as client:
             response = await client.post(
                 f"{str(settings.ollama_base_url).rstrip('/')}/api/chat",
