@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import ResourceNotFound, TenantAccessDenied
-from terrasatch.identity.models import Membership, Site, Team, User
+from terrasatch.identity.models import Membership, Organization, Site, Team, User
 from terrasatch.organizations.profiles import get_operational_profile
 from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transcript, Transmission
 from terrasatch.workspace.models import WorkspacePreference
@@ -29,6 +29,15 @@ async def build_satchy_context(
     active_map: ActiveMapContext | None = None,
 ) -> SatchyContext:
     """Build the smallest useful context while enforcing tenant/site ownership."""
+
+    organization = await session.scalar(
+        select(Organization).where(
+            Organization.id == organization_id,
+            Organization.enabled.is_(True),
+        )
+    )
+    if organization is None:
+        raise ResourceNotFound("Organization was not found in the Satchy context")
 
     site = await session.scalar(
         select(Site).where(
@@ -194,6 +203,7 @@ async def build_satchy_context(
 
     return SatchyContext(
         organization_id=organization_id,
+        organization_name=organization.name,
         site_id=site_id,
         site_name=site.name,
         user_id=user.id if user else None,
