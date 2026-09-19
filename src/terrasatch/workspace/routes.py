@@ -249,8 +249,13 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
         subscription = await get_subscription_for_organization(
             session, organization_id=organization_id
         )
-        sites = await session.scalars(
-            select(Site).where(Site.organization_id == organization_id, Site.enabled.is_(True))
+        sites = list(
+            await session.scalars(
+                select(Site).where(
+                    Site.organization_id == organization_id,
+                    Site.enabled.is_(True),
+                )
+            )
         )
         actions = await session.scalars(
             select(SatchyAction)
@@ -270,7 +275,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             )
         )
         asset_rows = []
-        for site in list(sites):
+        for site in sites:
             site_assets = await list_authorized_assets(
                 session,
                 organization_id=organization_id,
