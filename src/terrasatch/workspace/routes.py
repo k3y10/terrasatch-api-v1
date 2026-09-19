@@ -392,6 +392,22 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                     Site.enabled.is_(True),
                 )
             )
+        elif payload.transmission_id is not None:
+            source = await session.scalar(
+                select(Transmission).where(
+                    Transmission.id == payload.transmission_id,
+                    Transmission.organization_id == organization_id,
+                )
+            )
+            if source is None:
+                raise HTTPException(404, "Transmission not found")
+            selected_site = await session.scalar(
+                select(Site).where(
+                    Site.id == source.site_id,
+                    Site.organization_id == organization_id,
+                    Site.enabled.is_(True),
+                )
+            )
         else:
             selected_site = await session.scalar(
                 select(Site)
