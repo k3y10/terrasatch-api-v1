@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -99,3 +100,37 @@ class SatchyDecision(BaseModel):
     approval_required: bool = False
     radio_response: str = Field(min_length=1, max_length=2000)
     provenance: dict[str, object] = Field(default_factory=dict)
+
+
+class FieldAssetCreate(BaseModel):
+    """Workspace contract for registering authorized infrastructure."""
+
+    name: str = Field(min_length=1, max_length=255)
+    asset_type: str = Field(min_length=1, max_length=100)
+    provider: str = Field(min_length=1, max_length=100)
+    site_id: UUID | None = None
+    team_id: UUID | None = None
+    owner_user_id: UUID | None = None
+    controller_edge_device_id: UUID | None = None
+    capabilities: list[str] = Field(default_factory=list, max_length=128)
+    state: Literal["online", "available", "busy", "charging", "offline", "degraded"] = "offline"
+    location: dict[str, object] = Field(default_factory=dict)
+    policy: dict[str, object] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class FieldAssetUpdate(BaseModel):
+    """Partial workspace update for a registered field asset."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    asset_type: str | None = Field(default=None, min_length=1, max_length=100)
+    provider: str | None = Field(default=None, min_length=1, max_length=100)
+    site_id: UUID | None = None
+    team_id: UUID | None = None
+    owner_user_id: UUID | None = None
+    controller_edge_device_id: UUID | None = None
+    capabilities: list[str] | None = Field(default=None, max_length=128)
+    state: Literal["online", "available", "busy", "charging", "offline", "degraded"] | None = None
+    location: dict[str, object] | None = None
+    policy: dict[str, object] | None = None
+    enabled: bool | None = None
