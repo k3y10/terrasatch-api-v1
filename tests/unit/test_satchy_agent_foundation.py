@@ -26,6 +26,7 @@ from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 from terrasatch.satchy import models as satchy_models
+from terrasatch.satchy.adaptation import observe_workspace_context
 from terrasatch.satchy.agent import resolve_radio_intent
 from terrasatch.satchy.assets import (
     create_mission_plan,
@@ -38,6 +39,7 @@ from terrasatch.satchy.models import FieldAsset
 from terrasatch.satchy.schemas import ActiveMapContext, SatchyIntent, WorkflowMode
 from terrasatch.satchy.workflows import resolve_workflow
 from terrasatch.workspace import models as workspace_models
+from terrasatch.workspace.models import WorkspacePreference
 
 _MODEL_MODULES = (
     action_models,
@@ -78,6 +80,37 @@ def test_radio_intent_and_workflow_are_conservative() -> None:
         )
         == WorkflowMode.CLARIFY
     )
+
+
+def test_workspace_adaptation_records_usage_without_precise_map_location() -> None:
+    preference = WorkspacePreference(
+        organization_id=uuid4(),
+        user_id=uuid4(),
+        modules=["Map", "Satchy"],
+        satchy_preferences={"explicit": {"response_detail": "brief"}},
+    )
+    site_id = uuid4()
+    active_map = ActiveMapContext(
+        map_id="avalanche",
+        center_latitude=40.1234,
+        center_longitude=-111.5678,
+        zoom=14,
+        selected_layers=["slope_angle", "observations"],
+        selected_terrain="Cardiff Bowl",
+    )
+
+    observe_workspace_context(preference, site_id=site_id, active_map=active_map)
+    observe_workspace_context(preference, site_id=site_id, active_map=active_map)
+
+    observed = preference.satchy_preferences["observed"]
+    assert observed["site_counts"][str(site_id)] == 2
+    assert observed["map_counts"]["avalanche"] == 2
+    assert observed["layer_counts"]["slope_angle"] == 2
+    assert observed["layer_counts"]["observations"] == 2
+    serialized = str(preference.satchy_preferences)
+    assert "40.1234" not in serialized
+    assert "-111.5678" not in serialized
+    assert "Cardiff Bowl" not in serialized
 
 
 @pytest.mark.asyncio
@@ -264,6 +297,19 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
                 enabled=True,
             )
         )
+        session.add(
+            WorkspacePreference(
+                organization_id=org.id,
+                user_id=user.id,
+                modules=["Map", "Satchy"],
+                satchy_preferences={
+                    "explicit": {
+                        "response_detail": "brief",
+                        "preferred_workflows": ["field_observation"],
+                    }
+                },
+            )
+        )
         await session.flush()
 
         active_map = ActiveMapContext(
@@ -283,6 +329,10 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
         assert context.membership_role == "operator"
         assert context.active_map is not None
         assert context.active_map.selected_terrain == "Cardiff Bowl"
+        assert context.user_preferences["explicit"]["response_detail"] == "brief"
+        assert context.user_preferences["explicit"]["preferred_workflows"] == [
+            "field_observation"
+        ]
 
         outsider = User(
             email=f"{uuid4().hex}@example.com",
