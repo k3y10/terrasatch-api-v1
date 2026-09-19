@@ -106,7 +106,10 @@ async def create_mission_plan(
         for item in policy.get("autonomous_mission_types", [])
         if isinstance(item, str)
     }
-    preauthorized = mission_type.casefold() in autonomous
+    preauthorized = (
+        policy.get("mission_execution_enabled") is True
+        and mission_type.casefold() in autonomous
+    )
     mission = FieldMission(
         organization_id=organization_id,
         site_id=site_id,
