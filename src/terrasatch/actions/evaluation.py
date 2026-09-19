@@ -200,13 +200,13 @@ async def _radio_decision(
     return f"{speaker.name} approved the pending Satchy action", payload, action
 
 
-def _mission_request(text: str) -> tuple[str, set[str], dict[str, object]]:
+def _mission_request(text: str) -> tuple[str, set[str]]:
     lowered = text.casefold()
     if "relay" in lowered or "coverage" in lowered:
-        return "relay_deploy", {"relay:deploy"}, {"requested_location": text}
+        return "relay_deploy", {"relay:deploy"}
     if "eyes on" in lowered or "inspect" in lowered:
-        return "inspection", {"camera:capture"}, {"requested_location": text}
-    return "field_deployment", {"drone:mission"}, {"requested_location": text}
+        return "inspection", {"camera:capture"}
+    return "field_deployment", {"drone:mission"}
 
 
 async def process_transmission_control_plane(
@@ -297,63 +297,98 @@ async def process_transmission_control_plane(
     transmission.emergency_confidence = emergency_confidence
     transmission.emergency_reason = emergency_reason
 
+    mission_feedback: str | None = None
     if (
         addressing.addressed_to_agent
         and intent.intent == SatchyIntent.REQUEST_MISSION
         and not emergency
     ):
-        mission_type, capabilities, target = _mission_request(text)
-        try:
-            mission = await create_mission_plan(
-                session,
-                organization_id=transmission.organization_id,
-                site_id=transmission.site_id,
-                objective=text,
-                mission_type=mission_type,
-                required_capabilities=capabilities,
-                target=target,
-                requested_by_callsign_id=transmission.speaker_callsign_id,
-                source_transmission_id=transmission.id,
-                conversation_id=conversation.id,
-            )
-            mission_action = (
-                await session.get(SatchyAction, mission.action_id) if mission.action_id else None
-            )
-            proposed = {
-                "type": "asset_mission",
-                "mission_id": str(mission.id),
-                "asset_id": str(mission.asset_id),
-            }
-            evaluation = SatchyEvaluation(
-                organization_id=transmission.organization_id,
-                site_id=transmission.site_id,
-                conversation_id=conversation.id,
-                source_transmission_id=transmission.id,
-                addressed_to_satchy=True,
-                confidence=intent.confidence,
-                interpretation=f"Field mission requested: {text}",
-                proposed_action=proposed,
-                approval_required=mission.approval_required,
-                emergency_candidate=False,
-                operational_context=_profile_context(profile, intent=intent.intent),
-            )
-            session.add(evaluation)
-            await session.flush()
-            if mission_action is not None:
-                mission_action.evaluation_id = evaluation.id
-            elif not mission.approval_required:
-                try:
-                    await queue_field_mission(
-                        session,
-                        organization_id=transmission.organization_id,
-                        mission_id=mission.id,
+        mission_type, capabilities = _mission_request(text)
+        target_location = (
+            operational_event.location_text
+            if operational_event is not None and operational_event.location_text
+            else conversation.active_location
+        )
+        if not target_location:
+            mission_feedback = "I don't have a confident mission location. Say location again."
+        else:
+            speaker_team_id = None
+            if transmission.speaker_callsign_id is not None:
+                speaker_callsign = await session.scalar(
+                    select(Callsign).where(
+                        Callsign.id == transmission.speaker_callsign_id,
+                        Callsign.organization_id == transmission.organization_id,
                     )
-                except InvalidConfiguration:
-                    pass
-            await session.flush()
-            return EvaluationOutcome(conversation, evaluation, mission_action)
-        except ResourceNotFound:
-            pass
+                )
+                speaker_team_id = speaker_callsign.team_id if speaker_callsign else None
+            target = {
+                "location_text": target_location,
+                "provenance": (
+                    "operational_event"
+                    if operational_event is not None and operational_event.location_text
+                    else "active_conversation"
+                ),
+            }
+            try:
+                mission = await create_mission_plan(
+                    session,
+                    organization_id=transmission.organization_id,
+                    site_id=transmission.site_id,
+                    objective=text,
+                    mission_type=mission_type,
+                    required_capabilities=capabilities,
+                    target=target,
+                    requested_by_callsign_id=transmission.speaker_callsign_id,
+                    team_id=speaker_team_id,
+                    source_transmission_id=transmission.id,
+                    conversation_id=conversation.id,
+                )
+                mission_action = (
+                    await session.get(SatchyAction, mission.action_id)
+                    if mission.action_id
+                    else None
+                )
+                proposed = {
+                    "type": "asset_mission",
+                    "mission_id": str(mission.id),
+                    "asset_id": str(mission.asset_id),
+                    "target": target,
+                }
+                evaluation = SatchyEvaluation(
+                    organization_id=transmission.organization_id,
+                    site_id=transmission.site_id,
+                    conversation_id=conversation.id,
+                    source_transmission_id=transmission.id,
+                    addressed_to_satchy=True,
+                    confidence=intent.confidence,
+                    interpretation=f"Field mission requested: {text}",
+                    proposed_action=proposed,
+                    approval_required=mission.approval_required,
+                    emergency_candidate=False,
+                    operational_context=_profile_context(profile, intent=intent.intent),
+                )
+                session.add(evaluation)
+                await session.flush()
+                if mission_action is not None:
+                    mission_action.evaluation_id = evaluation.id
+                elif not mission.approval_required:
+                    try:
+                        await queue_field_mission(
+                            session,
+                            organization_id=transmission.organization_id,
+                            mission_id=mission.id,
+                        )
+                    except InvalidConfiguration as exc:
+                        evaluation.operational_context = {
+                            **evaluation.operational_context,
+                            "mission_queue_detail": str(exc),
+                        }
+                await session.flush()
+                return EvaluationOutcome(conversation, evaluation, mission_action)
+            except ResourceNotFound:
+                mission_feedback = (
+                    "No authorized available field asset can satisfy that mission."
+                )
 
     action_type: ActionType | None = None
     proposed_message: str | None = None
@@ -363,9 +398,17 @@ async def process_transmission_control_plane(
         risk_level = "critical"
         interpretation = emergency_reason or "Possible emergency requires human review"
     elif addressing.addressed_to_agent:
-        action_type = ActionType.REPLY_RADIO
         caller = addressing.speaker_text or "Caller"
-        if operational_event is not None and operational_event.event_type != "GENERAL_UPDATE":
+        if intent.intent == SatchyIntent.REQUEST_MISSION and mission_feedback:
+            action_type = (
+                ActionType.ASK_CLARIFICATION
+                if "location" in mission_feedback.casefold()
+                else ActionType.REPLY_RADIO
+            )
+            proposed_message = f"{radio_prefix(caller)} {mission_feedback}"
+            interpretation = mission_feedback
+        elif operational_event is not None and operational_event.event_type != "GENERAL_UPDATE":
+            action_type = ActionType.REPLY_RADIO
             proposed_message = observation_logged(
                 callsign=caller,
                 location=operational_event.location_text,
