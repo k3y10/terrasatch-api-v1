@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
@@ -277,6 +277,16 @@ async def _mission_status(
         "holding",
         "returning",
     )
+    speaker_team_id: UUID | None = None
+    if transmission.speaker_callsign_id is not None:
+        speaker = await session.scalar(
+            select(Callsign).where(
+                Callsign.id == transmission.speaker_callsign_id,
+                Callsign.organization_id == transmission.organization_id,
+            )
+        )
+        speaker_team_id = speaker.team_id if speaker is not None else None
+
     base = (
         select(FieldMission, FieldAsset)
         .join(FieldAsset, FieldAsset.id == FieldMission.asset_id)
@@ -285,8 +295,15 @@ async def _mission_status(
             FieldMission.site_id == transmission.site_id,
             FieldAsset.organization_id == transmission.organization_id,
             FieldAsset.enabled.is_(True),
+            FieldAsset.owner_user_id.is_(None),
         )
     )
+    if speaker_team_id is None:
+        base = base.where(FieldAsset.team_id.is_(None))
+    else:
+        base = base.where(
+            or_(FieldAsset.team_id.is_(None), FieldAsset.team_id == speaker_team_id)
+        )
     row = (
         await session.execute(
             base.where(
