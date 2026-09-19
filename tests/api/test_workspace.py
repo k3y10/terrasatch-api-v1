@@ -204,6 +204,12 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         ).json()["assets"]
         assert [item["id"] for item in visible_assets] == [asset["id"]]
 
+        inventory = await client.get(
+            f"/api/v1/workspace/organizations/{organization_id}/assets"
+        )
+        assert inventory.status_code == 200
+        assert [item["id"] for item in inventory.json()] == [asset["id"]]
+
         patched_asset = await client.patch(
             f"/api/v1/workspace/organizations/{organization_id}/assets/{asset['id']}",
             json={"state": "busy", "location": {"label": "Cardiff Bowl", "source": "workspace"}},
