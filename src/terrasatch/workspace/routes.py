@@ -27,7 +27,12 @@ from terrasatch.identity.models import MembershipRole, Site, User
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.satchy.agent import answer_workspace
-from terrasatch.satchy.assets import create_field_asset, list_authorized_assets, update_field_asset
+from terrasatch.satchy.assets import (
+    create_field_asset,
+    list_authorized_assets,
+    list_field_assets,
+    update_field_asset,
+)
 from terrasatch.satchy.context import build_satchy_context
 from terrasatch.satchy.schemas import ActiveMapContext, FieldAssetCreate, FieldAssetUpdate
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
@@ -345,6 +350,21 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 ],
             }
         )
+
+
+@router.get("/organizations/{organization_id}/assets")
+async def asset_inventory(
+    organization_id: UUID,
+    request: Request,
+):
+    """Return the complete field-asset inventory to workspace administrators only."""
+
+    async with create_session_factory(request.app.state.settings)() as session:
+        _, membership = await access(request, session, organization_id)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Workspace administrator required to list all field assets")
+        assets = await list_field_assets(session, organization_id=organization_id)
+        return jsonable_encoder([_asset_payload(asset) for asset in assets])
 
 
 @router.post(
