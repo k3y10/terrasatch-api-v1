@@ -11,9 +11,272 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction
 from terrasatch.actions.state import transition_action
 from terrasatch.edge.models import EdgeCommand, EdgeDevice
-from terrasatch.errors import InvalidConfiguration, ResourceNotFound
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound, TenantAccessDenied
+from terrasatch.identity.models import Membership, Site, Team, User
 
 from .models import FieldAsset, FieldMission
+from .schemas import FieldAssetCreate, FieldAssetUpdate
+
+
+def _normalized_capabilities(values: list[str] | None) -> list[str]:
+    return sorted(
+        {
+            value.strip().casefold()
+            for value in (values or [])
+            if isinstance(value, str) and value.strip()
+        }
+    )
+
+
+async def _asset_site(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID | None,
+) -> Site | None:
+    if site_id is None:
+        return None
+    site = await session.scalar(
+        select(Site).where(
+            Site.id == site_id,
+            Site.organization_id == organization_id,
+            Site.enabled.is_(True),
+        )
+    )
+    if site is None:
+        raise ResourceNotFound("Field asset site was not found in this organization")
+    return site
+
+
+async def _asset_team(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    team_id: UUID | None,
+) -> Team | None:
+    if team_id is None:
+        return None
+    team = await session.scalar(
+        select(Team).where(
+            Team.id == team_id,
+            Team.organization_id == organization_id,
+            Team.enabled.is_(True),
+        )
+    )
+    if team is None:
+        raise ResourceNotFound("Field asset team was not found in this organization")
+    return team
+
+
+async def _asset_owner(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    user_id: UUID | None,
+) -> User | None:
+    if user_id is None:
+        return None
+    membership = await session.scalar(
+        select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.user_id == user_id,
+            Membership.enabled.is_(True),
+        )
+    )
+    user = await session.get(User, user_id)
+    if membership is None or user is None or not user.enabled:
+        raise TenantAccessDenied("Field asset owner is not an enabled organization member")
+    return user
+
+
+async def _asset_controller(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    device_id: UUID | None,
+) -> EdgeDevice | None:
+    if device_id is None:
+        return None
+    device = await session.scalar(
+        select(EdgeDevice).where(
+            EdgeDevice.id == device_id,
+            EdgeDevice.organization_id == organization_id,
+            EdgeDevice.enabled.is_(True),
+        )
+    )
+    if device is None:
+        raise ResourceNotFound("Field asset Edge controller was not found in this organization")
+    return device
+
+
+async def _validated_asset_scope(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    site_id: UUID | None,
+    team_id: UUID | None,
+    owner_user_id: UUID | None,
+    controller_edge_device_id: UUID | None,
+) -> tuple[UUID | None, Team | None, User | None, EdgeDevice | None]:
+    site = await _asset_site(session, organization_id=organization_id, site_id=site_id)
+    team = await _asset_team(session, organization_id=organization_id, team_id=team_id)
+    owner = await _asset_owner(
+        session,
+        organization_id=organization_id,
+        user_id=owner_user_id,
+    )
+    controller = await _asset_controller(
+        session,
+        organization_id=organization_id,
+        device_id=controller_edge_device_id,
+    )
+
+    effective_site_id = site.id if site is not None else None
+    if team is not None and team.site_id is not None:
+        if effective_site_id is not None and team.site_id != effective_site_id:
+            raise InvalidConfiguration("Field asset team and site do not match")
+        effective_site_id = team.site_id
+    if controller is not None:
+        if effective_site_id is not None and controller.site_id != effective_site_id:
+            raise InvalidConfiguration("Field asset controller and site do not match")
+        effective_site_id = controller.site_id
+
+    return effective_site_id, team, owner, controller
+
+
+async def get_field_asset(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    asset_id: UUID,
+    for_update: bool = False,
+) -> FieldAsset:
+    query = select(FieldAsset).where(
+        FieldAsset.id == asset_id,
+        FieldAsset.organization_id == organization_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    asset = await session.scalar(query)
+    if asset is None:
+        raise ResourceNotFound("Field asset was not found")
+    return asset
+
+
+async def create_field_asset(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    payload: FieldAssetCreate,
+) -> FieldAsset:
+    """Register infrastructure only after every referenced scope is tenant validated."""
+
+    name = " ".join(payload.name.split())
+    existing = await session.scalar(
+        select(FieldAsset).where(
+            FieldAsset.organization_id == organization_id,
+            FieldAsset.name == name,
+        )
+    )
+    if existing is not None:
+        raise ResourceConflict(f"Field asset '{name}' already exists")
+
+    effective_site_id, team, owner, controller = await _validated_asset_scope(
+        session,
+        organization_id=organization_id,
+        site_id=payload.site_id,
+        team_id=payload.team_id,
+        owner_user_id=payload.owner_user_id,
+        controller_edge_device_id=payload.controller_edge_device_id,
+    )
+    asset = FieldAsset(
+        organization_id=organization_id,
+        site_id=effective_site_id,
+        team_id=team.id if team else None,
+        owner_user_id=owner.id if owner else None,
+        controller_edge_device_id=controller.id if controller else None,
+        name=name,
+        asset_type=payload.asset_type.strip().casefold(),
+        provider=payload.provider.strip(),
+        capabilities=_normalized_capabilities(payload.capabilities),
+        state=payload.state,
+        location=dict(payload.location),
+        policy=dict(payload.policy),
+        enabled=payload.enabled,
+    )
+    session.add(asset)
+    await session.flush()
+    return asset
+
+
+async def update_field_asset(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    asset_id: UUID,
+    payload: FieldAssetUpdate,
+) -> FieldAsset:
+    asset = await get_field_asset(
+        session,
+        organization_id=organization_id,
+        asset_id=asset_id,
+        for_update=True,
+    )
+
+    site_id = payload.site_id if "site_id" in payload.model_fields_set else asset.site_id
+    team_id = payload.team_id if "team_id" in payload.model_fields_set else asset.team_id
+    owner_id = (
+        payload.owner_user_id
+        if "owner_user_id" in payload.model_fields_set
+        else asset.owner_user_id
+    )
+    controller_id = (
+        payload.controller_edge_device_id
+        if "controller_edge_device_id" in payload.model_fields_set
+        else asset.controller_edge_device_id
+    )
+    effective_site_id, team, owner, controller = await _validated_asset_scope(
+        session,
+        organization_id=organization_id,
+        site_id=site_id,
+        team_id=team_id,
+        owner_user_id=owner_id,
+        controller_edge_device_id=controller_id,
+    )
+
+    if payload.name is not None:
+        name = " ".join(payload.name.split())
+        duplicate = await session.scalar(
+            select(FieldAsset).where(
+                FieldAsset.organization_id == organization_id,
+                FieldAsset.name == name,
+                FieldAsset.id != asset.id,
+            )
+        )
+        if duplicate is not None:
+            raise ResourceConflict(f"Field asset '{name}' already exists")
+        asset.name = name
+    if payload.asset_type is not None:
+        asset.asset_type = payload.asset_type.strip().casefold()
+    if payload.provider is not None:
+        asset.provider = payload.provider.strip()
+    if payload.capabilities is not None:
+        asset.capabilities = _normalized_capabilities(payload.capabilities)
+    if payload.state is not None:
+        asset.state = payload.state
+    if payload.location is not None:
+        asset.location = dict(payload.location)
+    if payload.policy is not None:
+        asset.policy = dict(payload.policy)
+    if payload.enabled is not None:
+        asset.enabled = payload.enabled
+
+    asset.site_id = effective_site_id
+    asset.team_id = team.id if team else None
+    asset.owner_user_id = owner.id if owner else None
+    asset.controller_edge_device_id = controller.id if controller else None
+    await session.flush()
+    return asset
 
 
 async def list_authorized_assets(
