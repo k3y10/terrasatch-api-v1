@@ -19,7 +19,7 @@ from terrasatch.radio.conversations import associate_transmission
 from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transmission
 from terrasatch.satchy.assets import create_mission_plan, queue_field_mission
 from terrasatch.satchy.intents import resolve_intent
-from terrasatch.satchy.radio import mission_ready, observation_logged, radio_prefix
+from terrasatch.satchy.radio import observation_logged, radio_prefix
 from terrasatch.satchy.schemas import SatchyIntent
 
 _DEFAULT_POLICY: dict[str, object] = {
@@ -340,8 +340,18 @@ async def process_transmission_control_plane(
                 operational_context=_profile_context(profile, intent=intent.intent),
             )
             session.add(evaluation)
+            await session.flush()
             if mission_action is not None:
                 mission_action.evaluation_id = evaluation.id
+            elif not mission.approval_required:
+                try:
+                    await queue_field_mission(
+                        session,
+                        organization_id=transmission.organization_id,
+                        mission_id=mission.id,
+                    )
+                except InvalidConfiguration:
+                    pass
             await session.flush()
             return EvaluationOutcome(conversation, evaluation, mission_action)
         except ResourceNotFound:
@@ -428,4 +438,3 @@ async def process_transmission_control_plane(
         transition_action(action, ActionStatus.AWAITING_APPROVAL)
 
     await session.flush()
-    return EvaluationOutcome(conversation, evaluation, action)
