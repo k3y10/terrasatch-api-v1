@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
@@ -27,9 +27,9 @@ from terrasatch.identity.models import MembershipRole, Site, User
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.satchy.agent import answer_workspace
-from terrasatch.satchy.assets import list_authorized_assets
+from terrasatch.satchy.assets import create_field_asset, list_authorized_assets, update_field_asset
 from terrasatch.satchy.context import build_satchy_context
-from terrasatch.satchy.schemas import ActiveMapContext
+from terrasatch.satchy.schemas import ActiveMapContext, FieldAssetCreate, FieldAssetUpdate
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
@@ -183,6 +183,26 @@ async def logout(request: Request):
     return {"signed_out": True}
 
 
+def _asset_payload(asset) -> dict[str, object]:
+    return {
+        "id": str(asset.id),
+        "site_id": str(asset.site_id) if asset.site_id else None,
+        "team_id": str(asset.team_id) if asset.team_id else None,
+        "owner_user_id": str(asset.owner_user_id) if asset.owner_user_id else None,
+        "controller_edge_device_id": (
+            str(asset.controller_edge_device_id) if asset.controller_edge_device_id else None
+        ),
+        "name": asset.name,
+        "type": asset.asset_type,
+        "provider": asset.provider,
+        "capabilities": list(asset.capabilities or []),
+        "state": asset.state,
+        "location": dict(asset.location or {}),
+        "policy": dict(asset.policy or {}),
+        "enabled": asset.enabled,
+    }
+
+
 async def records(session, organization_id):
     rows = (
         await session.execute(
@@ -306,19 +326,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 },
                 "subscription": subscription,
                 "sites": [{"id": str(s.id), "name": s.name} for s in sites],
-                "assets": [
-                    {
-                        "id": str(asset.id),
-                        "site_id": str(asset.site_id) if asset.site_id else None,
-                        "name": asset.name,
-                        "type": asset.asset_type,
-                        "provider": asset.provider,
-                        "capabilities": asset.capabilities,
-                        "state": asset.state,
-                        "location": asset.location,
-                    }
-                    for asset in asset_rows
-                ],
+                "assets": [_asset_payload(asset) for asset in asset_rows],
                 "records": await records(session, organization_id),
                 "actions": [
                     {
@@ -337,6 +345,57 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 ],
             }
         )
+
+
+@router.post(
+    "/organizations/{organization_id}/assets",
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_asset(
+    organization_id: UUID,
+    payload: FieldAssetCreate,
+    request: Request,
+):
+    """Register tenant-scoped infrastructure that Satchy may discover by capability."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        _, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Workspace administrator required to register field assets")
+        asset = await create_field_asset(
+            session,
+            organization_id=organization_id,
+            payload=payload,
+        )
+        await session.commit()
+        return jsonable_encoder(_asset_payload(asset))
+
+
+@router.patch("/organizations/{organization_id}/assets/{asset_id}")
+async def patch_asset(
+    organization_id: UUID,
+    asset_id: UUID,
+    payload: FieldAssetUpdate,
+    request: Request,
+):
+    """Update field-asset scope, capability, state, controller, or execution policy."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        _, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Workspace administrator required to update field assets")
+        asset = await update_field_asset(
+            session,
+            organization_id=organization_id,
+            asset_id=asset_id,
+            payload=payload,
+        )
+        await session.commit()
+        return jsonable_encoder(_asset_payload(asset))
 
 
 @router.post("/organizations/{organization_id}/actions/{action_id}")
