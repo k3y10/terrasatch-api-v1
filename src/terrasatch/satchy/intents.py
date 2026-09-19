@@ -14,7 +14,11 @@ _EXPLICIT_APPROVE = re.compile(
     r"\b(?:approve|confirm)(?:\s+(?:it|send|action|mission|deployment))?\b",
     re.I,
 )
-_EXPLICIT_REJECT = re.compile(r"\b(?:reject|deny)(?:\s+(?:it|action|mission))?\b", re.I)
+_EXPLICIT_REJECT = re.compile(
+    r"\b(?:reject|deny)(?:\s+(?:it|action|mission))?\b"
+    r"|\b(?:do not|don't|cannot|can't)\s+approve\b",
+    re.I,
+)
 _EXPLICIT_CANCEL = re.compile(r"\b(?:cancel|scratch|stand down)(?:\s+(?:it|that))?\b", re.I)
 _ABORT_MISSION = re.compile(r"\b(?:abort mission|abort deployment|bring it back|return to base)\b", re.I)
 _MISSION_STATUS = re.compile(
@@ -49,8 +53,8 @@ def resolve_intent(text: str) -> IntentResolution:
     checks: tuple[tuple[re.Pattern[str], SatchyIntent, float], ...] = (
         (_ABORT_MISSION, SatchyIntent.ABORT_MISSION, 0.98),
         (_MISSION_STATUS, SatchyIntent.MISSION_STATUS, 0.95),
+        (_EXPLICIT_REJECT, SatchyIntent.REJECT_ACTION, 0.97),
         (_EXPLICIT_APPROVE, SatchyIntent.APPROVE_ACTION, 0.96),
-        (_EXPLICIT_REJECT, SatchyIntent.REJECT_ACTION, 0.96),
         (_EXPLICIT_CANCEL, SatchyIntent.CANCEL_ACTION, 0.94),
         (_REQUEST_MISSION, SatchyIntent.REQUEST_MISSION, 0.92),
         (_LOG_OBSERVATION, SatchyIntent.LOG_OBSERVATION, 0.94),
