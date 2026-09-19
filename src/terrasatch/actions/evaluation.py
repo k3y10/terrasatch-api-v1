@@ -22,7 +22,13 @@ from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversatio
 from terrasatch.satchy.agent import resolve_radio_intent
 from terrasatch.satchy.assets import create_mission_plan, queue_field_mission
 from terrasatch.satchy.intents import resolve_intent
-from terrasatch.satchy.radio import observation_logged, radio_prefix
+from terrasatch.satchy.models import FieldAsset, FieldMission
+from terrasatch.satchy.radio import (
+    mission_status_response,
+    observation_logged,
+    radio_prefix,
+    summary_response,
+)
 from terrasatch.satchy.schemas import SatchyIntent
 
 _DEFAULT_POLICY: dict[str, object] = {
@@ -200,6 +206,93 @@ async def _radio_decision(
     if queue_detail:
         payload["queue_detail"] = queue_detail
     return f"{speaker.name} approved the pending Satchy action", payload, action
+
+
+async def _conversation_summary(
+    session: AsyncSession,
+    *,
+    transmission: Transmission,
+    conversation: RadioConversation,
+) -> tuple[str, list[str], int]:
+    """Return source-backed summaries from the active radio conversation."""
+
+    query = (
+        select(OperationalEvent)
+        .join(Transmission, Transmission.id == OperationalEvent.transmission_id)
+        .where(
+            OperationalEvent.organization_id == transmission.organization_id,
+            OperationalEvent.site_id == transmission.site_id,
+            Transmission.organization_id == transmission.organization_id,
+            Transmission.site_id == transmission.site_id,
+            Transmission.conversation_id == conversation.id,
+            Transmission.id != transmission.id,
+        )
+        .order_by(OperationalEvent.created_at.desc())
+        .limit(6)
+    )
+    events = list(await session.scalars(query))
+    location = conversation.active_location or ""
+    summaries = [event.summary for event in events if event.summary]
+    return location, summaries, len(events)
+
+
+async def _mission_status(
+    session: AsyncSession,
+    *,
+    transmission: Transmission,
+    conversation: RadioConversation,
+) -> tuple[FieldMission, FieldAsset] | None:
+    """Prefer an active mission in this conversation, then the latest site mission."""
+
+    active_states = (
+        "ready",
+        "awaiting_approval",
+        "queued",
+        "deploying",
+        "active",
+        "holding",
+        "returning",
+    )
+    base = (
+        select(FieldMission, FieldAsset)
+        .join(FieldAsset, FieldAsset.id == FieldMission.asset_id)
+        .where(
+            FieldMission.organization_id == transmission.organization_id,
+            FieldMission.site_id == transmission.site_id,
+            FieldAsset.organization_id == transmission.organization_id,
+            FieldAsset.enabled.is_(True),
+        )
+    )
+    row = (
+        await session.execute(
+            base.where(
+                FieldMission.conversation_id == conversation.id,
+                FieldMission.status.in_(active_states),
+            )
+            .order_by(FieldMission.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        row = (
+            await session.execute(
+                base.where(FieldMission.status.in_(active_states))
+                .order_by(FieldMission.created_at.desc())
+                .limit(1)
+            )
+        ).first()
+    if row is None:
+        row = (
+            await session.execute(
+                base.where(FieldMission.conversation_id == conversation.id)
+                .order_by(FieldMission.created_at.desc())
+                .limit(1)
+            )
+        ).first()
+    if row is None:
+        return None
+    mission, asset = row
+    return mission, asset
 
 
 def _mission_request(text: str) -> tuple[str, set[str]]:
@@ -436,6 +529,44 @@ async def process_transmission_control_plane(
             )
             proposed_message = f"{radio_prefix(caller)} {mission_feedback}"
             interpretation = mission_feedback
+        elif intent.intent == SatchyIntent.SUMMARIZE:
+            location, summaries, count = await _conversation_summary(
+                session,
+                transmission=transmission,
+                conversation=conversation,
+            )
+            action_type = ActionType.REPLY_RADIO
+            proposed_message = summary_response(
+                caller,
+                count=count,
+                summaries=summaries,
+                location=location or None,
+            )
+            interpretation = (
+                f"Satchy summarized {count} source-backed report(s)"
+                + (f" for {location}" if location else "")
+            )
+        elif intent.intent == SatchyIntent.MISSION_STATUS:
+            current = await _mission_status(
+                session,
+                transmission=transmission,
+                conversation=conversation,
+            )
+            action_type = ActionType.REPLY_RADIO
+            if current is None:
+                proposed_message = f"{radio_prefix(caller)} No field mission is currently recorded."
+                interpretation = "No field mission is available for this context"
+            else:
+                mission, asset = current
+                proposed_message = mission_status_response(
+                    caller,
+                    asset_name=asset.name,
+                    status=mission.status,
+                    objective=mission.objective,
+                )
+                interpretation = (
+                    f"Reported stored mission status {mission.status} for {asset.name}"
+                )
         elif operational_event is not None and operational_event.event_type != "GENERAL_UPDATE":
             action_type = ActionType.REPLY_RADIO
             proposed_message = observation_logged(
