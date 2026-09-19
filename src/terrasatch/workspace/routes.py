@@ -274,7 +274,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 .limit(40)
             )
         )
-        asset_rows = []
+        assets_by_id = {}
         for site in sites:
             site_assets = await list_authorized_assets(
                 session,
@@ -282,7 +282,8 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 site_id=site.id,
                 user_id=user.id,
             )
-            asset_rows.extend(site_assets)
+            assets_by_id.update({asset.id: asset for asset in site_assets})
+        asset_rows = list(assets_by_id.values())
         return jsonable_encoder(
             {
                 "role": membership.role,
