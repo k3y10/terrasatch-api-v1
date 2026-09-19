@@ -669,6 +669,7 @@ async def process_transmission_control_plane(
             )
             interpretation = "Satchy received and logged a structured field report"
         else:
+            action_type = ActionType.REPLY_RADIO
             proposed_message = radio_prefix(caller) + " Go ahead."
             interpretation = f"{caller} is calling Satchy"
     else:
