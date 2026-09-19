@@ -251,6 +251,58 @@ async def test_ingest_associates_conversation_and_proposes_expected_reply() -> N
 
 
 @pytest.mark.asyncio
+async def test_log_that_uses_previous_structured_report_without_duplicate_workflow() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, log_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Log that last report.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert log_action.action_type == ActionType.REPLY_RADIO.value
+        assert log_action.proposed_message is not None
+        assert "Last report is already logged" in log_action.proposed_message
+        assert "No avalanche activity observed" in log_action.proposed_message
+        assert log_action.structured_payload["satchy_intent"] == "log_observation"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_say_again_repeats_previous_source_backed_event() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, repeat_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Say again.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert repeat_action.proposed_message is not None
+        assert "Last report" in repeat_action.proposed_message
+        assert "Cardiff Bowl" in repeat_action.proposed_message
+        assert "No avalanche activity observed" in repeat_action.proposed_message
+        assert repeat_action.structured_payload["satchy_intent"] == "repeat"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_radio_summary_uses_active_conversation_records() -> None:
     engine, session, seeded = await _seed_session()
     try:
