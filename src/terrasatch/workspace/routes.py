@@ -26,6 +26,7 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import MembershipRole, Site, User
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
+from terrasatch.satchy.adaptation import observe_workspace_context
 from terrasatch.satchy.agent import answer_workspace
 from terrasatch.satchy.assets import (
     create_field_asset,
@@ -41,10 +42,17 @@ router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
 
 
+class SatchyPreferenceSettings(BaseModel):
+    response_detail: Literal["brief", "balanced", "detailed"] = "brief"
+    preferred_workflows: list[str] = Field(default_factory=list, max_length=32)
+    preferred_map_layers: list[str] = Field(default_factory=list, max_length=64)
+
+
 class ModulePreferences(BaseModel):
     modules: list[Literal["Map", "Radio Log", "Observations", "Workflows", "Satchy"]] = Field(
         max_length=5
     )
+    satchy: SatchyPreferenceSettings | None = None
 
 
 @router.post("/organizations/{organization_id}/preferences")
@@ -56,11 +64,23 @@ async def save_preferences(organization_id: UUID, payload: ModulePreferences, re
         await session.get(User, user.id, with_for_update=True)
         preference = await session.get(WorkspacePreference, (organization_id, user.id))
         if preference is None:
-            preference = WorkspacePreference(organization_id=organization_id, user_id=user.id)
+            preference = WorkspacePreference(
+                organization_id=organization_id,
+                user_id=user.id,
+                modules=[],
+                satchy_preferences={},
+            )
             session.add(preference)
         preference.modules = list(dict.fromkeys(payload.modules))
+        if payload.satchy is not None:
+            profile = dict(preference.satchy_preferences or {})
+            profile["explicit"] = payload.satchy.model_dump(mode="json")
+            preference.satchy_preferences = profile
         await session.commit()
-        return {"modules": preference.modules}
+        return {
+            "modules": preference.modules,
+            "satchy": dict(preference.satchy_preferences or {}),
+        }
 
 
 class Login(BaseModel):
@@ -313,6 +333,9 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             {
                 "role": membership.role,
                 "modules": preference.modules if preference is not None else STARTER_MODULES,
+                "satchy_preferences": (
+                    dict(preference.satchy_preferences or {}) if preference is not None else {}
+                ),
                 "integrations": {
                     "devices": [
                         {
@@ -499,6 +522,26 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             )
         if selected_site is None:
             raise HTTPException(404, "No enabled site is available for Satchy context")
+
+        preference = await session.get(
+            WorkspacePreference,
+            (organization_id, user.id),
+        )
+        if preference is None:
+            preference = WorkspacePreference(
+                organization_id=organization_id,
+                user_id=user.id,
+                modules=list(STARTER_MODULES),
+                satchy_preferences={},
+            )
+            session.add(preference)
+            await session.flush()
+        observe_workspace_context(
+            preference,
+            site_id=selected_site.id,
+            active_map=payload.active_map,
+        )
+        await session.flush()
 
         history = list(
             await session.scalars(
