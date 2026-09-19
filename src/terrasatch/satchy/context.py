@@ -52,6 +52,7 @@ async def build_satchy_context(
     user: User | None = None
     role: str | None = None
     modules: list[str] = []
+    user_preferences: dict[str, object] = {}
     if user_id is not None:
         membership = await session.scalar(
             select(Membership).where(
@@ -68,6 +69,9 @@ async def build_satchy_context(
         role = membership.role.value
         preference = await session.get(WorkspacePreference, (organization_id, user_id))
         modules = list(preference.modules) if preference is not None else []
+        user_preferences = (
+            dict(preference.satchy_preferences or {}) if preference is not None else {}
+        )
 
     transmission: Transmission | None = None
     transcript: Transcript | None = None
@@ -218,6 +222,7 @@ async def build_satchy_context(
         objective=objective,
         active_map=active_map,
         workspace_modules=modules,
+        user_preferences=user_preferences,
         operational_profile=profile_payload,
         edge_context=edge_context,
         rf_context=dict(transmission.rf_metadata or {}) if transmission else {},
