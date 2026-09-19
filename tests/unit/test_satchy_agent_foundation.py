@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -24,6 +26,7 @@ from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 from terrasatch.satchy import models as satchy_models
+from terrasatch.satchy.agent import resolve_radio_intent
 from terrasatch.satchy.assets import (
     create_mission_plan,
     list_authorized_assets,
@@ -297,3 +300,62 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_radio_model_fallback_understands_natural_mission_without_authorizing() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = __import__("json").loads(request.content)
+        assert payload["stream"] is False
+        assert isinstance(payload["format"], dict)
+        assert "approval" in payload["messages"][0]["content"].casefold()
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": (
+                        '{"intent":"request_mission","confidence":0.93,'
+                        '"references_context":true}'
+                    )
+                }
+            },
+        )
+
+    settings = SimpleNamespace(
+        intelligence_provider="ollama",
+        ollama_base_url="http://ollama.test",
+        ollama_model="qwen3:1.7b",
+        intelligence_timeout_seconds=5.0,
+    )
+    resolved = await resolve_radio_intent(
+        settings=settings,
+        text="Control 2 to Satchy, can you get a look over at Cardiff for us?",
+        context={"conversation": {"active_location": "Cardiff Bowl"}},
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert resolved.intent == SatchyIntent.REQUEST_MISSION
+    assert resolved.confidence == 0.93
+    assert resolved.explicit is False
+    assert resolved.references_context is True
+
+
+@pytest.mark.asyncio
+async def test_explicit_radio_approval_never_uses_model_fallback() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("Explicit approval must never be sent to the model")
+
+    settings = SimpleNamespace(
+        intelligence_provider="ollama",
+        ollama_base_url="http://ollama.test",
+        ollama_model="qwen3:1.7b",
+        intelligence_timeout_seconds=5.0,
+    )
+    resolved = await resolve_radio_intent(
+        settings=settings,
+        text="Satchy, Control 2. Approve.",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert resolved.intent == SatchyIntent.APPROVE_ACTION
+    assert resolved.explicit is True
