@@ -14,7 +14,6 @@ from terrasatch.edge.models import EdgeDevice
 from terrasatch.edge.schemas import EdgeDeviceUpdateRequest
 from terrasatch.edge.service import update_device
 from terrasatch.errors import InvalidConfiguration
-from terrasatch.radio.service import get_channel
 
 _DEFAULT_ACTION_TYPES = (
     "reply_radio",
@@ -191,6 +190,10 @@ async def run_ai_channel_command(
     ai = ai_channel_config(device)
 
     if action == "bind" and len(args) >= 2:
+        # Import lazily to keep the admin policy module out of the radio/action
+        # service import cycle during API startup and test collection.
+        from terrasatch.radio.service import get_channel
+
         try:
             channel_id = UUID(args[1])
         except ValueError as exc:
