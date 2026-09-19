@@ -9,6 +9,7 @@ from terrasatch.actions import models as action_models
 from terrasatch.auth import models as auth_models
 from terrasatch.database.base import Base
 from terrasatch.edge import models as edge_models
+from terrasatch.errors import TenantAccessDenied
 from terrasatch.identity import models as identity_models
 from terrasatch.identity.models import (
     Account,
@@ -286,7 +287,7 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
         )
         session.add(outsider)
         await session.flush()
-        with pytest.raises(Exception, match="member"):
+        with pytest.raises(TenantAccessDenied, match="member"):
             await build_satchy_context(
                 session,
                 organization_id=org.id,
