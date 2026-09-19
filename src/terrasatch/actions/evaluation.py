@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -185,8 +186,6 @@ async def _radio_decision(
         elif action.action_type == ActionType.ASSET_MISSION.value:
             mission_id = action.structured_payload.get("mission_id")
             if isinstance(mission_id, str):
-                from uuid import UUID
-
                 await queue_field_mission(
                     session,
                     organization_id=transmission.organization_id,
@@ -320,7 +319,6 @@ async def process_transmission_control_plane(
             mission_action = (
                 await session.get(SatchyAction, mission.action_id) if mission.action_id else None
             )
-            asset_name = "Authorized field asset"
             proposed = {
                 "type": "asset_mission",
                 "mission_id": str(mission.id),
@@ -438,3 +436,4 @@ async def process_transmission_control_plane(
         transition_action(action, ActionStatus.AWAITING_APPROVAL)
 
     await session.flush()
+    return EvaluationOutcome(conversation, evaluation, action)
