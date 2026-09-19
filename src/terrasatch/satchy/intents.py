@@ -20,7 +20,10 @@ _EXPLICIT_REJECT = re.compile(
     re.I,
 )
 _EXPLICIT_CANCEL = re.compile(r"\b(?:cancel|scratch|stand down)(?:\s+(?:it|that))?\b", re.I)
-_ABORT_MISSION = re.compile(r"\b(?:abort mission|abort deployment|bring it back|return to base)\b", re.I)
+_ABORT_MISSION = re.compile(
+    r"\b(?:abort mission|abort deployment|bring it back|return to base)\b",
+    re.I,
+)
 _MISSION_STATUS = re.compile(
     r"\b(?:mission status|status of|what(?:'s| is)\s+(?:the\s+)?(?:drone|robot|relay))\b",
     re.I,

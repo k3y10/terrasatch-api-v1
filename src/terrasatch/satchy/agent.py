@@ -153,5 +153,7 @@ async def answer_workspace(
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("Empty model response")
     except (httpx.HTTPError, ValueError, AttributeError) as error:
-        raise ProviderUnavailable("Satchy is unavailable. No answer was generated or saved.") from error
+        raise ProviderUnavailable(
+            "Satchy is unavailable. No answer was generated or saved."
+        ) from error
     return answer.strip(), settings.ollama_model

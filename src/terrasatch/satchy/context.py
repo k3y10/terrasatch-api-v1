@@ -11,7 +11,13 @@ from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import ResourceNotFound, TenantAccessDenied
 from terrasatch.identity.models import Membership, Organization, Site, Team, User
 from terrasatch.organizations.profiles import get_operational_profile
-from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transcript, Transmission
+from terrasatch.radio.models import (
+    Callsign,
+    OperationalEvent,
+    RadioConversation,
+    Transcript,
+    Transmission,
+)
 from terrasatch.workspace.models import WorkspacePreference
 
 from .schemas import ActiveMapContext, SatchyContext
@@ -218,7 +224,11 @@ async def build_satchy_context(
         transmission_id=transmission.id if transmission else None,
         conversation_id=conversation.id if conversation else None,
         channel_id=transmission.channel_id if transmission else None,
-        callsign=callsign.name if callsign else (transmission.speaker_text if transmission else None),
+        callsign=(
+            callsign.name
+            if callsign
+            else (transmission.speaker_text if transmission else None)
+        ),
         objective=objective,
         active_map=active_map,
         workspace_modules=modules,

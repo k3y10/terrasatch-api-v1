@@ -278,7 +278,9 @@ async def complete_command(
             or action is None
             or ActionStatus(action.status) != ActionStatus.EXECUTING
         ):
-            raise InvalidConfiguration("Only acknowledged approved RF actions can report transmitted")
+            raise InvalidConfiguration(
+                "Only acknowledged approved RF actions can report transmitted"
+            )
         if result == "simulated" and payload.get("simulate_only") is not True:
             raise InvalidConfiguration("RF execution cannot be reported as simulated")
     elif command.command_type == "asset_mission":

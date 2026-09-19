@@ -607,7 +607,9 @@ async def process_transmission_control_plane(
             )
             action_type = ActionType.REPLY_RADIO
             if previous is None:
-                proposed_message = f"{radio_prefix(caller)} No previous structured report to repeat."
+                proposed_message = (
+                    f"{radio_prefix(caller)} No previous structured report to repeat."
+                )
                 interpretation = "No prior structured report exists in this conversation"
             else:
                 location = (
