@@ -46,6 +46,7 @@ from terrasatch.radio.addressing import CallsignCandidate, parse_radio_addressin
 from terrasatch.radio.models import Agent, Callsign, Channel, Transmission
 from terrasatch.radio.schemas import TransmissionCreateRequest
 from terrasatch.radio.service import ingest_transmission
+from terrasatch.satchy.models import FieldAsset, FieldMission
 
 _MODEL_MODULES = (
     action_models,
@@ -247,6 +248,88 @@ async def test_ingest_associates_conversation_and_proposes_expected_reply() -> N
         await session.close()
         await engine.dispose()
 
+
+
+@pytest.mark.asyncio
+async def test_radio_summary_uses_active_conversation_records() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        first, _first_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, summary_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Summarize.",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert summary_action.action_type == ActionType.REPLY_RADIO.value
+        assert summary_action.proposed_message is not None
+        assert "1 related report" in summary_action.proposed_message
+        assert "Cardiff Bowl" in summary_action.proposed_message
+        assert "No avalanche activity observed" in summary_action.proposed_message
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_radio_mission_status_reports_stored_mission_state() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+
+        first, _first_action = await _ingest(session, seeded, "Satchy, Control 2.")
+        assert first.conversation_id is not None
+
+        asset = FieldAsset(
+            organization_id=organization.id,
+            site_id=site.id,
+            name="Drone 2",
+            asset_type="drone",
+            provider="test-drone",
+            capabilities=["drone:mission", "camera:capture"],
+            state="available",
+            enabled=True,
+        )
+        session.add(asset)
+        await session.flush()
+        session.add(
+            FieldMission(
+                organization_id=organization.id,
+                site_id=site.id,
+                asset_id=asset.id,
+                conversation_id=first.conversation_id,
+                objective="Inspect Cardiff Bowl",
+                mission_type="inspection",
+                required_capabilities=["camera:capture"],
+                target={"location_text": "Cardiff Bowl"},
+                approval_required=False,
+                status="deploying",
+            )
+        )
+        await session.flush()
+
+        second, status_action = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. What's the drone doing?",
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert status_action.action_type == ActionType.REPLY_RADIO.value
+        assert status_action.proposed_message is not None
+        assert "Drone 2 mission is deploying" in status_action.proposed_message
+        assert "Inspect Cardiff Bowl" in status_action.proposed_message
+    finally:
+        await session.close()
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
