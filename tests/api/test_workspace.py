@@ -135,6 +135,9 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             "garmin",
             "alltrails",
         }
+        setup = {provider["key"]: provider["setup_status"] for provider in catalog}
+        assert setup["google_drive"] == "planned"
+        assert setup["slack"] == "planned"
         assert own.json()["integrations"]["connections"] == []
 
         integration_url = f"/api/v1/workspace/organizations/{organization_id}/integrations"

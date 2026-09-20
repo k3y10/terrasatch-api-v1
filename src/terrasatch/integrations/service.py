@@ -120,11 +120,7 @@ async def create_connection_request(
         owner_user_id=owner_user_id,
         created_by_user_id=user_id,
         display_name=normalized_display_name[:255],
-        status=(
-            IntegrationStatus.AWAITING_AUTHORIZATION.value
-            if provider["setup_status"] == "available"
-            else IntegrationStatus.REQUESTED.value
-        ),
+        status=IntegrationStatus.REQUESTED.value,
         configuration=dict(configuration),
         enabled=True,
     )
@@ -151,6 +147,33 @@ async def list_visible_connections(
     )
 
 
+async def get_connection_for_management(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+    role: MembershipRole,
+    connection_id: UUID,
+    for_update: bool = False,
+) -> IntegrationConnection:
+    query = select(IntegrationConnection).where(
+        IntegrationConnection.id == connection_id,
+        IntegrationConnection.organization_id == organization_id,
+    )
+    if for_update:
+        query = query.with_for_update()
+    connection = await session.scalar(query)
+    if connection is None:
+        raise ResourceNotFound("Integration connection was not found")
+    scope = IntegrationScope(connection.scope_type)
+    if scope == IntegrationScope.USER:
+        if connection.owner_user_id != user_id and not role_allows(role, MembershipRole.ADMIN):
+            raise ResourceNotFound("Integration connection was not found")
+    elif not role_allows(role, MembershipRole.ADMIN):
+        raise TenantAccessDenied("Administrator access is required to manage this integration")
+    return connection
+
+
 async def revoke_connection(
     session: AsyncSession,
     *,
@@ -159,22 +182,14 @@ async def revoke_connection(
     role: MembershipRole,
     connection_id: UUID,
 ) -> IntegrationConnection:
-    connection = await session.scalar(
-        select(IntegrationConnection)
-        .where(
-            IntegrationConnection.id == connection_id,
-            IntegrationConnection.organization_id == organization_id,
-        )
-        .with_for_update()
+    connection = await get_connection_for_management(
+        session,
+        organization_id=organization_id,
+        user_id=user_id,
+        role=role,
+        connection_id=connection_id,
+        for_update=True,
     )
-    if connection is None:
-        raise ResourceNotFound("Integration connection was not found")
-    scope = IntegrationScope(connection.scope_type)
-    if scope == IntegrationScope.USER:
-        if connection.owner_user_id != user_id and not role_allows(role, MembershipRole.ADMIN):
-            raise ResourceNotFound("Integration connection was not found")
-    elif not role_allows(role, MembershipRole.ADMIN):
-        raise TenantAccessDenied("Administrator access is required to revoke this integration")
 
     connection.status = IntegrationStatus.REVOKED.value
     connection.enabled = False
@@ -196,6 +211,7 @@ def connection_payload(connection: IntegrationConnection) -> dict[str, object]:
         "status": connection.status,
         "configuration": dict(connection.configuration or {}),
         "provider_account_label": connection.provider_account_label,
+        "provider_account_id": connection.provider_account_id,
         "last_synced_at": connection.last_synced_at,
         "last_error": connection.last_error,
         "enabled": connection.enabled,

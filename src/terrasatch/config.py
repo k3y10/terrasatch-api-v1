@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     storage_provider: str = "local_filesystem"
     uac_archive_path: str | None = None
 
+    # External provider integrations. Provider credentials stay server-side; browser clients
+    # receive only connection metadata and authorization destinations.
+    integration_encryption_key: SecretStr | None = None
+    integration_encryption_key_id: str = Field(default="v1", min_length=1, max_length=64)
+    integration_oauth_state_ttl_minutes: int = Field(default=10, ge=3, le=30)
+    integration_return_url: AnyHttpUrl = "https://terrasatch.com/workspace?view=Integrations"
+    google_oauth_client_id: str | None = Field(default=None, max_length=512)
+    google_oauth_client_secret: SecretStr | None = None
+    google_oauth_redirect_uri: AnyHttpUrl | None = None
+    slack_oauth_client_id: str | None = Field(default=None, max_length=512)
+    slack_oauth_client_secret: SecretStr | None = None
+    slack_oauth_redirect_uri: AnyHttpUrl | None = None
+
     # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
     # Live-mode Stripe webhooks remain a separate explicit production safety gate.
@@ -180,6 +193,9 @@ class Settings(BaseSettings):
         "stripe_webhook_secret",
         "billing_email_webhook_secret",
         "billing_activation_signing_secret",
+        "integration_encryption_key",
+        "google_oauth_client_secret",
+        "slack_oauth_client_secret",
         mode="before",
     )
     @classmethod
@@ -209,6 +225,34 @@ class Settings(BaseSettings):
         """Only expose browser administration when all required secrets are configured."""
 
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
+
+    @property
+    def integration_secret_store_is_configured(self) -> bool:
+        """Return whether encrypted provider credential storage is enabled."""
+
+        return self.integration_encryption_key is not None
+
+    @property
+    def google_drive_oauth_is_configured(self) -> bool:
+        """Return whether the Google Drive web-server OAuth flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.google_oauth_redirect_uri
+        )
+
+    @property
+    def slack_oauth_is_configured(self) -> bool:
+        """Return whether the Slack OAuth v2 flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.slack_oauth_client_id
+            and self.slack_oauth_client_secret
+            and self.slack_oauth_redirect_uri
+        )
 
     @property
     def staging_payment_links_are_configured(self) -> bool:

@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
@@ -26,11 +27,17 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import MembershipRole, Site, Team, User
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.models import IntegrationScope
+from terrasatch.integrations.oauth_service import (
+    begin_authorization,
+    complete_authorization,
+    disconnect_connection,
+    probe_connection,
+    workspace_return_url,
+)
 from terrasatch.integrations.service import (
     connection_payload,
     create_connection_request,
     list_visible_connections,
-    revoke_connection,
 )
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
@@ -382,7 +389,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "provider": request.app.state.settings.intelligence_provider,
                         "model": request.app.state.settings.ollama_model,
                     },
-                    "catalog": provider_catalog(),
+                    "catalog": provider_catalog(request.app.state.settings),
                     "connections": [connection_payload(connection) for connection in connections],
                 },
                 "subscription": subscription,
@@ -416,7 +423,7 @@ async def integration_catalog(organization_id: UUID, request: Request, response:
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
         await access(request, session, organization_id)
-        return provider_catalog()
+        return provider_catalog(request.app.state.settings)
 
 
 @router.post(
@@ -449,20 +456,88 @@ async def request_integration(
         return jsonable_encoder(connection_payload(connection))
 
 
-@router.post("/organizations/{organization_id}/integrations/{connection_id}/revoke")
-async def revoke_integration(
-    organization_id: UUID,
-    connection_id: UUID,
-    request: Request,
-):
-    """Revoke a connection or request without exposing provider credentials to the browser."""
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/authorize")
+async def authorize_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Start a single-use server-side OAuth flow for a configured provider."""
 
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
         user, membership = await access(request, session, organization_id)
         await writable(session, membership)
-        connection = await revoke_connection(
+        connection, url, expires_at = await begin_authorization(
             session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return {"connection": jsonable_encoder(connection_payload(connection)), "url": url, "expires_at": expires_at}
+
+
+@router.get("/integrations/oauth/{provider}/callback", include_in_schema=False)
+async def integration_oauth_callback(
+    provider: str,
+    request: Request,
+    state: str = Query(min_length=16, max_length=256),
+    code: str | None = Query(default=None, max_length=4096),
+    error: str | None = Query(default=None, max_length=128),
+):
+    """Consume one OAuth state and immediately redirect away from authorization-code query params."""
+
+    async with create_session_factory(request.app.state.settings)() as session:
+        connection, success, reason = await complete_authorization(
+            session,
+            request.app.state.settings,
+            provider=provider,
+            state=state,
+            code=code,
+            provider_error=error,
+        )
+        await session.commit()
+        return RedirectResponse(
+            workspace_return_url(
+                request.app.state.settings,
+                connection=connection,
+                success=success,
+                reason=reason,
+            ),
+            status_code=303,
+        )
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/test")
+async def test_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Verify the live provider credential without returning the credential itself."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await probe_connection(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/revoke")
+async def revoke_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Revoke provider credentials first, then remove the encrypted local credential."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await disconnect_connection(
+            session,
+            request.app.state.settings,
             organization_id=organization_id,
             user_id=user.id,
             role=membership.role,
