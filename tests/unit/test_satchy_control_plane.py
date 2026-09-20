@@ -290,6 +290,7 @@ async def test_radio_integration_requests_become_approval_gated_satchy_actions()
         assert notify.status == ActionStatus.AWAITING_APPROVAL.value
         assert notify.approval_required is True
         assert notify.structured_payload["capability"] == "notification.send"
+        assert notify.structured_payload["integration_scope"] == "team"
         assert notify.structured_payload["text"] == "Cardiff is clear"
         assert notify.proposed_message == "Cardiff is clear"
 
@@ -308,6 +309,7 @@ async def test_radio_integration_requests_become_approval_gated_satchy_actions()
         assert report.status == ActionStatus.AWAITING_APPROVAL.value
         assert report.approval_required is True
         assert report.structured_payload["capability"] == "document.create"
+        assert report.structured_payload["integration_scope"] == "team"
         assert report.structured_payload["name"] == "satchy-shift-handoff.md"
         assert "No avalanche activity observed" in report.structured_payload["content"]
     finally:
