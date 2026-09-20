@@ -509,6 +509,7 @@ async def process_transmission_control_plane(
             conversation=conversation,
         )
         planner_context: dict[str, object] = {
+            "request_source": "radio",
             "conversation": {
                 "active_location": active_location or conversation.active_location,
                 "summaries": summaries,
@@ -650,6 +651,7 @@ async def process_transmission_control_plane(
                 interpretation = integration_plan.summary
                 action_specific_payload = {
                     "capability": "notification.send",
+                    "integration_scope": integration_plan.audience_scope,
                     "text": integration_plan.notification_text,
                     "workflow_key": "satchy.action.notify_team",
                     "planner_confidence": integration_plan.confidence,
@@ -665,6 +667,7 @@ async def process_transmission_control_plane(
                 interpretation = integration_plan.summary
                 action_specific_payload = {
                     "capability": "document.create",
+                    "integration_scope": integration_plan.audience_scope,
                     "name": integration_plan.document_name,
                     "content": integration_plan.document_content,
                     "mime_type": integration_plan.mime_type,
