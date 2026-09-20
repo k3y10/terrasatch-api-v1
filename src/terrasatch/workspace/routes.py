@@ -23,7 +23,15 @@ from terrasatch.identity.access import (
     list_user_access,
     role_allows,
 )
-from terrasatch.identity.models import MembershipRole, Site, User
+from terrasatch.identity.models import MembershipRole, Site, Team, User
+from terrasatch.integrations.catalog import provider_catalog
+from terrasatch.integrations.models import IntegrationScope
+from terrasatch.integrations.service import (
+    connection_payload,
+    create_connection_request,
+    list_visible_connections,
+    revoke_connection,
+)
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.satchy.adaptation import observe_workspace_context
@@ -115,6 +123,14 @@ class Observation(BaseModel):
 class Decision(BaseModel):
     decision: Literal["approve", "reject"]
     notes: str = Field(default="", max_length=2000)
+
+
+class IntegrationRequest(BaseModel):
+    provider: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9_]+$")
+    scope: IntegrationScope
+    team_id: UUID | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    configuration: dict[str, object] = Field(default_factory=dict)
 
 
 def csrf(request):
@@ -302,6 +318,21 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 )
             )
         )
+        teams = list(
+            await session.scalars(
+                select(Team)
+                .where(
+                    Team.organization_id == organization_id,
+                    Team.enabled.is_(True),
+                )
+                .order_by(Team.name)
+            )
+        )
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+        )
         actions = await session.scalars(
             select(SatchyAction)
             .where(SatchyAction.organization_id == organization_id)
@@ -351,9 +382,12 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "provider": request.app.state.settings.intelligence_provider,
                         "model": request.app.state.settings.ollama_model,
                     },
+                    "catalog": provider_catalog(),
+                    "connections": [connection_payload(connection) for connection in connections],
                 },
                 "subscription": subscription,
                 "sites": [{"id": str(s.id), "name": s.name} for s in sites],
+                "teams": [{"id": str(t.id), "name": t.name, "site_id": str(t.site_id) if t.site_id else None} for t in teams],
                 "assets": [_asset_payload(asset) for asset in asset_rows],
                 "records": await records(session, organization_id),
                 "actions": [
@@ -373,6 +407,69 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 ],
             }
         )
+
+
+@router.get("/organizations/{organization_id}/integrations/catalog")
+async def integration_catalog(organization_id: UUID, request: Request, response: Response):
+    """Return provider capabilities without exposing credentials or pretending roadmap adapters are live."""
+
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        await access(request, session, organization_id)
+        return provider_catalog()
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def request_integration(
+    organization_id: UUID,
+    payload: IntegrationRequest,
+    request: Request,
+):
+    """Record a safely scoped provider connection request; raw provider secrets are never accepted."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await create_connection_request(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            provider_key=payload.provider,
+            scope=payload.scope,
+            team_id=payload.team_id,
+            display_name=payload.display_name,
+            configuration=payload.configuration,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/revoke")
+async def revoke_integration(
+    organization_id: UUID,
+    connection_id: UUID,
+    request: Request,
+):
+    """Revoke a connection or request without exposing provider credentials to the browser."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await revoke_connection(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
 
 
 @router.get("/organizations/{organization_id}/assets")
