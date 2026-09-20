@@ -15,7 +15,6 @@ from urllib.parse import urlsplit
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
-
 @dataclass(frozen=True, slots=True)
 class ProviderAppConfig:
     provider_key: str
@@ -23,7 +22,6 @@ class ProviderAppConfig:
     client_secret: str
     redirect_uri: str
     source: str
-
 
 _LEGACY_FIELDS: dict[str, tuple[str, str, str]] = {
     "google_drive": (
@@ -43,7 +41,6 @@ _LEGACY_FIELDS: dict[str, tuple[str, str, str]] = {
     ),
 }
 
-
 def _clean_text(value: object) -> str | None:
     if value is None:
         return None
@@ -52,13 +49,11 @@ def _clean_text(value: object) -> str | None:
     normalized = str(value).strip()
     return normalized or None
 
-
 def _validate_redirect_uri(value: str) -> str:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.fragment:
         raise InvalidConfiguration("Provider redirect_uri must be an absolute HTTP(S) URL")
     return value
-
 
 def _bundle(settings: Settings) -> dict[str, object]:
     secret = settings.integration_provider_config_json
@@ -75,7 +70,6 @@ def _bundle(settings: Settings) -> dict[str, object]:
             "Integration provider config bundle must be a JSON object"
         )
     return payload
-
 
 def resolve_provider_app_config(
     settings: Settings,
@@ -133,7 +127,6 @@ def resolve_provider_app_config(
         )
     return None
 
-
 def provider_app_is_configured(settings: Settings, provider_key: str) -> bool:
     if not settings.integration_secret_store_is_configured:
         return False
@@ -141,8 +134,6 @@ def provider_app_is_configured(settings: Settings, provider_key: str) -> bool:
         return resolve_provider_app_config(settings, provider_key) is not None
     except InvalidConfiguration:
         return False
-
-
 
 def resolve_provider_secret_fields(
     settings: Settings,
@@ -181,7 +172,6 @@ def resolve_provider_secret_fields(
             )
         resolved[field] = value
     return resolved
-
 
 def provider_secret_is_configured(
     settings: Settings,
