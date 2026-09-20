@@ -30,6 +30,33 @@ class OAuthProviderAdapter(Protocol):
     async def revoke(self, credentials: dict[str, object]) -> None: ...
 
 
+async def _request(
+    transport: httpx.AsyncBaseTransport | None,
+    method: str,
+    url: str,
+    **kwargs,
+) -> httpx.Response:
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            return await client.request(method, url, **kwargs)
+    except httpx.HTTPError as error:
+        raise ProviderUnavailable("Provider network request failed") from error
+
+
+def _json_payload(response: httpx.Response, *, provider: str) -> dict[str, object]:
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(f"{provider} returned an invalid response") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable(f"{provider} returned an invalid response")
+    return payload
+
+
 def _expiry(expires_in: object) -> str | None:
     try:
         seconds = int(expires_in)
@@ -83,33 +110,37 @@ class GoogleDriveOAuthAdapter:
         return f"{self.authorization_endpoint}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str) -> OAuthExchangeResult:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.token_endpoint, data={
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
                 "redirect_uri": self.redirect_uri,
-            })
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Google authorization code exchange failed")
-            payload = response.json()
-            access_token = payload.get("access_token")
-            if not isinstance(access_token, str) or not access_token:
-                raise ProviderUnavailable("Google did not return an access token")
-            scope_text = str(payload.get("scope") or " ".join(self.scopes))
-            credentials: dict[str, object] = {
-                "provider": self.provider_key,
-                "access_token": access_token,
-                "token_type": str(payload.get("token_type") or "Bearer"),
-                "scope": scope_text.split(),
-            }
-            refresh_token = payload.get("refresh_token")
-            if isinstance(refresh_token, str) and refresh_token:
-                credentials["refresh_token"] = refresh_token
-            expires_at = _expiry(payload.get("expires_in"))
-            if expires_at:
-                credentials["expires_at"] = expires_at
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Google authorization code exchange failed")
+        payload = _json_payload(response, provider="Google")
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Google did not return an access token")
+        scope_text = str(payload.get("scope") or " ".join(self.scopes))
+        credentials: dict[str, object] = {
+            "provider": self.provider_key,
+            "access_token": access_token,
+            "token_type": str(payload.get("token_type") or "Bearer"),
+            "scope": scope_text.split(),
+        }
+        refresh_token = payload.get("refresh_token")
+        if isinstance(refresh_token, str) and refresh_token:
+            credentials["refresh_token"] = refresh_token
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            credentials["expires_at"] = expires_at
         label, account_id = await self.probe(credentials)
         return OAuthExchangeResult(credentials, label, account_id, scope_text.split())
 
@@ -117,16 +148,20 @@ class GoogleDriveOAuthAdapter:
         refresh_token = credentials.get("refresh_token")
         if not isinstance(refresh_token, str) or not refresh_token:
             raise ProviderUnavailable("Google refresh token is unavailable; reconnect Google Drive")
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.token_endpoint, data={
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
-            })
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Google access-token refresh failed")
-            payload = response.json()
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Google access-token refresh failed")
+        payload = _json_payload(response, provider="Google")
         access_token = payload.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise ProviderUnavailable("Google did not return a refreshed access token")
@@ -143,25 +178,34 @@ class GoogleDriveOAuthAdapter:
         access_token = credentials.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise ProviderUnavailable("Google access token is unavailable")
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.get(
-                self.about_endpoint,
-                params={"fields": "user(displayName,emailAddress,permissionId)"},
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Google Drive connection check failed")
-            user = response.json().get("user") or {}
+        response = await _request(
+            self.transport,
+            "GET",
+            self.about_endpoint,
+            params={"fields": "user(displayName,emailAddress,permissionId)"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Google Drive connection check failed")
+        payload = _json_payload(response, provider="Google Drive")
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
         label = user.get("emailAddress") or user.get("displayName")
         account_id = user.get("permissionId")
-        return (str(label)[:255] if label else None, str(account_id)[:255] if account_id else None)
+        return (
+            str(label)[:255] if label else None,
+            str(account_id)[:255] if account_id else None,
+        )
 
     async def revoke(self, credentials: dict[str, object]) -> None:
         token = credentials.get("refresh_token") or credentials.get("access_token")
         if not isinstance(token, str) or not token:
             return
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.revoke_endpoint, data={"token": token})
+        response = await _request(
+            self.transport,
+            "POST",
+            self.revoke_endpoint,
+            data={"token": token},
+        )
         if response.status_code not in {200, 400}:
             raise ProviderUnavailable("Google credential revocation could not be confirmed")
 
@@ -183,19 +227,25 @@ class SlackOAuthAdapter:
         self.transport = transport
 
     def authorization_url(self, *, state: str) -> str:
-        params = {"client_id":self.client_id,"scope":",".join(self.scopes),"redirect_uri":self.redirect_uri,"state":state}
+        params = {
+            "client_id": self.client_id,
+            "scope": ",".join(self.scopes),
+            "redirect_uri": self.redirect_uri,
+            "state": state,
+        }
         return f"{self.authorization_endpoint}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str) -> OAuthExchangeResult:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(
-                self.token_endpoint,
-                data={"code": code, "redirect_uri": self.redirect_uri},
-                auth=(self.client_id, self.client_secret),
-            )
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Slack authorization code exchange failed")
-            payload = response.json()
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={"code": code, "redirect_uri": self.redirect_uri},
+            auth=(self.client_id, self.client_secret),
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Slack authorization code exchange failed")
+        payload = _json_payload(response, provider="Slack")
         if payload.get("ok") is not True:
             error = str(payload.get("error") or "oauth_failed").replace(" ", "_")[:80]
             raise ProviderUnavailable(f"Slack authorization failed ({error})")
@@ -217,21 +267,35 @@ class SlackOAuthAdapter:
             credentials["expires_at"] = expires_at
         incoming = payload.get("incoming_webhook")
         if isinstance(incoming, dict):
-            credentials["incoming_webhook"] = {key:value for key,value in incoming.items() if key in {"channel","channel_id","configuration_url","url"}}
+            credentials["incoming_webhook"] = {
+                key: value
+                for key, value in incoming.items()
+                if key in {"channel", "channel_id", "configuration_url", "url"}
+            }
         team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
         label = team.get("name")
         account_id = team.get("id")
-        return OAuthExchangeResult(credentials, str(label)[:255] if label else None, str(account_id)[:255] if account_id else None, [item for item in scope_text.split(",") if item])
+        return OAuthExchangeResult(
+            credentials,
+            str(label)[:255] if label else None,
+            str(account_id)[:255] if account_id else None,
+            [item for item in scope_text.split(",") if item],
+        )
 
     async def refresh(self, credentials: dict[str, object]) -> dict[str, object]:
         refresh_token = credentials.get("refresh_token")
         if not isinstance(refresh_token, str) or not refresh_token:
             return credentials
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.token_endpoint, data={"grant_type":"refresh_token","refresh_token":refresh_token}, auth=(self.client_id,self.client_secret))
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Slack access-token refresh failed")
-            payload = response.json()
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            auth=(self.client_id, self.client_secret),
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Slack access-token refresh failed")
+        payload = _json_payload(response, provider="Slack")
         if payload.get("ok") is not True:
             raise ProviderUnavailable("Slack access-token refresh failed")
         access_token = payload.get("access_token")
@@ -246,34 +310,50 @@ class SlackOAuthAdapter:
         if expires_at:
             next_credentials["expires_at"] = expires_at
         if payload.get("scope"):
-            next_credentials["scope"] = [item for item in str(payload["scope"]).split(",") if item]
+            next_credentials["scope"] = [
+                item for item in str(payload["scope"]).split(",") if item
+            ]
         return next_credentials
 
     async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
         access_token = credentials.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise ProviderUnavailable("Slack access token is unavailable")
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.auth_test_endpoint, headers={"Authorization": f"Bearer {access_token}"})
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Slack connection check failed")
-            payload = response.json()
+        response = await _request(
+            self.transport,
+            "POST",
+            self.auth_test_endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Slack connection check failed")
+        payload = _json_payload(response, provider="Slack")
         if payload.get("ok") is not True:
             raise ProviderUnavailable("Slack connection check failed")
         label = payload.get("team") or payload.get("user")
         account_id = payload.get("team_id") or payload.get("enterprise_id")
-        return (str(label)[:255] if label else None, str(account_id)[:255] if account_id else None)
+        return (
+            str(label)[:255] if label else None,
+            str(account_id)[:255] if account_id else None,
+        )
 
     async def revoke(self, credentials: dict[str, object]) -> None:
         access_token = credentials.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             return
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, transport=self.transport) as client:
-            response = await client.post(self.revoke_endpoint, headers={"Authorization": f"Bearer {access_token}"})
-            if response.status_code >= 400:
-                raise ProviderUnavailable("Slack credential revocation could not be confirmed")
-            payload = response.json()
-        if payload.get("ok") is not True and payload.get("error") not in {"token_revoked","not_authed"}:
+        response = await _request(
+            self.transport,
+            "POST",
+            self.revoke_endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Slack credential revocation could not be confirmed")
+        payload = _json_payload(response, provider="Slack")
+        if payload.get("ok") is not True and payload.get("error") not in {
+            "token_revoked",
+            "not_authed",
+        }:
             raise ProviderUnavailable("Slack credential revocation could not be confirmed")
 
 
@@ -285,7 +365,12 @@ def provider_is_available(provider_key: str, settings: Settings) -> bool:
     return False
 
 
-def get_adapter(provider_key: str, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None) -> OAuthProviderAdapter:
+def get_adapter(
+    provider_key: str,
+    settings: Settings,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> OAuthProviderAdapter:
     if provider_key == "google_drive":
         return GoogleDriveOAuthAdapter(settings, transport=transport)
     if provider_key == "slack":

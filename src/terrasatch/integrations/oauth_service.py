@@ -72,7 +72,12 @@ async def _save_credentials(session: AsyncSession, settings: Settings, *, connec
 async def complete_authorization(session: AsyncSession, settings: Settings, *, provider: str, state: str, code: str | None, provider_error: str | None) -> tuple[IntegrationConnection, bool, str | None]:
     oauth_state = await session.scalar(select(IntegrationOAuthState).where(IntegrationOAuthState.provider == provider, IntegrationOAuthState.state_hash == _state_hash(state)).with_for_update())
     now = datetime.now(UTC)
-    if oauth_state is None or oauth_state.consumed_at is not None or oauth_state.expires_at <= now:
+    if oauth_state is None or oauth_state.consumed_at is not None:
+        raise AuthenticationFailed("OAuth state is invalid or expired")
+    expires_at = oauth_state.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at <= now:
         raise AuthenticationFailed("OAuth state is invalid or expired")
     oauth_state.consumed_at = now
     connection = await session.scalar(select(IntegrationConnection).where(IntegrationConnection.id == oauth_state.connection_id, IntegrationConnection.organization_id == oauth_state.organization_id, IntegrationConnection.provider == provider).with_for_update())
@@ -131,7 +136,7 @@ async def probe_connection(session: AsyncSession, settings: Settings, *, organiz
         connection.status = IntegrationStatus.ERROR.value
         connection.last_error = error.message[:1000]
         await session.flush()
-        raise
+        return connection
     connection.provider_account_label = label or connection.provider_account_label
     connection.provider_account_id = account_id or connection.provider_account_id
     connection.last_synced_at = datetime.now(UTC)
@@ -151,6 +156,6 @@ async def disconnect_connection(session: AsyncSession, settings: Settings, *, or
             connection.status = IntegrationStatus.ERROR.value
             connection.last_error = error.message[:1000]
             await session.flush()
-            raise
+            return connection
         await session.delete(credential)
     return await revoke_connection(session, organization_id=organization_id, user_id=user_id, role=role, connection_id=connection.id)

@@ -152,7 +152,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
                 "provider": "google_drive",
                 "scope": "user",
                 "display_name": "My field Drive",
-                "configuration": {"folder": "TerraSatch"},
+                "configuration": {"folder_id": "folder-test-123"},
             },
             headers=headers,
         )

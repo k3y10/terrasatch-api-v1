@@ -16,6 +16,22 @@ from .catalog import PROVIDERS
 from .models import IntegrationConnection, IntegrationScope, IntegrationStatus
 
 _SENSITIVE_KEY_PARTS = ("secret", "token", "password", "credential", "api_key", "apikey", "private_key")
+_ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
+    "google_drive": {"folder_id"},
+}
+
+
+def _validate_configuration(provider_key: str, configuration: dict[str, object]) -> None:
+    allowed = _ALLOWED_CONFIGURATION_KEYS.get(provider_key, set())
+    unexpected = sorted(set(configuration) - allowed)
+    if unexpected:
+        raise InvalidConfiguration(
+            f"Unsupported configuration fields for {provider_key}: {', '.join(unexpected)}"
+        )
+    if "folder_id" in configuration:
+        folder_id = configuration["folder_id"]
+        if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
+            raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
 
 
 def _assert_non_secret_configuration(value: object, *, path: str = "configuration") -> None:
@@ -87,6 +103,7 @@ async def create_connection_request(
     if scope != IntegrationScope.TEAM and team_id is not None:
         raise InvalidConfiguration("team_id is only valid for team-scoped integrations")
 
+    _validate_configuration(provider_key, configuration)
     _assert_non_secret_configuration(configuration)
 
     owner_user_id = user_id if scope == IntegrationScope.USER else None
