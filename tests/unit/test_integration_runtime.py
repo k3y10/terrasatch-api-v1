@@ -11,11 +11,13 @@ from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Organization, Team, User
 from terrasatch.integrations.models import (
     IntegrationConnection,
+    IntegrationCredential,
+    IntegrationDelivery,
     IntegrationGrant,
     IntegrationStatus,
 )
 from terrasatch.integrations.operations import ProviderQueryResult
-from terrasatch.integrations.runtime import query, resolve_connection
+from terrasatch.integrations.runtime import _delivery, query, resolve_connection
 
 
 @pytest.mark.asyncio
@@ -324,5 +326,75 @@ async def test_arcgis_query_runtime_enforces_connection_layer_allowlist(
                 payload={"layer_url": other_layer},
                 agent_key="satchy",
             )
+
+    await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_delivery_duplicate_does_not_rollback_unrelated_state() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Idempotency account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Idempotency org",
+            slug=f"idempotency-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Idempotency User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="google_drive",
+            scope_type="user",
+            owner_user_id=user.id,
+            created_by_user_id=user.id,
+            display_name="Drive",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+
+        request_id = uuid4()
+        existing = IntegrationDelivery(
+            organization_id=organization.id,
+            connection_id=connection.id,
+            requested_by_user_id=user.id,
+            request_id=request_id,
+            operation="document.create",
+            status="pending",
+            request_metadata={},
+            response_metadata={},
+        )
+        session.add(existing)
+        await session.commit()
+
+        organization.name = "Idempotency org updated"
+        delivery, created = await _delivery(
+            session,
+            organization_id=organization.id,
+            connection=connection,
+            user_id=user.id,
+            request_id=request_id,
+            capability="document.create",
+            request_metadata={"content_bytes": 1},
+        )
+        assert created is False
+        assert delivery.id == existing.id
+        assert organization.name == "Idempotency org updated"
+        assert session.dirty
 
     await engine.dispose()

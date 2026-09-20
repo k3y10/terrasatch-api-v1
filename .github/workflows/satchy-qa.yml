@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/satchy-agent-context-missions
+      - feat/integration-scope-foundation
   pull_request:
     branches:
       - main

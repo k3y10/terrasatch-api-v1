@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from binascii import Error as BinasciiError
 import hashlib
 import hmac
 import json
@@ -373,7 +374,7 @@ def _caltopo_signature(
 ) -> str:
     try:
         secret = base64.b64decode(credential_secret, validate=True)
-    except (ValueError, TypeError) as error:
+    except (BinasciiError, ValueError, TypeError) as error:
         raise InvalidConfiguration("CalTopo credential secret is not valid base64") from error
     message = f"{method.upper()} {endpoint}\n{expires}\n{payload_string}"
     digest = hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()

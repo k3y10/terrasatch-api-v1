@@ -52,7 +52,7 @@ async def probe_manual_credentials(
         host = configuration.get("account_host")
         if not isinstance(host, str):
             raise InvalidConfiguration("Snowflake account_host is missing")
-        result = await query_snowflake(
+        await query_snowflake(
             credentials,
             account_host=host,
             statement="SELECT CURRENT_ACCOUNT()",
@@ -77,7 +77,7 @@ async def probe_manual_credentials(
                 else None
             ),
         )
-        return host, str(result.metadata.get("statement_handle") or host)
+        return host, host
 
     raise InvalidConfiguration("This integration does not use manual credentials")
 

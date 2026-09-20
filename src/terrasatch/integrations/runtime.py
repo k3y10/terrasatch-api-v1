@@ -168,11 +168,11 @@ async def _delivery(
         request_metadata=request_metadata,
         response_metadata={},
     )
-    session.add(delivery)
     try:
-        await session.flush()
+        async with session.begin_nested():
+            session.add(delivery)
+            await session.flush()
     except IntegrityError:
-        await session.rollback()
         existing = await session.scalar(
             select(IntegrationDelivery).where(
                 IntegrationDelivery.organization_id == organization_id,
@@ -241,6 +241,12 @@ async def execute(
     )
     if not created:
         return delivery
+
+    # Persist the pending idempotency record (and any approved action state in the
+    # caller's transaction) before contacting an external provider. If the process
+    # exits after the provider accepts the request, a retry sees the pending record
+    # instead of sending the same communication again.
+    await session.commit()
 
     try:
         credentials, _ = await active_credentials(
