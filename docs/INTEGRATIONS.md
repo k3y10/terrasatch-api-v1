@@ -38,7 +38,8 @@ The first Drive adapter uses the narrow `https://www.googleapis.com/auth/drive.f
 2. Enable the Google Drive API.
 3. Configure the OAuth consent screen and the `drive.file` scope.
 4. Register the exact redirect URI: `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/google_drive/callback`.
-5. Set the server-only client ID, client secret, and redirect URI environment values.
+5. Store the client ID, client secret, and redirect URI in the server-only provider config bundle
+   (or the legacy per-provider environment fallback).
 
 The authorization request uses a random single-use `state`, requests offline access, and stores any refresh token only in the encrypted credential record.
 
@@ -51,7 +52,8 @@ The initial Slack adapter deliberately requests only the `incoming-webhook` scop
 1. Create the TerraSatch Slack app and configure OAuth & Permissions.
 2. Add the `incoming-webhook` bot scope.
 3. Register the exact redirect URI: `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/slack/callback`.
-4. Set the server-only Slack client ID, client secret, and redirect URI environment values.
+4. Store the Slack client ID, client secret, and redirect URI in the server-only provider config
+   bundle (or the legacy per-provider environment fallback).
 5. Distribute or approve the app as required before installing it into customer workspaces.
 
 Slack code exchange uses HTTP Basic authentication for the client credentials. TerraSatch treats the OAuth install as incomplete unless Slack returns the approved incoming webhook destination and channel identifier. Returned bot tokens, refresh tokens when rotation is enabled, and incoming webhook URLs stay inside the encrypted credential payload.
@@ -77,7 +79,8 @@ capabilities yet.
 1. Create ArcGIS OAuth credentials for a server-side application.
 2. Register the callback:
    `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/esri_arcgis/callback`.
-3. Set the API-only ArcGIS client ID, client secret, and redirect URI environment values.
+3. Store the API-only ArcGIS client ID, client secret, and redirect URI in the provider config
+   bundle (or the legacy per-provider environment fallback).
 4. Create the TerraSatch connection with its approved `feature_layer_urls`.
 
 ## Lifecycle
