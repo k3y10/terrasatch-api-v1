@@ -35,6 +35,8 @@ materially affects correctness.
 _INTEGRATION_ACTION_SYSTEM = """Plan one provider-neutral TerraSatch integration action.
 You are planning only. Never execute, approve, authorize, or choose a provider brand.
 Supported action_type values are notify_team, generate_report, and none.
+Choose audience_scope independently from provider selection: user for personal work, team for a
+team workflow, and organization only when the request clearly targets the whole organization.
 Use only the supplied operational context and the user's request.
 For notify_team, notification_text is the exact proposed outbound message.
 For generate_report, provide document_name, document_content, and a supported mime_type.
@@ -110,17 +112,21 @@ def _deterministic_integration_plan(
             return SatchyIntegrationPlan(
                 action_type="notify_team",
                 confidence=0.9,
+                audience_scope="team",
                 summary="A team notification was requested but its message is missing.",
                 missing_context=["notification text or a source-backed field update"],
             )
         return SatchyIntegrationPlan(
             action_type="notify_team",
             confidence=0.95,
+            audience_scope="team",
             summary="Prepare a team notification and wait for human approval.",
             notification_text=notification,
         )
 
     if _REPORT_REQUEST.search(normalized):
+        request_source = context.get("request_source")
+        report_scope = "team" if request_source == "radio" else "user"
         report_lines = summaries.copy()
         if direct_text and direct_text not in report_lines:
             report_lines.insert(0, direct_text)
@@ -128,6 +134,7 @@ def _deterministic_integration_plan(
             return SatchyIntegrationPlan(
                 action_type="generate_report",
                 confidence=0.9,
+                audience_scope=report_scope,
                 summary="A report was requested but source-backed report content is missing.",
                 missing_context=["report content or source-backed operational records"],
             )
@@ -137,6 +144,7 @@ def _deterministic_integration_plan(
         return SatchyIntegrationPlan(
             action_type="generate_report",
             confidence=0.95,
+            audience_scope=report_scope,
             summary="Prepare a source-backed field report and wait for human approval.",
             document_name=(
                 "satchy-shift-handoff.md"
