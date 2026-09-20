@@ -261,7 +261,7 @@ def provider_catalog(
             and provider_secret_is_configured(
                 settings,
                 "mapbox",
-                required_fields={"access_token"},
+                required_fields={"access_token", "username", "style_ids"},
             )
         )
         manual_supported = support_status == "supported" and auth_type == "service_account"
