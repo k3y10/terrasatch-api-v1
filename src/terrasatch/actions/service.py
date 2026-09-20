@@ -142,10 +142,19 @@ async def approve_action(
     if ActionStatus(action.status) != ActionStatus.AWAITING_APPROVAL:
         raise InvalidConfiguration("Only actions awaiting approval can be approved")
     if edited_message is not None:
-        normalized = " ".join(edited_message.split())
+        if action.action_type == ActionType.GENERATE_REPORT.value:
+            normalized = edited_message.strip()
+        else:
+            normalized = " ".join(edited_message.split())
         if not normalized:
-            raise InvalidConfiguration("Approved radio message cannot be empty")
+            raise InvalidConfiguration("Approved action content cannot be empty")
         action.proposed_message = normalized
+        structured = dict(action.structured_payload or {})
+        if action.action_type == ActionType.NOTIFY_TEAM.value:
+            structured["text"] = normalized
+        elif action.action_type == ActionType.GENERATE_REPORT.value:
+            structured["content"] = normalized
+        action.structured_payload = structured
 
     now = datetime.now(UTC)
     transition_action(action, ActionStatus.APPROVED, now=now)

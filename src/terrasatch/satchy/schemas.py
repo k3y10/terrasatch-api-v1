@@ -27,6 +27,25 @@ class SatchyIntent(StrEnum):
     ABORT_MISSION = "abort_mission"
 
 
+class SatchyIntegrationPlan(BaseModel):
+    """Provider-neutral action proposal. Execution always remains approval-gated."""
+
+    action_type: Literal["notify_team", "generate_report", "none"] = "none"
+    confidence: float = Field(ge=0, le=1)
+    summary: str = Field(min_length=1, max_length=1000)
+    notification_text: str | None = Field(default=None, max_length=4000)
+    document_name: str | None = Field(default=None, max_length=255)
+    document_content: str | None = Field(default=None, max_length=500000)
+    mime_type: Literal[
+        "application/json",
+        "text/csv",
+        "text/markdown",
+        "text/plain",
+    ] | None = None
+    missing_context: list[str] = Field(default_factory=list, max_length=16)
+    approval_required: Literal[True] = True
+
+
 class WorkflowMode(StrEnum):
     AUTO_COMPLETE = "auto_complete"
     CLARIFY = "clarify"

@@ -455,6 +455,9 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "reason": a.reason,
                         "message": a.proposed_message,
                         "status": a.status,
+                        "integration_execution": dict(
+                            (a.structured_payload or {}).get("integration_execution") or {}
+                        ),
                     }
                     for a in actions
                 ],
@@ -839,6 +842,9 @@ async def review(organization_id: UUID, action_id: UUID, payload: Decision, requ
             "id": str(action.id),
             "status": action.status,
             "integration_detail": integration_detail,
+            "integration_execution": dict(
+                (action.structured_payload or {}).get("integration_execution") or {}
+            ),
         }
 
 

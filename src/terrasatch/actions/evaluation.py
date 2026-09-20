@@ -24,7 +24,7 @@ from terrasatch.organizations.models import OrganizationOperationalProfile
 from terrasatch.organizations.profiles import get_operational_profile
 from terrasatch.radio.conversations import associate_transmission
 from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transmission
-from terrasatch.satchy.agent import resolve_radio_intent
+from terrasatch.satchy.agent import plan_integration_action, resolve_radio_intent
 from terrasatch.satchy.assets import create_mission_plan, queue_field_mission
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.models import FieldAsset, FieldMission
@@ -480,6 +480,36 @@ async def process_transmission_control_plane(
     transmission.emergency_confidence = emergency_confidence
     transmission.emergency_reason = emergency_reason
 
+    integration_plan = None
+    if (
+        addressing.addressed_to_agent
+        and intent.intent == SatchyIntent.REQUEST_ACTION
+        and not emergency
+    ):
+        active_location, summaries, _ = await _conversation_summary(
+            session,
+            transmission=transmission,
+            conversation=conversation,
+        )
+        planner_context: dict[str, object] = {
+            "conversation": {
+                "active_location": active_location or conversation.active_location,
+                "summaries": summaries,
+            }
+        }
+        if operational_event is not None:
+            planner_context["current_event"] = {
+                "id": str(operational_event.id),
+                "type": operational_event.event_type,
+                "summary": operational_event.summary,
+                "location": operational_event.location_text,
+            }
+        integration_plan = await plan_integration_action(
+            settings=settings,
+            text=text,
+            context=planner_context,
+        )
+
     mission_feedback: str | None = None
     if (
         addressing.addressed_to_agent
@@ -576,13 +606,58 @@ async def process_transmission_control_plane(
     action_type: ActionType | None = None
     proposed_message: str | None = None
     risk_level = "low"
+    action_specific_payload: dict[str, object] = {}
     if emergency:
         action_type = ActionType.EMERGENCY_REVIEW
         risk_level = "critical"
         interpretation = emergency_reason or "Possible emergency requires human review"
     elif addressing.addressed_to_agent:
         caller = addressing.speaker_text or "Caller"
-        if intent.intent == SatchyIntent.REQUEST_MISSION and mission_feedback:
+        if intent.intent == SatchyIntent.REQUEST_ACTION and integration_plan is not None:
+            if integration_plan.missing_context:
+                action_type = ActionType.ASK_CLARIFICATION
+                missing = ", ".join(integration_plan.missing_context)
+                proposed_message = (
+                    f"{radio_prefix(caller)} I need {missing} before I can propose that action."
+                )
+                interpretation = integration_plan.summary
+            elif (
+                integration_plan.action_type == "notify_team"
+                and integration_plan.notification_text
+            ):
+                action_type = ActionType.NOTIFY_TEAM
+                proposed_message = integration_plan.notification_text
+                interpretation = integration_plan.summary
+                action_specific_payload = {
+                    "capability": "notification.send",
+                    "text": integration_plan.notification_text,
+                    "workflow_key": "satchy.action.notify_team",
+                    "planner_confidence": integration_plan.confidence,
+                }
+            elif (
+                integration_plan.action_type == "generate_report"
+                and integration_plan.document_content
+                and integration_plan.document_name
+                and integration_plan.mime_type
+            ):
+                action_type = ActionType.GENERATE_REPORT
+                proposed_message = integration_plan.document_content
+                interpretation = integration_plan.summary
+                action_specific_payload = {
+                    "capability": "document.create",
+                    "name": integration_plan.document_name,
+                    "content": integration_plan.document_content,
+                    "mime_type": integration_plan.mime_type,
+                    "workflow_key": "satchy.action.generate_report",
+                    "planner_confidence": integration_plan.confidence,
+                }
+            else:
+                action_type = ActionType.ASK_CLARIFICATION
+                proposed_message = (
+                    f"{radio_prefix(caller)} Tell me what you want sent or reported."
+                )
+                interpretation = "Integration action request needs clarification"
+        elif intent.intent == SatchyIntent.REQUEST_MISSION and mission_feedback:
             action_type = (
                 ActionType.ASK_CLARIFICATION
                 if "location" in mission_feedback.casefold()
@@ -706,6 +781,9 @@ async def process_transmission_control_plane(
         proposed_payload = {"type": action_type.value}
         if proposed_message is not None:
             proposed_payload["message"] = proposed_message
+        if action_type in {ActionType.NOTIFY_TEAM, ActionType.GENERATE_REPORT}:
+            proposed_payload["approval_required"] = True
+            proposed_payload["capability"] = action_specific_payload.get("capability")
 
     evaluation = SatchyEvaluation(
         organization_id=transmission.organization_id,
@@ -742,6 +820,7 @@ async def process_transmission_control_plane(
                 "emergency_candidate": emergency,
                 "emergency_auto_broadcast": False,
                 "satchy_intent": intent.intent.value,
+                **action_specific_payload,
             },
             confidence=addressing.confidence if not emergency else emergency_confidence or 0.9,
             approval_required=True,

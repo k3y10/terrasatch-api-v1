@@ -278,6 +278,44 @@ async def test_log_that_uses_previous_structured_report_without_duplicate_workfl
 
 
 @pytest.mark.asyncio
+async def test_radio_integration_requests_become_approval_gated_satchy_actions() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        _, notify = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Notify the team that Cardiff is clear.",
+        )
+        assert notify.action_type == ActionType.NOTIFY_TEAM.value
+        assert notify.status == ActionStatus.AWAITING_APPROVAL.value
+        assert notify.approval_required is True
+        assert notify.structured_payload["capability"] == "notification.send"
+        assert notify.structured_payload["text"] == "Cardiff is clear"
+        assert notify.proposed_message == "Cardiff is clear"
+
+        first, _ = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, report = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Generate a shift handoff.",
+        )
+        assert second.conversation_id == first.conversation_id
+        assert report.action_type == ActionType.GENERATE_REPORT.value
+        assert report.status == ActionStatus.AWAITING_APPROVAL.value
+        assert report.approval_required is True
+        assert report.structured_payload["capability"] == "document.create"
+        assert report.structured_payload["name"] == "satchy-shift-handoff.md"
+        assert "No avalanche activity observed" in report.structured_payload["content"]
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_say_again_repeats_previous_source_backed_event() -> None:
     engine, session, seeded = await _seed_session()
     try:
