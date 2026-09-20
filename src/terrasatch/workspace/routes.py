@@ -30,6 +30,7 @@ from terrasatch.identity.access import (
 )
 from terrasatch.identity.models import MembershipRole, Site, Team, User
 from terrasatch.integrations.catalog import provider_catalog
+from terrasatch.integrations.manual_service import bind_manual_credentials
 from terrasatch.integrations.models import IntegrationScope
 from terrasatch.integrations.delivery_service import (
     content_metadata,
@@ -176,7 +177,7 @@ class IntegrationExecuteRequest(BaseModel):
 
 
 class IntegrationQueryRequest(BaseModel):
-    capability: Literal["map.features.query"]
+    capability: Literal["map.features.query", "map.style.read", "data.query"]
     connection_id: UUID | None = None
     workflow_key: str | None = Field(
         default=None,
@@ -185,6 +186,19 @@ class IntegrationQueryRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9_.:-]+$",
     )
     payload: dict[str, object] = Field(default_factory=dict)
+
+
+class IntegrationCredentialRequest(BaseModel):
+    values: dict[str, str]
+
+    @model_validator(mode="after")
+    def validate_values(self):
+        if not 1 <= len(self.values) <= 4:
+            raise ValueError("Credential setup requires between 1 and 4 values")
+        for key, value in self.values.items():
+            if not key or len(key) > 100 or not value or len(value) > 8192:
+                raise ValueError("Credential setup contains an invalid value")
+        return self
 
 
 class SlackMessageRequest(BaseModel):
@@ -642,6 +656,34 @@ async def query_integration(
         )
         await session.commit()
         return jsonable_encoder(result)
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/credentials"
+)
+async def configure_integration_credentials(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: IntegrationCredentialRequest,
+    request: Request,
+):
+    """Store one manual provider credential set without returning secrets."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await bind_manual_credentials(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            values=payload.values,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
 
 
 @router.post("/organizations/{organization_id}/integrations/{connection_id}/authorize")

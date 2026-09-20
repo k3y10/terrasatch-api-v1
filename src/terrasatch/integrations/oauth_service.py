@@ -23,6 +23,10 @@ from .models import (
     IntegrationOAuthState,
     IntegrationStatus,
 )
+from .manual_service import (
+    MANUAL_CREDENTIAL_PROVIDERS,
+    probe_manual_credentials,
+)
 from .service import get_connection_for_management, revoke_connection
 
 
@@ -271,10 +275,17 @@ async def probe_connection(
             settings,
             connection=connection,
         )
-        label, account_id = await get_adapter(
-            connection.provider,
-            settings,
-        ).probe(credentials)
+        if connection.provider in MANUAL_CREDENTIAL_PROVIDERS:
+            label, account_id = await probe_manual_credentials(
+                connection.provider,
+                credentials,
+                dict(connection.configuration or {}),
+            )
+        else:
+            label, account_id = await get_adapter(
+                connection.provider,
+                settings,
+            ).probe(credentials)
     except TerraSatchError as error:
         connection.status = IntegrationStatus.ERROR.value
         connection.last_error = error.message[:1000]
@@ -314,7 +325,8 @@ async def disconnect_connection(
     if credential is not None:
         try:
             payload = decrypt_payload(settings, credential.encrypted_payload)
-            await get_adapter(connection.provider, settings).revoke(payload)
+            if connection.provider not in MANUAL_CREDENTIAL_PROVIDERS:
+                await get_adapter(connection.provider, settings).revoke(payload)
         except TerraSatchError as error:
             connection.status = IntegrationStatus.ERROR.value
             connection.last_error = error.message[:1000]

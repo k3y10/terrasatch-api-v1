@@ -1,5 +1,6 @@
 """Provider output primitive tests with no live external traffic."""
 
+import base64
 import json
 
 import httpx
@@ -8,7 +9,11 @@ import pytest
 from terrasatch.errors import InvalidConfiguration
 from terrasatch.integrations.operations import (
     create_google_drive_file,
+    create_microsoft_drive_file,
     query_arcgis_features,
+    query_caltopo_map,
+    query_snowflake,
+    read_mapbox_style,
     send_slack_message,
 )
 
@@ -135,3 +140,109 @@ async def test_arcgis_feature_query_rejects_non_arcgis_destination() -> None:
             {"access_token": "arcgis-access"},
             layer_url="https://example.com/arcgis/rest/services/Test/FeatureServer/0",
         )
+
+
+
+@pytest.mark.asyncio
+async def test_microsoft_file_export_uses_graph_and_bearer_token() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.host == "graph.microsoft.com"
+        assert request.url.path.endswith("/me/drive/root:/Reports/shift-report.txt:/content")
+        assert request.headers["Authorization"] == "Bearer ms-access"
+        assert request.content == b"Shift report"
+        return httpx.Response(
+            201,
+            json={
+                "id": "drive-item-1",
+                "name": "shift-report.txt",
+                "size": 12,
+                "webUrl": "https://example.sharepoint.com/file",
+            },
+        )
+
+    result = await create_microsoft_drive_file(
+        {"access_token": "ms-access"},
+        name="shift-report.txt",
+        content="Shift report",
+        mime_type="text/plain",
+        folder_path="Reports",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "drive-item-1"
+
+
+@pytest.mark.asyncio
+async def test_caltopo_map_query_signs_request_and_never_sends_secret() -> None:
+    secret = base64.b64encode(b"cal-secret").decode("ascii")
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "caltopo.com"
+        assert request.url.path == "/api/v1/map/ABC123/since/0"
+        assert request.url.params["id"] == "credential-id"
+        assert "signature" in request.url.params
+        assert "cal-secret" not in str(request.url)
+        return httpx.Response(
+            200,
+            json={"result": {"features": [], "timestamp": 123}},
+        )
+
+    result = await query_caltopo_map(
+        {
+            "credential_id": "credential-id",
+            "credential_secret": secret,
+        },
+        map_id="ABC123",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["feature_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_snowflake_query_allows_only_single_select() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "org-account.snowflakecomputing.com"
+        assert request.headers["Authorization"] == "Bearer snow-pat"
+        assert request.headers["X-Snowflake-Authorization-Token-Type"] == (
+            "PROGRAMMATIC_ACCESS_TOKEN"
+        )
+        assert json.loads(request.content)["statement"] == "SELECT CURRENT_TIMESTAMP()"
+        return httpx.Response(
+            200,
+            json={"statementHandle": "handle-1", "data": [["2026-09-20"]]},
+        )
+
+    result = await query_snowflake(
+        {"programmatic_access_token": "snow-pat"},
+        account_host="org-account.snowflakecomputing.com",
+        statement="SELECT CURRENT_TIMESTAMP()",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["row_count"] == 1
+
+    with pytest.raises(InvalidConfiguration, match="read-only SELECT"):
+        await query_snowflake(
+            {"programmatic_access_token": "snow-pat"},
+            account_host="org-account.snowflakecomputing.com",
+            statement="DELETE FROM observations",
+        )
+
+
+@pytest.mark.asyncio
+async def test_mapbox_style_read_uses_fixed_api_host() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.mapbox.com"
+        assert request.url.path == "/styles/v1/terrasatch/field-style"
+        assert request.url.params["access_token"] == "pk.test"
+        return httpx.Response(
+            200,
+            json={"version": 8, "name": "Field", "sources": {}, "layers": []},
+        )
+
+    result = await read_mapbox_style(
+        access_token="pk.test",
+        username="terrasatch",
+        style_id="field-style",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["name"] == "Field"

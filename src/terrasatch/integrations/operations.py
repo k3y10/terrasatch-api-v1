@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import re
 import secrets
+import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -288,3 +292,323 @@ async def query_arcgis_features(
     if payload.get("exceededTransferLimit") is not None:
         metadata["exceeded_transfer_limit"] = bool(payload["exceededTransferLimit"])
     return ProviderQueryResult(data=payload, metadata=metadata)
+
+
+
+_MICROSOFT_GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+_CALTOPO_ROOT = "https://caltopo.com"
+_MAPBOX_STYLES_ROOT = "https://api.mapbox.com/styles/v1"
+
+
+async def create_microsoft_drive_file(
+    credentials: dict[str, object],
+    *,
+    name: str,
+    content: str,
+    mime_type: str,
+    folder_path: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Microsoft access token is unavailable")
+
+    clean_name = " ".join(name.split())
+    if not clean_name or len(clean_name) > 255 or "/" in clean_name or "\\" in clean_name:
+        raise InvalidConfiguration("Microsoft file name is invalid")
+    media = content.encode("utf-8")
+    if len(media) > 5_000_000:
+        raise InvalidConfiguration("Microsoft file export is limited to 5 MB")
+
+    path_parts: list[str] = []
+    if folder_path:
+        path_parts.extend(
+            part.strip()
+            for part in folder_path.replace("\\", "/").split("/")
+            if part.strip()
+        )
+    if any(part in {".", ".."} for part in path_parts):
+        raise InvalidConfiguration("Microsoft folder path is invalid")
+    path_parts.append(clean_name)
+    encoded_path = "/".join(quote(part, safe="") for part in path_parts)
+    url = f"{_MICROSOFT_GRAPH_ROOT}/me/drive/root:/{encoded_path}:/content"
+    response = await _request(
+        transport,
+        "PUT",
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": mime_type,
+        },
+        content=media,
+    )
+    if response.status_code not in {200, 201}:
+        raise ProviderUnavailable(
+            f"Microsoft file export failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("Microsoft Graph returned an invalid file response") from error
+    if not isinstance(payload, dict) or not payload.get("id"):
+        raise ProviderUnavailable("Microsoft Graph did not return a file ID")
+    safe = {
+        "id": str(payload["id"]),
+        "name": payload.get("name"),
+        "size": payload.get("size"),
+        "web_url": payload.get("webUrl"),
+    }
+    return ProviderOperationResult(
+        external_id=str(payload["id"]),
+        metadata={key: value for key, value in safe.items() if value is not None},
+    )
+
+
+def _caltopo_signature(
+    method: str,
+    endpoint: str,
+    expires: int,
+    payload_string: str,
+    credential_secret: str,
+) -> str:
+    try:
+        secret = base64.b64decode(credential_secret, validate=True)
+    except (ValueError, TypeError) as error:
+        raise InvalidConfiguration("CalTopo credential secret is not valid base64") from error
+    message = f"{method.upper()} {endpoint}\n{expires}\n{payload_string}"
+    digest = hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+async def _caltopo_get(
+    credentials: dict[str, object],
+    endpoint: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, object]:
+    credential_id = credentials.get("credential_id")
+    credential_secret = credentials.get("credential_secret")
+    if not isinstance(credential_id, str) or not credential_id.strip():
+        raise ProviderUnavailable("CalTopo credential ID is unavailable")
+    if not isinstance(credential_secret, str) or not credential_secret.strip():
+        raise ProviderUnavailable("CalTopo credential secret is unavailable")
+    expires = int(time.time() * 1000) + 120_000
+    signature = _caltopo_signature(
+        "GET",
+        endpoint,
+        expires,
+        "",
+        credential_secret,
+    )
+    response = await _request(
+        transport,
+        "GET",
+        f"{_CALTOPO_ROOT}{endpoint}",
+        params={
+            "id": credential_id,
+            "expires": str(expires),
+            "signature": signature,
+        },
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"CalTopo request failed with HTTP {response.status_code}"
+        )
+    if len(response.content) > 2_000_000:
+        raise ProviderUnavailable("CalTopo response exceeded the 2 MB safety limit")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("CalTopo returned an invalid response") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("CalTopo returned an invalid response")
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise ProviderUnavailable("CalTopo returned no result")
+    return result
+
+
+async def query_caltopo_team(
+    credentials: dict[str, object],
+    *,
+    team_id: str,
+    since: int = 0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    clean_team = team_id.strip()
+    if len(clean_team) != 6 or not clean_team.isalnum():
+        raise InvalidConfiguration("CalTopo team ID is invalid")
+    if not 0 <= since <= 9_999_999_999_999:
+        raise InvalidConfiguration("CalTopo since timestamp is invalid")
+    data = await _caltopo_get(
+        credentials,
+        f"/api/v1/acct/{clean_team}/since/{since}",
+        transport=transport,
+    )
+    features = data.get("features")
+    feature_count = len(features) if isinstance(features, list) else 0
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "team_id": clean_team,
+            "feature_count": feature_count,
+            "timestamp": data.get("timestamp"),
+        },
+    )
+
+
+async def query_caltopo_map(
+    credentials: dict[str, object],
+    *,
+    map_id: str,
+    since: int = 0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    clean_map = map_id.strip()
+    if not 4 <= len(clean_map) <= 32 or not clean_map.isalnum():
+        raise InvalidConfiguration("CalTopo map ID is invalid")
+    if not 0 <= since <= 9_999_999_999_999:
+        raise InvalidConfiguration("CalTopo since timestamp is invalid")
+    data = await _caltopo_get(
+        credentials,
+        f"/api/v1/map/{clean_map}/since/{since}",
+        transport=transport,
+    )
+    features = data.get("features")
+    feature_count = len(features) if isinstance(features, list) else 0
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "map_id": clean_map,
+            "feature_count": feature_count,
+            "timestamp": data.get("timestamp"),
+        },
+    )
+
+
+async def query_snowflake(
+    credentials: dict[str, object],
+    *,
+    account_host: str,
+    statement: str,
+    warehouse: str | None = None,
+    database: str | None = None,
+    schema: str | None = None,
+    role: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    token = credentials.get("programmatic_access_token")
+    if not isinstance(token, str) or not token:
+        raise ProviderUnavailable("Snowflake programmatic access token is unavailable")
+    host = account_host.strip().casefold()
+    if (
+        not host.endswith(".snowflakecomputing.com")
+        or "://" in host
+        or "/" in host
+    ):
+        raise InvalidConfiguration("Snowflake account host is invalid")
+
+    normalized = " ".join(statement.split()).strip()
+    upper = normalized.upper()
+    if (
+        not upper.startswith("SELECT ")
+        or ";" in normalized
+        or "--" in normalized
+        or "/*" in normalized
+        or len(normalized) > 5000
+    ):
+        raise InvalidConfiguration("Snowflake data.query accepts one read-only SELECT statement")
+
+    body: dict[str, object] = {"statement": normalized, "timeout": 30}
+    for key, value in {
+        "warehouse": warehouse,
+        "database": database,
+        "schema": schema,
+        "role": role,
+    }.items():
+        if value:
+            body[key] = value
+
+    response = await _request(
+        transport,
+        "POST",
+        f"https://{host}/api/v2/statements",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        json=body,
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"Snowflake query failed with HTTP {response.status_code}"
+        )
+    if len(response.content) > 2_000_000:
+        raise ProviderUnavailable("Snowflake query response exceeded the 2 MB safety limit")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("Snowflake returned an invalid response") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("Snowflake returned an invalid response")
+    if payload.get("code") and not payload.get("data"):
+        raise ProviderUnavailable(
+            f"Snowflake query failed ({str(payload.get('code'))[:80]})"
+        )
+    data_rows = payload.get("data")
+    row_count = len(data_rows) if isinstance(data_rows, list) else 0
+    return ProviderQueryResult(
+        data=payload,
+        metadata={
+            "row_count": row_count,
+            "statement_handle": payload.get("statementHandle"),
+        },
+    )
+
+
+async def read_mapbox_style(
+    *,
+    access_token: str,
+    username: str,
+    style_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    clean_username = username.strip()
+    clean_style = style_id.strip()
+    if (
+        not clean_username
+        or not clean_style
+        or len(clean_username) > 255
+        or len(clean_style) > 255
+        or not re.fullmatch(r"[A-Za-z0-9_.-]+", clean_username)
+        or not re.fullmatch(r"[A-Za-z0-9_-]+", clean_style)
+    ):
+        raise InvalidConfiguration("Mapbox username or style_id is invalid")
+    response = await _request(
+        transport,
+        "GET",
+        f"{_MAPBOX_STYLES_ROOT}/{clean_username}/{clean_style}",
+        params={"access_token": access_token},
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"Mapbox style request failed with HTTP {response.status_code}"
+        )
+    if len(response.content) > 2_000_000:
+        raise ProviderUnavailable("Mapbox style response exceeded the 2 MB safety limit")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("Mapbox returned an invalid style response") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("Mapbox returned an invalid style response")
+    return ProviderQueryResult(
+        data=payload,
+        metadata={
+            "username": clean_username,
+            "style_id": clean_style,
+            "name": payload.get("name"),
+        },
+    )

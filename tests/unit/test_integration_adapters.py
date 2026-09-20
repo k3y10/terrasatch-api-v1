@@ -12,6 +12,7 @@ from terrasatch.errors import ProviderUnavailable
 from terrasatch.integrations.adapters import (
     ArcGISOAuthAdapter,
     GoogleDriveOAuthAdapter,
+    Microsoft365OAuthAdapter,
     SlackOAuthAdapter,
 )
 from terrasatch.integrations.catalog import provider_catalog
@@ -224,7 +225,7 @@ async def test_slack_oauth_rejects_install_without_approved_webhook_destination(
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     adapter = SlackOAuthAdapter(
-        settings,
+        resolve_provider_app_config(settings, "slack", required=True),
         transport=httpx.MockTransport(responder),
     )
     with pytest.raises(ProviderUnavailable, match="webhook destination"):
@@ -258,7 +259,7 @@ async def test_slack_revocation_refreshes_rotated_token_before_remote_revoke() -
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     adapter = SlackOAuthAdapter(
-        settings,
+        resolve_provider_app_config(settings, "slack", required=True),
         transport=httpx.MockTransport(responder),
     )
     await adapter.revoke(
@@ -350,3 +351,52 @@ async def test_arcgis_revoke_invalidates_refresh_token() -> None:
             "refresh_token": "arcgis-refresh",
         }
     )
+
+
+
+@pytest.mark.asyncio
+async def test_microsoft_oauth_requests_one_drive_scopes_and_probes_identity() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"microsoft_365":{"client_id":"ms-client","client_secret":"ms-secret",'
+            '"redirect_uri":"https://api.example.com/microsoft/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == Microsoft365OAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ms-access",
+                    "refresh_token": "ms-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access User.Read Files.ReadWrite",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url).startswith(Microsoft365OAuthAdapter.profile_endpoint):
+            assert request.headers["Authorization"] == "Bearer ms-access"
+            return httpx.Response(
+                200,
+                json={
+                    "id": "user-123",
+                    "displayName": "Field User",
+                    "userPrincipalName": "field@example.com",
+                },
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = Microsoft365OAuthAdapter(
+        resolve_provider_app_config(settings, "microsoft_365", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="ms-state"))
+    params = parse_qs(authorization.query)
+    assert authorization.hostname == "login.microsoftonline.com"
+    assert "Files.ReadWrite" in params["scope"][0]
+    assert "offline_access" in params["scope"][0]
+    result = await adapter.exchange_code(code="ms-code")
+    assert result.account_id == "user-123"
+    assert result.credentials["refresh_token"] == "ms-refresh"

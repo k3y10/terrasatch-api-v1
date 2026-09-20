@@ -20,7 +20,12 @@ per-provider environment variables remain only as a compatibility fallback. Cust
 refresh tokens, webhook URLs, and account credentials are never stored in this bundle; those stay
 encrypted per connection in `integration_credentials`.
 
-Provider passwords, API keys, OAuth access tokens, refresh tokens, private keys, and Slack webhook URLs must never be sent to the browser integration form or stored in `integration_connections.configuration`. OAuth credentials are obtained by the API callback, encrypted with Fernet, and stored in `integration_credentials`. The connection table holds only an opaque `credential_ref` and safe provider account metadata.
+Provider secrets are never returned to the browser or stored in `integration_connections.configuration`.
+OAuth credentials are obtained by the API callback. CalTopo service-account credentials and Snowflake
+PATs are submitted once through the protected credential setup endpoint for providers that do not
+offer the same OAuth experience. All customer secrets are immediately encrypted with Fernet and
+stored in `integration_credentials`. The connection table holds only an opaque `credential_ref`
+and safe provider account metadata.
 
 Generate the encryption key once per deployment and keep it stable:
 
@@ -82,6 +87,44 @@ capabilities yet.
 3. Store the API-only ArcGIS client ID, client secret, and redirect URI in the provider config
    bundle (or the legacy per-provider environment fallback).
 4. Create the TerraSatch connection with its approved `feature_layer_urls`.
+
+## Microsoft 365
+
+Microsoft 365 uses delegated Microsoft identity-platform OAuth with `offline_access`, `User.Read`,
+and `Files.ReadWrite`. The first supported capability is `document.create`, implemented as a small
+file upload to the connected user's OneDrive. Team and organization OneDrive/SharePoint routing is
+not advertised yet; the initial connection scope is intentionally personal.
+
+## Snowflake
+
+Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
+connection stores only the Snowflake account hostname and optional warehouse/database/schema/role
+metadata. The PAT is submitted through the protected credential setup endpoint and encrypted
+immediately. The `data.query` capability accepts one read-only `SELECT` statement, rejects
+multi-statement/comment syntax, and calls the Snowflake SQL API over the fixed
+`*.snowflakecomputing.com` host.
+
+## CalTopo
+
+CalTopo uses its supported Teams service-account API. A team or organization administrator creates a
+CalTopo service account, then provides its credential ID and one-time credential secret through the
+protected credential setup endpoint. TerraSatch stores the secret only in the encrypted credential
+record. Requests use CalTopo's documented HMAC-SHA256 signing flow. The
+`map.features.query` capability can read team data or specifically allowlisted map IDs.
+
+## Mapbox
+
+Mapbox is treated as a TerraSatch-managed read service rather than a customer OAuth connection. Its
+server-side access token lives only in the provider secret bundle. The current
+`map.style.read` capability reads a named style through the fixed Mapbox Styles API host. It does
+not grant style-write or token-management permissions.
+
+## Provider access boundaries
+
+Garmin remains marked **partner required** because the Garmin Connect Developer Program requires
+business approval before production API access. onX Backcountry, Gaia GPS, and AllTrails remain
+**coming soon** rather than pretending unsupported public APIs exist. Their catalog entries remain
+visible so customers can see the intended stack without being offered a broken Connect button.
 
 ## Lifecycle
 

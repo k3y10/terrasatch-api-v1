@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 if TYPE_CHECKING:
     from terrasatch.config import Settings
 
-from .provider_config import provider_app_is_configured
+from .provider_config import (
+    provider_app_is_configured,
+    provider_secret_is_configured,
+)
 
 
 class CapabilityDefinition(TypedDict):
@@ -28,11 +31,18 @@ class ProviderDefinition(TypedDict):
     category: str
     auth: str
     setup_status: Literal["managed", "planned", "available"]
-    support_status: Literal["managed", "supported", "coming_soon"]
+    support_status: Literal[
+        "managed",
+        "supported",
+        "partner_required",
+        "coming_soon",
+    ]
     connect_status: Literal[
         "managed",
         "available",
+        "external_setup_required",
         "needs_configuration",
+        "partner_required",
         "coming_soon",
     ]
     scopes: list[str]
@@ -42,6 +52,7 @@ class ProviderDefinition(TypedDict):
     requires_admin: bool
     connected: bool
     connected_scopes: list[str]
+    runtime_ready: bool
     capabilities: list[str]
     capability_details: list[CapabilityDefinition]
     description: str
@@ -63,9 +74,27 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Read map features",
         "access": "read",
     },
+    "map.style.read": {
+        "key": "map.style.read",
+        "label": "Read map styles",
+        "access": "read",
+    },
+    "data.query": {
+        "key": "data.query",
+        "label": "Query connected data",
+        "access": "read",
+    },
 }
 
-_SUPPORTED_PROVIDER_KEYS = {"google_drive", "slack", "esri_arcgis"}
+_SUPPORTED_PROVIDER_KEYS = {
+    "google_drive",
+    "slack",
+    "esri_arcgis",
+    "microsoft_365",
+    "snowflake",
+    "caltopo",
+}
+_PARTNER_PROVIDER_KEYS = {"garmin"}
 
 
 PROVIDERS: dict[str, ProviderDefinition] = {
@@ -95,9 +124,9 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "category": "productivity",
         "auth": "oauth2",
         "setup_status": "planned",
-        "scopes": ["user", "team", "organization"],
-        "capabilities": [],
-        "description": "Microsoft productivity and document workflows.",
+        "scopes": ["user"],
+        "capabilities": ["document.create"],
+        "description": "Create approved files in the connected member's OneDrive.",
     },
     "slack": {
         "key": "slack",
@@ -118,8 +147,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "service_account",
         "setup_status": "planned",
         "scopes": ["organization"],
-        "capabilities": [],
-        "description": "Organization-scoped data exchange and analytics.",
+        "capabilities": ["data.query"],
+        "description": "Read-only SQL queries through an organization Snowflake PAT.",
     },
     "esri_arcgis": {
         "key": "esri_arcgis",
@@ -135,11 +164,11 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "key": "mapbox",
         "name": "Mapbox",
         "category": "mapping",
-        "auth": "token",
-        "setup_status": "planned",
-        "scopes": ["user", "team", "organization"],
-        "capabilities": [],
-        "description": "Map rendering and approved location context.",
+        "auth": "managed_token",
+        "setup_status": "managed",
+        "scopes": ["organization"],
+        "capabilities": ["map.style.read"],
+        "description": "TerraSatch-managed read access to approved Mapbox styles.",
     },
     "onx_backcountry": {
         "key": "onx_backcountry",
@@ -155,11 +184,11 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "key": "caltopo",
         "name": "CalTopo",
         "category": "outdoor",
-        "auth": "provider_specific",
+        "auth": "service_account",
         "setup_status": "planned",
-        "scopes": ["user", "team", "organization"],
-        "capabilities": [],
-        "description": "Outdoor mapping and approved operational layers.",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": "Read approved Team maps through a CalTopo service account.",
     },
     "gaia_gps": {
         "key": "gaia_gps",
@@ -175,11 +204,11 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "key": "garmin",
         "name": "Garmin",
         "category": "outdoor",
-        "auth": "provider_specific",
+        "auth": "oauth2_partner",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
         "capabilities": [],
-        "description": "Approved device, activity, or field data where provider access permits.",
+        "description": "Partner-gated Garmin Connect APIs after TerraSatch program approval.",
     },
     "alltrails": {
         "key": "alltrails",
@@ -196,12 +225,14 @@ PROVIDERS: dict[str, ProviderDefinition] = {
 
 def provider_support_status(
     provider_key: str,
-) -> Literal["managed", "supported", "coming_soon"]:
+) -> Literal["managed", "supported", "partner_required", "coming_soon"]:
     provider = PROVIDERS.get(provider_key)
     if provider is not None and provider["setup_status"] == "managed":
         return "managed"
     if provider_key in _SUPPORTED_PROVIDER_KEYS:
         return "supported"
+    if provider_key in _PARTNER_PROVIDER_KEYS:
+        return "partner_required"
     return "coming_soon"
 
 
@@ -217,24 +248,48 @@ def provider_catalog(
     for provider in PROVIDERS.values():
         item = dict(provider)
         support_status = provider_support_status(provider["key"])
-        configured = bool(
+        provider_key = provider["key"]
+        auth_type = provider["auth"]
+        oauth_configured = bool(
             settings is not None
-            and support_status == "supported"
-            and provider_app_is_configured(settings, provider["key"])
+            and auth_type == "oauth2"
+            and provider_app_is_configured(settings, provider_key)
         )
+        managed_configured = bool(
+            settings is not None
+            and provider_key == "mapbox"
+            and provider_secret_is_configured(
+                settings,
+                "mapbox",
+                required_fields={"access_token"},
+            )
+        )
+        manual_supported = support_status == "supported" and auth_type == "service_account"
 
         if support_status == "managed":
             connect_status = "managed"
             setup_status = "managed"
+            runtime_ready = managed_configured or provider_key == "terrasatch_edge"
+        elif support_status == "partner_required":
+            connect_status = "partner_required"
+            setup_status = "planned"
+            runtime_ready = False
         elif support_status == "coming_soon":
             connect_status = "coming_soon"
             setup_status = "planned"
-        elif configured:
+            runtime_ready = False
+        elif manual_supported:
+            connect_status = "external_setup_required"
+            setup_status = "available"
+            runtime_ready = True
+        elif oauth_configured:
             connect_status = "available"
             setup_status = "available"
+            runtime_ready = True
         else:
             connect_status = "needs_configuration"
             setup_status = "planned"
+            runtime_ready = False
 
         allowed_scopes = (
             list(provider["scopes"])
@@ -258,7 +313,8 @@ def provider_catalog(
                 "connect_status": connect_status,
                 "allowed_scopes": allowed_scopes,
                 "allowed": bool(allowed_scopes),
-                "can_connect": bool(allowed_scopes) and connect_status == "available",
+                "can_connect": bool(allowed_scopes)
+                and connect_status in {"available", "external_setup_required"},
                 "requires_admin": (
                     support_status == "supported"
                     and not allowed_scopes
@@ -267,8 +323,18 @@ def provider_catalog(
                         for scope in provider["scopes"]
                     )
                 ),
-                "connected": bool(visible_connected_scopes),
-                "connected_scopes": visible_connected_scopes,
+                "connected": (
+                    bool(visible_connected_scopes)
+                    or (support_status == "managed" and runtime_ready)
+                ),
+                "connected_scopes": (
+                    visible_connected_scopes
+                    if visible_connected_scopes
+                    else ["organization"]
+                    if support_status == "managed" and runtime_ready
+                    else []
+                ),
+                "runtime_ready": runtime_ready,
                 "capability_details": capability_details,
             }
         )

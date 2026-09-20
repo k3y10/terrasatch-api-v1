@@ -22,10 +22,16 @@ from .models import (
 from .oauth_service import active_credentials
 from .operations import (
     create_google_drive_file,
+    create_microsoft_drive_file,
     query_arcgis_features,
+    query_caltopo_map,
+    query_caltopo_team,
+    query_snowflake,
+    read_mapbox_style,
     send_slack_message,
     validate_arcgis_feature_layer_url,
 )
+from .provider_config import resolve_provider_secret_fields
 
 
 def _audience_subjects(
@@ -255,6 +261,17 @@ async def execute(
                 mime_type=mime_type,
                 folder_id=folder_id,
             )
+        elif capability == "document.create" and connection.provider == "microsoft_365":
+            folder_path = dict(connection.configuration or {}).get("folder_path")
+            if folder_path is not None and not isinstance(folder_path, str):
+                raise InvalidConfiguration("Stored Microsoft folder_path is invalid")
+            result = await create_microsoft_drive_file(
+                credentials,
+                name=name,
+                content=content,
+                mime_type=mime_type,
+                folder_path=folder_path,
+            )
         else:
             raise InvalidConfiguration(
                 f"{connection.provider} does not implement {capability}"
@@ -292,6 +309,31 @@ async def query(
 ) -> dict[str, object]:
     """Query an authorized read capability without exposing provider credentials."""
 
+    if capability == "map.style.read":
+        config = resolve_provider_secret_fields(
+            settings,
+            "mapbox",
+            required_fields={"access_token"},
+            required=True,
+        )
+        assert config is not None
+        username = payload.get("username")
+        style_id = payload.get("style_id")
+        if not isinstance(username, str) or not isinstance(style_id, str):
+            raise InvalidConfiguration("map.style.read requires username and style_id")
+        result = await read_mapbox_style(
+            access_token=config["access_token"],
+            username=username,
+            style_id=style_id,
+        )
+        return {
+            "capability": capability,
+            "connection_id": None,
+            "provider": "mapbox",
+            "data": result.data,
+            "metadata": result.metadata,
+        }
+
     connection = await resolve_connection(
         session,
         organization_id=organization_id,
@@ -302,51 +344,6 @@ async def query(
         workflow_key=workflow_key,
         connection_id=connection_id,
     )
-    if capability != "map.features.query" or connection.provider != "esri_arcgis":
-        raise InvalidConfiguration(
-            f"{connection.provider} does not implement the requested read capability"
-        )
-
-    configured_layers = dict(connection.configuration or {}).get("feature_layer_urls")
-    if not isinstance(configured_layers, list) or not configured_layers:
-        raise InvalidConfiguration("ArcGIS connection has no approved feature layers")
-    approved_layers = {
-        validate_arcgis_feature_layer_url(item)
-        for item in configured_layers
-        if isinstance(item, str)
-    }
-    requested_layer = payload.get("layer_url")
-    if requested_layer is None and len(approved_layers) == 1:
-        layer_url = next(iter(approved_layers))
-    elif isinstance(requested_layer, str):
-        layer_url = validate_arcgis_feature_layer_url(requested_layer)
-    else:
-        raise InvalidConfiguration(
-            "map.features.query requires layer_url when multiple layers are approved"
-        )
-    if layer_url not in approved_layers:
-        raise InvalidConfiguration("ArcGIS feature layer is not approved for this connection")
-
-    where = payload.get("where", "1=1")
-    out_fields = payload.get("out_fields", ["*"])
-    return_geometry = payload.get("return_geometry", True)
-    result_record_count = payload.get("result_record_count", 100)
-    result_offset = payload.get("result_offset", 0)
-    if not isinstance(where, str):
-        raise InvalidConfiguration("ArcGIS where must be a string")
-    if not isinstance(out_fields, list) or not all(
-        isinstance(field, str) for field in out_fields
-    ):
-        raise InvalidConfiguration("ArcGIS out_fields must be a list of field names")
-    if not isinstance(return_geometry, bool):
-        raise InvalidConfiguration("ArcGIS return_geometry must be boolean")
-    if not isinstance(result_record_count, int) or isinstance(
-        result_record_count,
-        bool,
-    ):
-        raise InvalidConfiguration("ArcGIS result_record_count must be an integer")
-    if not isinstance(result_offset, int) or isinstance(result_offset, bool):
-        raise InvalidConfiguration("ArcGIS result_offset must be an integer")
 
     try:
         credentials, _ = await active_credentials(
@@ -354,15 +351,133 @@ async def query(
             settings,
             connection=connection,
         )
-        result = await query_arcgis_features(
-            credentials,
-            layer_url=layer_url,
-            where=where,
-            out_fields=out_fields,
-            return_geometry=return_geometry,
-            result_record_count=result_record_count,
-            result_offset=result_offset,
-        )
+
+        if capability == "map.features.query" and connection.provider == "esri_arcgis":
+            configured_layers = dict(connection.configuration or {}).get(
+                "feature_layer_urls"
+            )
+            if not isinstance(configured_layers, list) or not configured_layers:
+                raise InvalidConfiguration(
+                    "ArcGIS connection has no approved feature layers"
+                )
+            approved_layers = {
+                validate_arcgis_feature_layer_url(item)
+                for item in configured_layers
+                if isinstance(item, str)
+            }
+            requested_layer = payload.get("layer_url")
+            if requested_layer is None and len(approved_layers) == 1:
+                layer_url = next(iter(approved_layers))
+            elif isinstance(requested_layer, str):
+                layer_url = validate_arcgis_feature_layer_url(requested_layer)
+            else:
+                raise InvalidConfiguration(
+                    "map.features.query requires layer_url when multiple layers are approved"
+                )
+            if layer_url not in approved_layers:
+                raise InvalidConfiguration(
+                    "ArcGIS feature layer is not approved for this connection"
+                )
+            where = payload.get("where", "1=1")
+            out_fields = payload.get("out_fields", ["*"])
+            return_geometry = payload.get("return_geometry", True)
+            result_record_count = payload.get("result_record_count", 100)
+            result_offset = payload.get("result_offset", 0)
+            if not isinstance(where, str):
+                raise InvalidConfiguration("ArcGIS where must be a string")
+            if not isinstance(out_fields, list) or not all(
+                isinstance(field, str) for field in out_fields
+            ):
+                raise InvalidConfiguration(
+                    "ArcGIS out_fields must be a list of field names"
+                )
+            if not isinstance(return_geometry, bool):
+                raise InvalidConfiguration("ArcGIS return_geometry must be boolean")
+            if not isinstance(result_record_count, int) or isinstance(
+                result_record_count,
+                bool,
+            ):
+                raise InvalidConfiguration(
+                    "ArcGIS result_record_count must be an integer"
+                )
+            if not isinstance(result_offset, int) or isinstance(result_offset, bool):
+                raise InvalidConfiguration("ArcGIS result_offset must be an integer")
+            result = await query_arcgis_features(
+                credentials,
+                layer_url=layer_url,
+                where=where,
+                out_fields=out_fields,
+                return_geometry=return_geometry,
+                result_record_count=result_record_count,
+                result_offset=result_offset,
+            )
+
+        elif capability == "map.features.query" and connection.provider == "caltopo":
+            configuration = dict(connection.configuration or {})
+            team_id = configuration.get("caltopo_team_id")
+            allowed_maps = configuration.get("map_ids", [])
+            if not isinstance(team_id, str):
+                raise InvalidConfiguration("CalTopo team configuration is missing")
+            since = payload.get("since", 0)
+            if not isinstance(since, int) or isinstance(since, bool):
+                raise InvalidConfiguration("CalTopo since must be an integer")
+            map_id = payload.get("map_id")
+            if map_id is None:
+                result = await query_caltopo_team(
+                    credentials,
+                    team_id=team_id,
+                    since=since,
+                )
+            else:
+                if not isinstance(map_id, str):
+                    raise InvalidConfiguration("CalTopo map_id must be a string")
+                if not isinstance(allowed_maps, list) or map_id not in allowed_maps:
+                    raise InvalidConfiguration(
+                        "CalTopo map is not approved for this connection"
+                    )
+                result = await query_caltopo_map(
+                    credentials,
+                    map_id=map_id,
+                    since=since,
+                )
+
+        elif capability == "data.query" and connection.provider == "snowflake":
+            configuration = dict(connection.configuration or {})
+            account_host = configuration.get("account_host")
+            statement = payload.get("statement")
+            if not isinstance(account_host, str) or not isinstance(statement, str):
+                raise InvalidConfiguration(
+                    "Snowflake data.query requires account configuration and statement"
+                )
+            result = await query_snowflake(
+                credentials,
+                account_host=account_host,
+                statement=statement,
+                warehouse=(
+                    configuration.get("warehouse")
+                    if isinstance(configuration.get("warehouse"), str)
+                    else None
+                ),
+                database=(
+                    configuration.get("database")
+                    if isinstance(configuration.get("database"), str)
+                    else None
+                ),
+                schema=(
+                    configuration.get("schema")
+                    if isinstance(configuration.get("schema"), str)
+                    else None
+                ),
+                role=(
+                    configuration.get("role")
+                    if isinstance(configuration.get("role"), str)
+                    else None
+                ),
+            )
+        else:
+            raise InvalidConfiguration(
+                f"{connection.provider} does not implement the requested read capability"
+            )
     except TerraSatchError as error:
         connection.last_error = error.message[:1000]
         await session.flush()
@@ -374,6 +489,7 @@ async def query(
     return {
         "capability": capability,
         "connection_id": str(connection.id),
+        "provider": connection.provider,
         "data": result.data,
         "metadata": result.metadata,
     }

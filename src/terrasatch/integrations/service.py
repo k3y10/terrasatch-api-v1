@@ -37,7 +37,10 @@ _SENSITIVE_KEY_PARTS = (
 )
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
+    "microsoft_365": {"folder_path"},
+    "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
+    "caltopo": {"caltopo_team_id", "map_ids"},
 }
 
 
@@ -52,6 +55,68 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         folder_id = configuration["folder_id"]
         if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
+
+    if provider_key == "microsoft_365":
+        folder_path = configuration.get("folder_path")
+        if folder_path is not None:
+            if not isinstance(folder_path, str) or len(folder_path) > 512:
+                raise InvalidConfiguration("Microsoft folder_path must be a string")
+            clean_path = "/".join(
+                segment.strip()
+                for segment in folder_path.replace("\\", "/").split("/")
+                if segment.strip()
+            )
+            if ".." in clean_path.split("/"):
+                raise InvalidConfiguration("Microsoft folder_path cannot contain '..'")
+            configuration["folder_path"] = clean_path
+
+    if provider_key == "snowflake":
+        account_host = configuration.get("account_host")
+        if not isinstance(account_host, str):
+            raise InvalidConfiguration("Snowflake account_host is required")
+        account_host = account_host.strip().casefold()
+        if (
+            not account_host.endswith(".snowflakecomputing.com")
+            or "://" in account_host
+            or "/" in account_host
+            or len(account_host) > 255
+        ):
+            raise InvalidConfiguration(
+                "Snowflake account_host must be a snowflakecomputing.com hostname"
+            )
+        configuration["account_host"] = account_host
+        for field in ("warehouse", "database", "schema", "role"):
+            value = configuration.get(field)
+            if value is not None:
+                if not isinstance(value, str) or not value.strip() or len(value) > 255:
+                    raise InvalidConfiguration(f"Snowflake {field} must be a short string")
+                configuration[field] = value.strip()
+
+    if provider_key == "caltopo":
+        team_id = configuration.get("caltopo_team_id")
+        if (
+            not isinstance(team_id, str)
+            or len(team_id.strip()) != 6
+            or not team_id.strip().isalnum()
+        ):
+            raise InvalidConfiguration("CalTopo caltopo_team_id must be 6 alphanumeric characters")
+        configuration["caltopo_team_id"] = team_id.strip()
+        map_ids = configuration.get("map_ids", [])
+        if not isinstance(map_ids, list) or len(map_ids) > 50:
+            raise InvalidConfiguration("CalTopo map_ids must be a list of at most 50 IDs")
+        normalized_maps: list[str] = []
+        for map_id in map_ids:
+            if (
+                not isinstance(map_id, str)
+                or not 4 <= len(map_id.strip()) <= 32
+                or not map_id.strip().isalnum()
+            ):
+                raise InvalidConfiguration("CalTopo map_ids contains an invalid map ID")
+            normalized_maps.append(map_id.strip())
+        if len(set(normalized_maps)) != len(normalized_maps):
+            raise InvalidConfiguration("CalTopo map_ids cannot contain duplicates")
+        configuration["map_ids"] = normalized_maps
+
 
     if provider_key == "esri_arcgis":
         raw_layers = configuration.get("feature_layer_urls")
@@ -130,9 +195,11 @@ async def create_connection_request(
         raise InvalidConfiguration(
             f"{provider['name']} is managed by TerraSatch and is not added here"
         )
-    if provider_support_status(provider_key) == "coming_soon":
+    support_status = provider_support_status(provider_key)
+    if support_status in {"coming_soon", "partner_required"}:
+        label = "partner access required" if support_status == "partner_required" else "coming soon"
         raise InvalidConfiguration(
-            f"{provider['name']} is listed as coming soon and cannot be connected yet"
+            f"{provider['name']} is {label} and cannot be connected yet"
         )
     if not can_manage_scope(role=role, scope=scope):
         raise TenantAccessDenied(

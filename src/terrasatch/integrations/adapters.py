@@ -253,6 +253,154 @@ class GoogleDriveOAuthAdapter:
             raise ProviderUnavailable("Google credential revocation could not be confirmed")
 
 
+class Microsoft365OAuthAdapter:
+    """Microsoft Graph delegated OAuth adapter for personal OneDrive output."""
+
+    provider_key = "microsoft_365"
+    scopes = (
+        "offline_access",
+        "User.Read",
+        "Files.ReadWrite",
+    )
+    authorization_endpoint = (
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+    )
+    token_endpoint = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+    profile_endpoint = "https://graph.microsoft.com/v1.0/me"
+
+    def __init__(
+        self,
+        app_config: ProviderAppConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.client_id = app_config.client_id
+        self.client_secret = app_config.client_secret
+        self.redirect_uri = app_config.redirect_uri
+        self.transport = transport
+
+    def authorization_url(self, *, state: str) -> str:
+        params = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "response_mode": "query",
+            "scope": " ".join(self.scopes),
+            "state": state,
+        }
+        return f"{self.authorization_endpoint}?{urlencode(params)}"
+
+    async def exchange_code(self, *, code: str) -> OAuthExchangeResult:
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": self.redirect_uri,
+                "scope": " ".join(self.scopes),
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Microsoft authorization code exchange failed")
+        payload = _json_payload(response, provider="Microsoft")
+        access_token = payload.get("access_token")
+        refresh_token = payload.get("refresh_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Microsoft did not return an access token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable(
+                "Microsoft did not return a refresh token; reconnect Microsoft 365"
+            )
+        scope_text = str(payload.get("scope") or " ".join(self.scopes))
+        credentials: dict[str, object] = {
+            "provider": self.provider_key,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": str(payload.get("token_type") or "Bearer"),
+            "scope": scope_text.split(),
+        }
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            credentials["expires_at"] = expires_at
+        label, account_id = await self.probe(credentials)
+        return OAuthExchangeResult(
+            credentials,
+            label,
+            account_id,
+            scope_text.split(),
+        )
+
+    async def refresh(self, credentials: dict[str, object]) -> dict[str, object]:
+        refresh_token = credentials.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable(
+                "Microsoft refresh token is unavailable; reconnect Microsoft 365"
+            )
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "scope": " ".join(self.scopes),
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Microsoft access-token refresh failed")
+        payload = _json_payload(response, provider="Microsoft")
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Microsoft did not return a refreshed access token")
+        next_credentials = dict(credentials)
+        next_credentials["access_token"] = access_token
+        next_refresh = payload.get("refresh_token")
+        if isinstance(next_refresh, str) and next_refresh:
+            next_credentials["refresh_token"] = next_refresh
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            next_credentials["expires_at"] = expires_at
+        if payload.get("scope"):
+            next_credentials["scope"] = str(payload["scope"]).split()
+        return next_credentials
+
+    async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
+        access_token = credentials.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Microsoft access token is unavailable")
+        response = await _request(
+            self.transport,
+            "GET",
+            self.profile_endpoint,
+            params={"$select": "id,displayName,userPrincipalName,mail"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Microsoft connection check failed")
+        payload = _json_payload(response, provider="Microsoft Graph")
+        label = (
+            payload.get("mail")
+            or payload.get("userPrincipalName")
+            or payload.get("displayName")
+        )
+        account_id = payload.get("id")
+        return (
+            str(label)[:255] if label else None,
+            str(account_id)[:255] if account_id else None,
+        )
+
+    async def revoke(self, credentials: dict[str, object]) -> None:
+        # Microsoft does not expose a delegated refresh-token revocation endpoint
+        # suitable for this flow. Disconnect deletes TerraSatch's encrypted copy.
+        return None
+
+
 class SlackOAuthAdapter:
     provider_key = "slack"
     scopes = ("incoming-webhook",)
@@ -588,6 +736,8 @@ def get_adapter(
     assert app_config is not None
     if provider_key == "google_drive":
         return GoogleDriveOAuthAdapter(app_config, transport=transport)
+    if provider_key == "microsoft_365":
+        return Microsoft365OAuthAdapter(app_config, transport=transport)
     if provider_key == "slack":
         return SlackOAuthAdapter(app_config, transport=transport)
     if provider_key == "esri_arcgis":

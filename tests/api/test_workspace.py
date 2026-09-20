@@ -144,8 +144,14 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             "alltrails",
         }
         setup = {provider["key"]: provider["setup_status"] for provider in catalog}
+        support = {provider["key"]: provider["support_status"] for provider in catalog}
+        connect = {provider["key"]: provider["connect_status"] for provider in catalog}
         assert setup["google_drive"] == "planned"
         assert setup["slack"] == "planned"
+        assert setup["snowflake"] == "available"
+        assert connect["snowflake"] == "external_setup_required"
+        assert support["garmin"] == "partner_required"
+        assert support["alltrails"] == "coming_soon"
         assert own.json()["integrations"]["connections"] == []
 
         integration_url = f"/api/v1/workspace/organizations/{organization_id}/integrations"
@@ -184,7 +190,13 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
 
         organization_connection = await client.post(
             integration_url,
-            json={"provider": "snowflake", "scope": "organization"},
+            json={
+                "provider": "snowflake",
+                "scope": "organization",
+                "configuration": {
+                    "account_host": "org-account.snowflakecomputing.com"
+                },
+            },
             headers=headers,
         )
         assert organization_connection.status_code == 201
@@ -214,6 +226,20 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             headers=headers,
         )
         assert managed_rejected.status_code == 400
+        partner_rejected = await client.post(
+            integration_url,
+            json={"provider": "garmin", "scope": "organization"},
+            headers=headers,
+        )
+        assert partner_rejected.status_code == 400
+
+        coming_soon_rejected = await client.post(
+            integration_url,
+            json={"provider": "alltrails", "scope": "user"},
+            headers=headers,
+        )
+        assert coming_soon_rejected.status_code == 400
+
 
         with_integrations = (
             await client.get(f"/api/v1/workspace/organizations/{organization_id}")

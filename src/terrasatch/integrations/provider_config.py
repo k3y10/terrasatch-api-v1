@@ -141,3 +141,62 @@ def provider_app_is_configured(settings: Settings, provider_key: str) -> bool:
         return resolve_provider_app_config(settings, provider_key) is not None
     except InvalidConfiguration:
         return False
+
+
+
+def resolve_provider_secret_fields(
+    settings: Settings,
+    provider_key: str,
+    *,
+    required_fields: set[str],
+    required: bool = False,
+) -> dict[str, str] | None:
+    """Resolve non-OAuth platform secrets from the central provider bundle."""
+
+    raw = _bundle(settings).get(provider_key)
+    if raw is None:
+        if required:
+            raise ProviderUnavailable(
+                f"{provider_key} platform service configuration is not configured"
+            )
+        return None
+    if not isinstance(raw, dict):
+        raise InvalidConfiguration(
+            f"Provider config for {provider_key} must be a JSON object"
+        )
+
+    unexpected = sorted(set(raw) - required_fields)
+    if unexpected:
+        raise InvalidConfiguration(
+            f"Unsupported provider config fields for {provider_key}: "
+            + ", ".join(unexpected)
+        )
+
+    resolved: dict[str, str] = {}
+    for field in required_fields:
+        value = _clean_text(raw.get(field))
+        if not value:
+            raise InvalidConfiguration(
+                f"Provider config for {provider_key} is missing {field}"
+            )
+        resolved[field] = value
+    return resolved
+
+
+def provider_secret_is_configured(
+    settings: Settings,
+    provider_key: str,
+    *,
+    required_fields: set[str],
+) -> bool:
+    try:
+        return (
+            resolve_provider_secret_fields(
+                settings,
+                provider_key,
+                required_fields=required_fields,
+            )
+            is not None
+        )
+    except InvalidConfiguration:
+        return False
