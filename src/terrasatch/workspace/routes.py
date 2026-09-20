@@ -384,12 +384,32 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             user_id=user.id,
             role=membership.role,
         )
-        actions = await session.scalars(
-            select(SatchyAction)
-            .where(SatchyAction.organization_id == organization_id)
-            .order_by(SatchyAction.created_at.desc())
-            .limit(100)
+        actions = list(
+            await session.scalars(
+                select(SatchyAction)
+                .where(SatchyAction.organization_id == organization_id)
+                .order_by(SatchyAction.created_at.desc())
+                .limit(100)
+            )
         )
+        visible_actions = []
+        for action in actions:
+            action_payload = dict(action.structured_payload or {})
+            if action_payload.get("origin") != "workspace_chat":
+                visible_actions.append(action)
+                continue
+            requester = action_payload.get("requester_user_id")
+            integration_scope = action_payload.get("integration_scope", "user")
+            if requester == str(user.id):
+                visible_actions.append(action)
+            elif (
+                integration_scope == "organization"
+                or (
+                    integration_scope == "team"
+                    and role_allows(membership.role, MembershipRole.ADMIN)
+                )
+            ):
+                visible_actions.append(action)
         messages = list(
             await session.scalars(
                 select(WorkspaceMessage)
@@ -464,7 +484,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                             (a.structured_payload or {}).get("integration_execution") or {}
                         ),
                     }
-                    for a in actions
+                    for a in visible_actions
                 ],
                 "messages": [
                     {"id": str(m.id), "role": m.role, "content": m.content}
@@ -957,11 +977,19 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             active_map=payload.active_map,
         )
         request_id = payload.request_id or uuid4()
-        existing_action = await session.get(SatchyAction, request_id)
+        existing_by_id = await session.get(SatchyAction, request_id)
+        if (
+            existing_by_id is not None
+            and existing_by_id.organization_id != organization_id
+        ):
+            raise HTTPException(409, "Satchy request ID is already in use")
+        existing_action = existing_by_id
+        planner_context = context.model_dump(mode="json")
+        planner_context["request_source"] = "workspace"
         planned_action = await plan_integration_action(
             settings=settings,
             text=payload.message,
-            context=context.model_dump(mode="json"),
+            context=planner_context,
         )
         action = existing_action
         if action is None and planned_action.action_type != "none":
@@ -983,6 +1011,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                         "origin": "workspace_chat",
                         "requester_user_id": str(user.id),
                         "capability": "notification.send",
+                        "integration_scope": planned_action.audience_scope,
                         "text": planned_action.notification_text,
                         "workflow_key": "satchy.action.notify_team",
                         "planner_confidence": planned_action.confidence,
@@ -994,6 +1023,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                         "origin": "workspace_chat",
                         "requester_user_id": str(user.id),
                         "capability": "document.create",
+                        "integration_scope": planned_action.audience_scope,
                         "name": planned_action.document_name,
                         "content": planned_action.document_content,
                         "mime_type": planned_action.mime_type,
