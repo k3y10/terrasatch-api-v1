@@ -220,6 +220,45 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         ).json()
         assert len(with_integrations["integrations"]["connections"]) == 3
 
+        satchy_request_id = uuid4()
+        proposal = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "request_id": str(satchy_request_id),
+                "site_id": str(site_id),
+                "message": "Satchy, notify the team that staging integration review is ready.",
+            },
+            headers=headers,
+        )
+        assert proposal.status_code == 200
+        assert proposal.json()["action_id"] == str(satchy_request_id)
+        assert proposal.json()["action_status"] == "awaiting_approval"
+        assert proposal.json()["approval_required"] is True
+        assert "Nothing has been sent" in proposal.json()["answer"]
+
+        proposed_workspace = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()
+        proposed_action = next(
+            item
+            for item in proposed_workspace["actions"]
+            if item["id"] == str(satchy_request_id)
+        )
+        assert proposed_action["source_id"] is None
+        assert proposed_action["status"] == "awaiting_approval"
+
+        approved_action = await client.post(
+            (
+                f"/api/v1/workspace/organizations/{organization_id}/actions/"
+                f"{satchy_request_id}"
+            ),
+            json={"decision": "approve"},
+            headers=headers,
+        )
+        assert approved_action.status_code == 200
+        assert approved_action.json()["status"] == "approved"
+        assert approved_action.json()["integration_execution"]["status"] == "blocked"
+
         revoked = await client.post(
             f"{integration_url}/{personal.json()['id']}/revoke",
             headers=headers,
