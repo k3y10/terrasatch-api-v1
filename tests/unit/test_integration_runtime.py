@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.config import Settings
@@ -15,8 +16,8 @@ from terrasatch.integrations.models import (
     IntegrationGrant,
     IntegrationStatus,
 )
-from terrasatch.integrations.operations import ProviderQueryResult
-from terrasatch.integrations.runtime import _delivery, query, resolve_connection
+from terrasatch.integrations.operations import ProviderOperationResult, ProviderQueryResult
+from terrasatch.integrations.runtime import _delivery, execute, query, resolve_connection
 
 
 @pytest.mark.asyncio
@@ -395,5 +396,375 @@ async def test_delivery_duplicate_does_not_rollback_unrelated_state() -> None:
         assert delivery.id == existing.id
         assert organization.name == "Idempotency org updated"
         assert session.dirty
+
+    await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_microsoft_document_create_uses_generic_runtime(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Microsoft runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Microsoft runtime org",
+            slug=f"microsoft-runtime-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Microsoft User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="microsoft_365",
+            scope_type="user",
+            owner_user_id=user.id,
+            created_by_user_id=user.id,
+            display_name="My OneDrive",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={"folder_path": "Reports"},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="user",
+                    subject_id=str(user.id),
+                    capabilities=["document.create"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["document.create"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "ms-access"}, object()
+
+        async def fake_create(*args, **kwargs):
+            assert kwargs["folder_path"] == "Reports"
+            assert kwargs["name"] == "handoff.md"
+            return ProviderOperationResult(
+                external_id="drive-item-1",
+                metadata={"name": "handoff.md"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.create_microsoft_drive_file",
+            fake_create,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=user.id,
+            capability="document.create",
+            request_id=uuid4(),
+            payload={
+                "name": "handoff.md",
+                "content": "Shift handoff",
+                "mime_type": "text/markdown",
+            },
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "drive-item-1"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_snowflake_data_query_routes_through_org_grants(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Snowflake runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Snowflake runtime org",
+            slug=f"snowflake-runtime-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Data User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="snowflake",
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name="Read-only warehouse",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "account_host": "org-account.snowflakecomputing.com",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["data.query"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["data.query"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"programmatic_access_token": "snow-pat"}, object()
+
+        async def fake_query(*args, **kwargs):
+            assert kwargs["statement"] == "SELECT CURRENT_TIMESTAMP()"
+            return ProviderQueryResult(
+                data={"data": [["2026-09-20"]]},
+                metadata={"row_count": 1},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_snowflake",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=user.id,
+            capability="data.query",
+            payload={"statement": "SELECT CURRENT_TIMESTAMP()"},
+        )
+        assert result["provider"] == "snowflake"
+        assert result["metadata"]["row_count"] == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_caltopo_map_query_requires_team_grant_and_allowlisted_map(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="CalTopo runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="CalTopo runtime org",
+            slug=f"caltopo-runtime-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Map User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        team = Team(
+            organization_id=organization.id,
+            name="Field Team",
+            enabled=True,
+        )
+        session.add(team)
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="caltopo",
+            scope_type="team",
+            team_id=team.id,
+            created_by_user_id=user.id,
+            display_name="Field maps",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "caltopo_team_id": "ABC123",
+                "map_ids": ["MAP123"],
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="team",
+                    subject_id=str(team.id),
+                    capabilities=["map.features.query"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["map.features.query"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {
+                "credential_id": "credential-id",
+                "credential_secret": "secret",
+            }, object()
+
+        async def fake_map_query(*args, **kwargs):
+            assert kwargs["map_id"] == "MAP123"
+            return ProviderQueryResult(
+                data={"features": []},
+                metadata={"feature_count": 0},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_caltopo_map",
+            fake_map_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=None,
+            team_ids=(team.id,),
+            capability="map.features.query",
+            payload={"map_id": "MAP123"},
+        )
+        assert result["provider"] == "caltopo"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=None,
+                team_ids=(team.id,),
+                capability="map.features.query",
+                payload={"map_id": "OTHER1"},
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mapbox_managed_runtime_enforces_style_allowlist(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        integration_provider_config_json=SecretStr(
+            '{"mapbox":{"access_token":"pk.test","username":"terrasatch",'
+            '"style_ids":"field-style,incident-style"}}'
+        )
+    )
+
+    async def fake_style(*args, **kwargs):
+        assert kwargs["access_token"] == "pk.test"
+        assert kwargs["username"] == "terrasatch"
+        assert kwargs["style_id"] == "field-style"
+        return ProviderQueryResult(
+            data={"version": 8, "name": "Field"},
+            metadata={"name": "Field"},
+        )
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.runtime.read_mapbox_style",
+        fake_style,
+    )
+
+    async with factory() as session:
+        result = await query(
+            session,
+            settings,
+            organization_id=uuid4(),
+            user_id=uuid4(),
+            capability="map.style.read",
+            payload={"style_id": "field-style"},
+        )
+        assert result["provider"] == "mapbox"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                settings,
+                organization_id=uuid4(),
+                user_id=uuid4(),
+                capability="map.style.read",
+                payload={"style_id": "private-style"},
+            )
 
     await engine.dispose()
