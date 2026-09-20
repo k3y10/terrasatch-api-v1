@@ -19,6 +19,7 @@ from terrasatch.actions.models import (
 from terrasatch.actions.service import (
     approve_action,
     approve_and_queue_action,
+    execute_approved_integration_action,
     queue_approved_action,
 )
 from terrasatch.actions.state import transition_action
@@ -583,6 +584,109 @@ async def test_approval_gate_and_simulated_edge_lifecycle_are_idempotent() -> No
         assert action.status == ActionStatus.COMPLETED.value
         assert await session.scalar(select(func.count(OutboundTransmission.id))) == 1
         assert await session.scalar(select(func.count(EdgeCommand.id))) == 1
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_approved_integration_actions_use_generic_satchy_capabilities(
+    monkeypatch,
+) -> None:
+    engine, session, seeded = await _seed_session()
+    calls: list[tuple[str, dict[str, object]]] = []
+    connection_id = uuid4()
+
+    async def fake_resolve(*args, **kwargs):
+        calls.append(("resolve", kwargs))
+        return SimpleNamespace(id=connection_id)
+
+    async def fake_execute(*args, **kwargs):
+        calls.append(("execute", kwargs))
+        return SimpleNamespace(
+            id=uuid4(),
+            status="delivered",
+            last_error=None,
+        )
+
+    monkeypatch.setattr(
+        "terrasatch.actions.service.resolve_integration_connection",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "terrasatch.actions.service.execute_integration_capability",
+        fake_execute,
+    )
+    try:
+        organization = seeded["organization"]
+        assert isinstance(organization, Organization)
+
+        _, notify = await _ingest(session, seeded, "Satchy, Control 2.")
+        notify.action_type = ActionType.NOTIFY_TEAM.value
+        notify.proposed_message = "Patrol update: hold at the ridge."
+        notify.structured_payload = {}
+
+        with pytest.raises(InvalidConfiguration, match="approved"):
+            await execute_approved_integration_action(
+                session,
+                Settings(),
+                action=notify,
+                approver_user_id=None,
+            )
+
+        await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=notify.id,
+            approver_role="admin",
+        )
+        notify, delivery, detail = await execute_approved_integration_action(
+            session,
+            Settings(),
+            action=notify,
+            approver_user_id=None,
+        )
+        assert detail is None
+        assert delivery is not None
+        assert notify.status == ActionStatus.COMPLETED.value
+        notify_execute = [item for item in calls if item[0] == "execute"][-1][1]
+        assert notify_execute["capability"] == "notification.send"
+        assert notify_execute["payload"] == {
+            "text": "Patrol update: hold at the ridge."
+        }
+        assert "slack" not in str(notify_execute).casefold()
+
+        _, report = await _ingest(session, seeded, "Satchy, Control 2. Status.")
+        report.action_type = ActionType.GENERATE_REPORT.value
+        report.proposed_message = None
+        report.structured_payload = {
+            "name": "shift-handoff.md",
+            "content": "# Shift handoff\nNo incidents.",
+            "mime_type": "text/markdown",
+        }
+        await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=report.id,
+            approver_role="admin",
+        )
+        report, delivery, detail = await execute_approved_integration_action(
+            session,
+            Settings(),
+            action=report,
+            approver_user_id=None,
+        )
+        assert detail is None
+        assert delivery is not None
+        assert report.status == ActionStatus.COMPLETED.value
+        report_execute = [item for item in calls if item[0] == "execute"][-1][1]
+        assert report_execute["capability"] == "document.create"
+        assert report_execute["payload"] == {
+            "name": "shift-handoff.md",
+            "content": "# Shift handoff\nNo incidents.",
+            "mime_type": "text/markdown",
+        }
+        assert "google_drive" not in str(report_execute).casefold()
     finally:
         await session.close()
         await engine.dispose()

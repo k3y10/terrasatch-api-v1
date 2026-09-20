@@ -26,14 +26,13 @@ from .operations import create_google_drive_file, send_slack_message
 def _audience_subjects(
     *,
     organization_id: UUID,
-    user_id: UUID,
+    user_id: UUID | None,
     team_ids: tuple[UUID, ...],
     workflow_key: str | None,
 ) -> set[tuple[str, str]]:
-    subjects = {
-        ("user", str(user_id)),
-        ("organization", str(organization_id)),
-    }
+    subjects = {("organization", str(organization_id))}
+    if user_id is not None:
+        subjects.add(("user", str(user_id)))
     subjects.update(("team", str(team_id)) for team_id in team_ids)
     if workflow_key:
         subjects.add(("workflow", workflow_key))
@@ -48,7 +47,7 @@ async def resolve_connection(
     session: AsyncSession,
     *,
     organization_id: UUID,
-    user_id: UUID,
+    user_id: UUID | None,
     capability: str,
     team_ids: tuple[UUID, ...] = (),
     agent_key: str | None = "satchy",
@@ -133,7 +132,7 @@ async def _delivery(
     *,
     organization_id: UUID,
     connection: IntegrationConnection,
-    user_id: UUID,
+    user_id: UUID | None,
     request_id: UUID,
     capability: str,
     request_metadata: dict[str, object],
@@ -181,7 +180,7 @@ async def execute(
     settings: Settings,
     *,
     organization_id: UUID,
-    user_id: UUID,
+    user_id: UUID | None,
     capability: str,
     request_id: UUID,
     payload: dict[str, object],

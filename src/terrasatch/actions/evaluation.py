@@ -10,7 +10,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
-from terrasatch.actions.service import approve_action, queue_approved_action, reject_action
+from terrasatch.actions.service import (
+    approve_action,
+    execute_approved_integration_action,
+    queue_approved_action,
+    reject_action,
+)
 from terrasatch.actions.state import transition_action
 from terrasatch.config import Settings
 from terrasatch.edge.models import EdgeDevice
@@ -126,6 +131,7 @@ async def _radio_decision(
     conversation: RadioConversation,
     intent: SatchyIntent,
     policy: dict[str, object],
+    settings: Settings | None,
 ) -> tuple[str, dict[str, object], SatchyAction | None] | None:
     if intent not in {SatchyIntent.APPROVE_ACTION, SatchyIntent.REJECT_ACTION}:
         return None
@@ -198,6 +204,19 @@ async def _radio_decision(
                     session,
                     organization_id=transmission.organization_id,
                     mission_id=UUID(mission_id),
+                )
+        elif action.action_type in {
+            ActionType.NOTIFY_TEAM.value,
+            ActionType.GENERATE_REPORT.value,
+        }:
+            if settings is None:
+                queue_detail = "Integration runtime settings are unavailable"
+            else:
+                _, _, queue_detail = await execute_approved_integration_action(
+                    session,
+                    settings,
+                    action=action,
+                    approver_user_id=None,
                 )
     except (InvalidConfiguration, ResourceNotFound, ValueError) as exc:
         queue_detail = str(exc)
@@ -431,6 +450,7 @@ async def process_transmission_control_plane(
         conversation=conversation,
         intent=intent.intent,
         policy=policy,
+        settings=settings,
     )
     if decision is not None:
         interpretation, proposed_payload, decided_action = decision

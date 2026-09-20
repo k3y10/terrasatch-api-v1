@@ -10,8 +10,12 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
-from terrasatch.actions.models import SatchyAction
-from terrasatch.actions.service import approve_action, reject_action
+from terrasatch.actions.models import ActionType, SatchyAction
+from terrasatch.actions.service import (
+    approve_action,
+    execute_approved_integration_action,
+    reject_action,
+)
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.billing.rate_limit import enforce_public_rate_limit
 from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
@@ -801,17 +805,41 @@ async def review(organization_id: UUID, action_id: UUID, payload: Decision, requ
     async with create_session_factory(request.app.state.settings)() as session:
         user, membership = await access(request, session, organization_id)
         await writable(session, membership)
-        operation = approve_action if payload.decision == "approve" else reject_action
-        action, _ = await operation(
-            session,
-            organization_id=organization_id,
-            action_id=action_id,
-            approver_role=membership.role.value,
-            approver_user_id=user.id,
-            notes=payload.notes,
-        )
+        integration_detail = None
+        if payload.decision == "approve":
+            action, _ = await approve_action(
+                session,
+                organization_id=organization_id,
+                action_id=action_id,
+                approver_role=membership.role.value,
+                approver_user_id=user.id,
+                notes=payload.notes,
+            )
+            if action.action_type in {
+                ActionType.NOTIFY_TEAM.value,
+                ActionType.GENERATE_REPORT.value,
+            }:
+                action, _, integration_detail = await execute_approved_integration_action(
+                    session,
+                    request.app.state.settings,
+                    action=action,
+                    approver_user_id=user.id,
+                )
+        else:
+            action, _ = await reject_action(
+                session,
+                organization_id=organization_id,
+                action_id=action_id,
+                approver_role=membership.role.value,
+                approver_user_id=user.id,
+                notes=payload.notes,
+            )
         await session.commit()
-        return {"id": str(action.id), "status": action.status}
+        return {
+            "id": str(action.id),
+            "status": action.status,
+            "integration_detail": integration_detail,
+        }
 
 
 @router.post("/organizations/{organization_id}/billing")
