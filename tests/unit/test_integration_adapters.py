@@ -134,6 +134,18 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
     assert slack_labels["notification.send"] == "Send notifications"
 
 
+def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
+    settings = Settings(
+        integration_provider_config_json=SecretStr(
+            '{"google_drive":{"client_id":"client","client_secret":"secret",'
+            '"redirect_uri":"https://api.example.com/callback"}}'
+        ),
+    )
+    catalog = {item["key"]: item for item in provider_catalog(settings)}
+    assert catalog["google_drive"]["connect_status"] == "needs_configuration"
+    assert catalog["google_drive"]["can_connect"] is False
+
+
 def test_invalid_integration_encryption_key_is_rejected_at_startup() -> None:
     with pytest.raises(ValidationError, match="integration encryption key"):
         Settings(integration_encryption_key=SecretStr("not-a-fernet-key"))
