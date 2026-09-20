@@ -687,6 +687,7 @@ async def test_approved_integration_actions_use_generic_satchy_capabilities(
         assert detail is None
         assert delivery is not None
         assert notify.status == ActionStatus.COMPLETED.value
+        assert notify.structured_payload["integration_execution"]["status"] == "delivered"
         notify_execute = [item for item in calls if item[0] == "execute"][-1][1]
         assert notify_execute["capability"] == "notification.send"
         assert notify_execute["payload"] == {
@@ -717,6 +718,7 @@ async def test_approved_integration_actions_use_generic_satchy_capabilities(
         assert detail is None
         assert delivery is not None
         assert report.status == ActionStatus.COMPLETED.value
+        assert report.structured_payload["integration_execution"]["status"] == "delivered"
         report_execute = [item for item in calls if item[0] == "execute"][-1][1]
         assert report_execute["capability"] == "document.create"
         assert report_execute["payload"] == {
