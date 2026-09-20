@@ -1,4 +1,4 @@
-"""OAuth provider adapters for Google Drive, Slack, and ArcGIS Online."""
+"""OAuth provider adapters for Google Drive, Microsoft 365, Slack, and ArcGIS Online."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ class OAuthExchangeResult:
 
 class OAuthProviderAdapter(Protocol):
     provider_key: str
+
     def authorization_url(self, *, state: str) -> str: ...
     async def exchange_code(self, *, code: str) -> OAuthExchangeResult: ...
     async def refresh(self, credentials: dict[str, object]) -> dict[str, object]: ...
