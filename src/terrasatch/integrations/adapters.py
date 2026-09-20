@@ -10,7 +10,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 
 from terrasatch.config import Settings
-from terrasatch.errors import ProviderUnavailable
+from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
 from .provider_config import ProviderAppConfig, resolve_provider_app_config
 
@@ -570,7 +570,7 @@ def provider_is_available(provider_key: str, settings: Settings) -> bool:
     try:
         resolve_provider_app_config(settings, provider_key, required=True)
         return settings.integration_secret_store_is_configured
-    except ProviderUnavailable:
+    except (InvalidConfiguration, ProviderUnavailable):
         return False
 
 
