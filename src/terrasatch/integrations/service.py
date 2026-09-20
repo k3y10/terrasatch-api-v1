@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound
+from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound, TenantAccessDenied
 from terrasatch.identity.access import role_allows
 from terrasatch.identity.models import MembershipRole, Team
 
@@ -75,7 +75,7 @@ async def create_connection_request(
     if provider["setup_status"] == "managed":
         raise InvalidConfiguration(f"{provider['name']} is managed by TerraSatch and is not added here")
     if not can_manage_scope(role=role, scope=scope):
-        raise InvalidConfiguration("Administrator access is required for team or organization integrations")
+        raise TenantAccessDenied("Administrator access is required for team or organization integrations")
 
     team = await _validated_team(
         session,
@@ -108,6 +108,10 @@ async def create_connection_request(
     if await session.scalar(duplicate_query) is not None:
         raise ResourceConflict(f"{provider['name']} already has an active {scope.value} connection")
 
+    normalized_display_name = " ".join((display_name or provider["name"]).split())
+    if not normalized_display_name:
+        normalized_display_name = provider["name"]
+
     connection = IntegrationConnection(
         organization_id=organization_id,
         provider=provider_key,
@@ -115,8 +119,12 @@ async def create_connection_request(
         team_id=team.id if team is not None else None,
         owner_user_id=owner_user_id,
         created_by_user_id=user_id,
-        display_name=" ".join((display_name or provider["name"]).split())[:255],
-        status=IntegrationStatus.REQUESTED.value,
+        display_name=normalized_display_name[:255],
+        status=(
+            IntegrationStatus.AWAITING_AUTHORIZATION.value
+            if provider["setup_status"] == "available"
+            else IntegrationStatus.REQUESTED.value
+        ),
         configuration=dict(configuration),
         enabled=True,
     )
@@ -166,7 +174,7 @@ async def revoke_connection(
         if connection.owner_user_id != user_id and not role_allows(role, MembershipRole.ADMIN):
             raise ResourceNotFound("Integration connection was not found")
     elif not role_allows(role, MembershipRole.ADMIN):
-        raise InvalidConfiguration("Administrator access is required to revoke this integration")
+        raise TenantAccessDenied("Administrator access is required to revoke this integration")
 
     connection.status = IntegrationStatus.REVOKED.value
     connection.enabled = False
