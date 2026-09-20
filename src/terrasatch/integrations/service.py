@@ -224,7 +224,7 @@ async def get_connection_for_management(
         raise ResourceNotFound("Integration connection was not found")
     scope = IntegrationScope(connection.scope_type)
     if scope == IntegrationScope.USER:
-        if connection.owner_user_id != user_id and not role_allows(role, MembershipRole.ADMIN):
+        if connection.owner_user_id != user_id:
             raise ResourceNotFound("Integration connection was not found")
     elif not role_allows(role, MembershipRole.ADMIN):
         raise TenantAccessDenied("Administrator access is required to manage this integration")
