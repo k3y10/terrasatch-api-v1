@@ -38,6 +38,7 @@ class ProviderQueryResult:
     data: dict[str, object]
     metadata: dict[str, object]
 
+
 _ARCGIS_LAYER_PATH = re.compile(r"/FeatureServer/\d+/?$", re.I)
 _ARCGIS_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -291,6 +292,7 @@ async def query_arcgis_features(
     if payload.get("exceededTransferLimit") is not None:
         metadata["exceeded_transfer_limit"] = bool(payload["exceededTransferLimit"])
     return ProviderQueryResult(data=payload, metadata=metadata)
+
 
 _MICROSOFT_GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 _CALTOPO_ROOT = "https://caltopo.com"
