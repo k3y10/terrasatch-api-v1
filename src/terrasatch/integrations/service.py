@@ -43,6 +43,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "caltopo": {"caltopo_team_id", "map_ids"},
 }
 
+
 def _validate_configuration(provider_key: str, configuration: dict[str, object]) -> None:
     allowed = _ALLOWED_CONFIGURATION_KEYS.get(provider_key, set())
     unexpected = sorted(set(configuration) - allowed)
@@ -131,6 +132,7 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             raise InvalidConfiguration("ArcGIS feature_layer_urls cannot contain duplicates")
         configuration["feature_layer_urls"] = normalized_layers
 
+
 def _assert_non_secret_configuration(value: object, *, path: str = "configuration") -> None:
     if isinstance(value, Mapping):
         for key, nested in value.items():
@@ -146,6 +148,7 @@ def _assert_non_secret_configuration(value: object, *, path: str = "configuratio
     elif isinstance(value, list):
         for index, nested in enumerate(value):
             _assert_non_secret_configuration(nested, path=f"{path}[{index}]")
+
 
 async def _validated_team(
     session: AsyncSession, *, organization_id: UUID, team_id: UUID | None
@@ -163,10 +166,12 @@ async def _validated_team(
         raise ResourceNotFound("Integration team was not found in this organization")
     return team
 
+
 def can_manage_scope(*, role: MembershipRole, scope: IntegrationScope) -> bool:
     if scope == IntegrationScope.USER:
         return True
     return role_allows(role, MembershipRole.ADMIN)
+
 
 async def create_connection_request(
     session: AsyncSession,
@@ -284,6 +289,7 @@ async def create_connection_request(
     await session.flush()
     return connection
 
+
 async def list_visible_connections(
     session: AsyncSession,
     *,
@@ -321,6 +327,7 @@ async def list_visible_connections(
         )
     )
 
+
 async def get_connection_for_management(
     session: AsyncSession,
     *,
@@ -347,6 +354,7 @@ async def get_connection_for_management(
         raise TenantAccessDenied("Administrator access is required to manage this integration")
     return connection
 
+
 async def revoke_connection(
     session: AsyncSession,
     *,
@@ -369,6 +377,7 @@ async def revoke_connection(
     connection.credential_ref = None
     await session.flush()
     return connection
+
 
 def connection_payload(connection: IntegrationConnection) -> dict[str, object]:
     provider = PROVIDERS.get(connection.provider)
