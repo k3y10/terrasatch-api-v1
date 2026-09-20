@@ -92,7 +92,10 @@ class GoogleDriveOAuthAdapter:
         if not settings.google_drive_oauth_is_configured:
             raise ProviderUnavailable("Google Drive OAuth is not configured")
         self.client_id = settings.google_oauth_client_id or ""
-        self.client_secret = settings.google_oauth_client_secret.get_secret_value()  # type: ignore[union-attr]
+        google_secret = settings.google_oauth_client_secret
+        if google_secret is None:
+            raise ProviderUnavailable("Google Drive OAuth client secret is unavailable")
+        self.client_secret = google_secret.get_secret_value()
         self.redirect_uri = str(settings.google_oauth_redirect_uri)
         self.transport = transport
 
@@ -224,7 +227,10 @@ class SlackOAuthAdapter:
         if not settings.slack_oauth_is_configured:
             raise ProviderUnavailable("Slack OAuth is not configured")
         self.client_id = settings.slack_oauth_client_id or ""
-        self.client_secret = settings.slack_oauth_client_secret.get_secret_value()  # type: ignore[union-attr]
+        slack_secret = settings.slack_oauth_client_secret
+        if slack_secret is None:
+            raise ProviderUnavailable("Slack OAuth client secret is unavailable")
+        self.client_secret = slack_secret.get_secret_value()
         self.redirect_uri = str(settings.slack_oauth_redirect_uri)
         self.transport = transport
 
