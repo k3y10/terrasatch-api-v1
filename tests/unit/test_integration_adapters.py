@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from terrasatch.config import Settings
 from terrasatch.integrations.adapters import GoogleDriveOAuthAdapter, SlackOAuthAdapter
@@ -42,6 +42,11 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     assert available["google_drive"] == "available"
     assert available["slack"] == "available"
     assert available["garmin"] == "planned"
+
+
+def test_invalid_integration_encryption_key_is_rejected_at_startup() -> None:
+    with pytest.raises(ValidationError, match="integration encryption key"):
+        Settings(integration_encryption_key=SecretStr("not-a-fernet-key"))
 
 
 def test_provider_credentials_are_encrypted_at_rest() -> None:
