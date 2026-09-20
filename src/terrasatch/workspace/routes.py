@@ -1,6 +1,6 @@
 """Member sessions, tenant-scoped field records, Satchy chat and human reviews."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -10,12 +10,13 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy import select
 
-from terrasatch.actions.models import ActionType, SatchyAction
+from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction
 from terrasatch.actions.service import (
     approve_action,
     execute_approved_integration_action,
     reject_action,
 )
+from terrasatch.actions.state import transition_action
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.billing.rate_limit import enforce_public_rate_limit
 from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
@@ -48,6 +49,8 @@ from terrasatch.integrations.oauth_service import (
 )
 from terrasatch.integrations.runtime import (
     execute as execute_integration_capability,
+)
+from terrasatch.integrations.runtime import (
     query as query_integration_capability,
 )
 from terrasatch.integrations.service import (

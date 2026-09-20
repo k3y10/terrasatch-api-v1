@@ -17,15 +17,15 @@ from terrasatch.identity.models import MembershipRole
 
 from .adapters import get_adapter, token_is_expiring
 from .crypto import decrypt_payload, encrypt_payload
+from .manual_service import (
+    MANUAL_CREDENTIAL_PROVIDERS,
+    probe_manual_credentials,
+)
 from .models import (
     IntegrationConnection,
     IntegrationCredential,
     IntegrationOAuthState,
     IntegrationStatus,
-)
-from .manual_service import (
-    MANUAL_CREDENTIAL_PROVIDERS,
-    probe_manual_credentials,
 )
 from .service import get_connection_for_management, revoke_connection
 

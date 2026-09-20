@@ -168,7 +168,7 @@ async def create_google_drive_file(
         f"{json.dumps(metadata, separators=(',', ':'))}\r\n"
         f"--{boundary}\r\n"
         f"Content-Type: {mime_type}\r\n\r\n"
-    ).encode("utf-8") + media + f"\r\n--{boundary}--\r\n".encode("ascii")
+    ).encode() + media + f"\r\n--{boundary}--\r\n".encode("ascii")
 
     response = await _request(
         transport,

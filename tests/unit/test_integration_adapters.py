@@ -73,8 +73,8 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     assert catalog["google_drive"]["connected_scopes"] == ["user"]
     assert catalog["slack"]["allowed"] is False
     assert catalog["slack"]["requires_admin"] is True
-    assert catalog["garmin"]["support_status"] == "coming_soon"
-    assert catalog["garmin"]["connect_status"] == "coming_soon"
+    assert catalog["garmin"]["support_status"] == "partner_required"
+    assert catalog["garmin"]["connect_status"] == "partner_required"
 
 
 def test_manual_provider_requires_encrypted_credential_store() -> None:

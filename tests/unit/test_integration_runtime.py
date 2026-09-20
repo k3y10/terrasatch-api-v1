@@ -395,7 +395,13 @@ async def test_delivery_duplicate_does_not_rollback_unrelated_state() -> None:
         assert created is False
         assert delivery.id == existing.id
         assert organization.name == "Idempotency org updated"
-        assert session.dirty
+        organization_id = organization.id
+        await session.commit()
+
+    async with factory() as verification:
+        persisted = await verification.get(Organization, organization_id)
+        assert persisted is not None
+        assert persisted.name == "Idempotency org updated"
 
     await engine.dispose()
 

@@ -28,6 +28,8 @@ from terrasatch.identity.models import Team
 from terrasatch.integrations.models import IntegrationDelivery
 from terrasatch.integrations.runtime import (
     execute as execute_integration_capability,
+)
+from terrasatch.integrations.runtime import (
     resolve_connection as resolve_integration_connection,
 )
 from terrasatch.outbound.models import OutboundStatus, OutboundTransmission

@@ -139,10 +139,8 @@ def _assert_non_secret_configuration(value: object, *, path: str = "configuratio
             normalized = str(key).casefold().replace("-", "_")
             if any(part in normalized for part in _SENSITIVE_KEY_PARTS):
                 raise InvalidConfiguration(
-                    (
-                        f"{path} cannot contain credentials or secrets; "
-                        "provider credentials are stored server-side"
-                    )
+                    f"{path} cannot contain credentials or secrets; "
+                    "provider credentials are stored server-side"
                 )
             _assert_non_secret_configuration(nested, path=f"{path}.{key}")
     elif isinstance(value, list):
