@@ -15,6 +15,7 @@ from terrasatch.identity.models import (
     Team,
     User,
 )
+from terrasatch.integrations.delivery_service import prepare_delivery
 from terrasatch.integrations.models import IntegrationConnection, IntegrationScope
 from terrasatch.integrations.service import (
     get_connection_for_management,
@@ -97,6 +98,31 @@ async def test_personal_connection_remains_private_even_from_org_admin() -> None
             role=MembershipRole.ADMIN,
         )
         assert personal.id not in {item.id for item in admin_visible}
+
+        request_id = uuid4()
+        first, first_created = await prepare_delivery(
+            session,
+            organization_id=organization.id,
+            user_id=owner.id,
+            role=MembershipRole.OPERATOR,
+            connection_id=personal.id,
+            request_id=request_id,
+            operation="drive_export",
+            request_metadata={"content_sha256": "test"},
+        )
+        second, second_created = await prepare_delivery(
+            session,
+            organization_id=organization.id,
+            user_id=owner.id,
+            role=MembershipRole.OPERATOR,
+            connection_id=personal.id,
+            request_id=request_id,
+            operation="drive_export",
+            request_metadata={"content_sha256": "test"},
+        )
+        assert first_created is True
+        assert second_created is False
+        assert second.id == first.id
 
     await engine.dispose()
 
