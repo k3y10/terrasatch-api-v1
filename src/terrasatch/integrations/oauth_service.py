@@ -70,6 +70,10 @@ async def begin_authorization(
     role: MembershipRole,
     connection_id: UUID,
 ) -> tuple[IntegrationConnection, str, datetime]:
+    if not settings.integration_secret_store_is_configured:
+        raise ProviderUnavailable(
+            "Integration credential storage is not configured"
+        )
     connection = await get_connection_for_management(
         session,
         organization_id=organization_id,
