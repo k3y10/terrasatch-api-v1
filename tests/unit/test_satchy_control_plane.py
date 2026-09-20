@@ -733,6 +733,54 @@ async def test_approved_integration_actions_use_generic_satchy_capabilities(
 
 
 @pytest.mark.asyncio
+async def test_non_radio_satchy_actions_can_use_the_same_human_approval_gate() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+
+        action = SatchyAction(
+            organization_id=organization.id,
+            site_id=site.id,
+            conversation_id=None,
+            source_transmission_id=None,
+            action_type=ActionType.NOTIFY_TEAM.value,
+            risk_level="low",
+            reason="Workspace user requested a team notification",
+            proposed_message="Cardiff is clear.",
+            structured_payload={
+                "origin": "workspace_chat",
+                "capability": "notification.send",
+                "text": "Cardiff is clear.",
+                "workflow_key": "satchy.action.notify_team",
+            },
+            confidence=0.99,
+            approval_required=True,
+            status=ActionStatus.PROPOSED.value,
+            expires_at=datetime.now(UTC) + timedelta(minutes=15),
+        )
+        session.add(action)
+        await session.flush()
+        transition_action(action, ActionStatus.AWAITING_APPROVAL)
+
+        approved, approval = await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=action.id,
+            approver_role="admin",
+        )
+        assert approved.status == ActionStatus.APPROVED.value
+        assert approval.decision == "approved"
+        assert approved.source_transmission_id is None
+        assert approved.conversation_id is None
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_and_cross_tenant_approval_are_rejected() -> None:
     engine, session, seeded = await _seed_session()
     try:

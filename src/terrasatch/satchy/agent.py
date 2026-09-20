@@ -69,6 +69,18 @@ def _context_summaries(context: dict[str, object]) -> tuple[list[str], str | Non
         raw_location = current.get("location")
         if isinstance(raw_location, str) and raw_location.strip():
             location = raw_location.strip()
+    evidence = context.get("evidence")
+    if isinstance(evidence, list):
+        for item in evidence:
+            if not isinstance(item, dict):
+                continue
+            summary = item.get("summary")
+            if isinstance(summary, str) and summary.strip() and summary.strip() not in summaries:
+                summaries.append(summary.strip())
+            if location is None:
+                raw_location = item.get("location") or item.get("location_text")
+                if isinstance(raw_location, str) and raw_location.strip():
+                    location = raw_location.strip()
     conversation = context.get("conversation")
     if isinstance(conversation, dict):
         raw = conversation.get("summaries")

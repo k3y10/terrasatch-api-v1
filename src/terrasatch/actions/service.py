@@ -312,12 +312,14 @@ async def _integration_action_team_ids(
             raise ResourceNotFound("Integration action team was not found")
         team_ids.add(team.id)
 
-    source = await session.scalar(
-        select(Transmission).where(
-            Transmission.id == action.source_transmission_id,
-            Transmission.organization_id == action.organization_id,
+    source = None
+    if action.source_transmission_id is not None:
+        source = await session.scalar(
+            select(Transmission).where(
+                Transmission.id == action.source_transmission_id,
+                Transmission.organization_id == action.organization_id,
+            )
         )
-    )
     if source is not None and source.speaker_callsign_id is not None:
         callsign = await session.scalar(
             select(Callsign).where(
@@ -465,6 +467,8 @@ async def queue_approved_action(
         raise InvalidConfiguration("Action must be approved before it can be queued")
     if action.action_type != ActionType.REPLY_RADIO.value:
         raise InvalidConfiguration("This action type does not create an outbound radio command")
+    if action.conversation_id is None or action.source_transmission_id is None:
+        raise InvalidConfiguration("Approved radio action is missing radio source context")
     if not action.proposed_message:
         raise InvalidConfiguration("Approved radio action is missing a message")
 

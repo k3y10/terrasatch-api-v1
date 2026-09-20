@@ -54,7 +54,7 @@ from terrasatch.integrations.service import (
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.satchy.adaptation import observe_workspace_context
-from terrasatch.satchy.agent import answer_workspace
+from terrasatch.satchy.agent import answer_workspace, plan_integration_action
 from terrasatch.satchy.assets import (
     create_field_asset,
     list_authorized_assets,
@@ -116,6 +116,7 @@ class Login(BaseModel):
 
 
 class Chat(BaseModel):
+    request_id: UUID | None = None
     message: str = Field(min_length=1, max_length=4000)
     site_id: UUID | None = None
     transmission_id: UUID | None = None
@@ -450,7 +451,11 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 "actions": [
                     {
                         "id": str(a.id),
-                        "source_id": str(a.source_transmission_id),
+                        "source_id": (
+                            str(a.source_transmission_id)
+                            if a.source_transmission_id is not None
+                            else None
+                        ),
                         "type": a.action_type,
                         "reason": a.reason,
                         "message": a.proposed_message,
@@ -951,15 +956,94 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             objective=payload.objective,
             active_map=payload.active_map,
         )
-        answer, model = await answer_workspace(
+        request_id = payload.request_id or uuid4()
+        existing_action = await session.get(SatchyAction, request_id)
+        planned_action = await plan_integration_action(
             settings=settings,
-            context=context,
-            message=payload.message,
-            history=[
-                {"role": item.role, "content": item.content}
-                for item in reversed(history)
-            ],
+            text=payload.message,
+            context=context.model_dump(mode="json"),
         )
+        action = existing_action
+        if action is None and planned_action.action_type != "none":
+            if planned_action.missing_context:
+                missing = ", ".join(planned_action.missing_context)
+                answer = (
+                    f"I need {missing} before I can prepare that integration action."
+                )
+                model = "satchy-integration-planner"
+            else:
+                action_type = (
+                    ActionType.NOTIFY_TEAM
+                    if planned_action.action_type == "notify_team"
+                    else ActionType.GENERATE_REPORT
+                )
+                if action_type == ActionType.NOTIFY_TEAM:
+                    proposed_message = planned_action.notification_text
+                    structured_payload = {
+                        "origin": "workspace_chat",
+                        "requester_user_id": str(user.id),
+                        "capability": "notification.send",
+                        "text": planned_action.notification_text,
+                        "workflow_key": "satchy.action.notify_team",
+                        "planner_confidence": planned_action.confidence,
+                    }
+                    preview = "team notification"
+                else:
+                    proposed_message = planned_action.document_content
+                    structured_payload = {
+                        "origin": "workspace_chat",
+                        "requester_user_id": str(user.id),
+                        "capability": "document.create",
+                        "name": planned_action.document_name,
+                        "content": planned_action.document_content,
+                        "mime_type": planned_action.mime_type,
+                        "workflow_key": "satchy.action.generate_report",
+                        "planner_confidence": planned_action.confidence,
+                    }
+                    preview = "report"
+                if context.team_id is not None:
+                    structured_payload["team_id"] = str(context.team_id)
+                action = SatchyAction(
+                    id=request_id,
+                    organization_id=organization_id,
+                    site_id=selected_site.id,
+                    conversation_id=None,
+                    source_transmission_id=None,
+                    evaluation_id=None,
+                    action_type=action_type.value,
+                    risk_level="low",
+                    reason=planned_action.summary,
+                    proposed_message=proposed_message,
+                    structured_payload=structured_payload,
+                    confidence=planned_action.confidence,
+                    approval_required=True,
+                    status=ActionStatus.PROPOSED.value,
+                    expires_at=datetime.now(UTC) + timedelta(minutes=15),
+                )
+                session.add(action)
+                await session.flush()
+                transition_action(action, ActionStatus.AWAITING_APPROVAL)
+                answer = (
+                    f"I prepared that {preview} for human approval. "
+                    "Nothing has been sent or created yet. Review it in Workflows."
+                )
+                model = "satchy-integration-planner"
+        elif action is not None:
+            answer = (
+                f"That integration action already exists with status {action.status}. "
+                "Review it in Workflows."
+            )
+            model = "satchy-integration-planner"
+        else:
+            answer, model = await answer_workspace(
+                settings=settings,
+                context=context,
+                message=payload.message,
+                history=[
+                    {"role": item.role, "content": item.content}
+                    for item in reversed(history)
+                ],
+            )
         session.add_all(
             [
                 WorkspaceMessage(
@@ -978,7 +1062,12 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             ]
         )
         await session.commit()
-        return {"answer": answer[:16000]}
+        return {
+            "answer": answer[:16000],
+            "action_id": str(action.id) if action is not None else None,
+            "action_status": action.status if action is not None else None,
+            "approval_required": bool(action is not None and action.approval_required),
+        }
 
 
 @router.post("/organizations/{organization_id}/observations")
