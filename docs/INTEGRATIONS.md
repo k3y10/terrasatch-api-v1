@@ -115,9 +115,10 @@ record. Requests use CalTopo's documented HMAC-SHA256 signing flow. The
 ## Mapbox
 
 Mapbox is treated as a TerraSatch-managed read service rather than a customer OAuth connection. Its
-server-side access token lives only in the provider secret bundle. The current
-`map.style.read` capability reads a named style through the fixed Mapbox Styles API host. It does
-not grant style-write or token-management permissions.
+server-side access token, fixed username, and comma-separated approved style IDs live only in the
+provider secret bundle. The current `map.style.read` capability can read only those approved styles
+through the fixed Mapbox Styles API host. It does not grant style-write, arbitrary private-style
+discovery, or token-management permissions.
 
 ## Provider access boundaries
 
