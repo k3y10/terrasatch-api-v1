@@ -59,3 +59,19 @@ Connected providers now expose two server-side output primitives that keep crede
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.
 
 Shared team integrations remain administrator-visible in the member portal until TerraSatch has an explicit portal team-membership mapping. This is intentionally conservative: team connection metadata is not exposed to every organization member merely because they share the same organization.
+
+
+## Satchy integration runtime
+
+Provider connections are no longer the interface Satchy needs to reason about. Each provider advertises
+generic capabilities such as `document.create` or `notification.send`. When a connection is created,
+TerraSatch creates an audience grant for the selected user, team, or organization plus a separate
+`agent:satchy` grant for the same supported capabilities.
+
+At execution time the runtime resolves an eligible connected provider from the current user/team/
+organization/workflow context and requires both the audience grant and Satchy's agent grant. This keeps
+connection ownership, audience permission, and agent authority separate while letting workflows call one
+stable interface instead of provider-specific APIs.
+
+The existing provider-specific endpoints remain compatibility/test surfaces. New Satchy workflows should
+call the integration runtime by capability.

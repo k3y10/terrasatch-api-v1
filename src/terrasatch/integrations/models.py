@@ -141,6 +141,47 @@ class IntegrationDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
 
+class IntegrationGrant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Capability grant from one connection to a user, team, organization, agent, or workflow."""
+
+    __tablename__ = "integration_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "subject_type",
+            "subject_id",
+            name="uq_integration_grants_subject",
+        ),
+        Index(
+            "ix_integration_grants_subject",
+            "organization_id",
+            "subject_type",
+            "subject_id",
+            "enabled",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("integration_connections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subject_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    subject_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
 class IntegrationCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "integration_credentials"
     __table_args__ = (

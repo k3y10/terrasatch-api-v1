@@ -115,6 +115,68 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "integration_grants",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
+        sa.Column("connection_id", sa.Uuid(), nullable=False),
+        sa.Column("subject_type", sa.String(length=32), nullable=False),
+        sa.Column("subject_id", sa.String(length=255), nullable=False),
+        sa.Column(
+            "capabilities",
+            sa.JSON(),
+            server_default=sa.text("'[]'"),
+            nullable=False,
+        ),
+        sa.Column("created_by_user_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "enabled",
+            sa.Boolean(),
+            server_default=sa.true(),
+            nullable=False,
+        ),
+        *_timestamps(),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["connection_id"],
+            ["integration_connections.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["created_by_user_id"],
+            ["users.id"],
+            ondelete="SET NULL",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "connection_id",
+            "subject_type",
+            "subject_id",
+            name="uq_integration_grants_subject",
+        ),
+    )
+    for column in (
+        "organization_id",
+        "connection_id",
+        "subject_type",
+        "subject_id",
+        "created_by_user_id",
+    ):
+        op.create_index(
+            f"ix_integration_grants_{column}",
+            "integration_grants",
+            [column],
+        )
+    op.create_index(
+        "ix_integration_grants_subject",
+        "integration_grants",
+        ["organization_id", "subject_type", "subject_id", "enabled"],
+    )
+
+    op.create_table(
         "integration_deliveries",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("organization_id", sa.Uuid(), nullable=False),
@@ -268,4 +330,5 @@ def downgrade() -> None:
     op.drop_table("integration_oauth_states")
     op.drop_table("integration_credentials")
     op.drop_table("integration_deliveries")
+    op.drop_table("integration_grants")
     op.drop_table("integration_connections")

@@ -34,6 +34,7 @@ from terrasatch.integrations.delivery_service import (
     execute_slack_delivery,
     prepare_delivery,
 )
+from terrasatch.integrations.runtime import execute as execute_integration_capability
 from terrasatch.integrations.oauth_service import (
     begin_authorization,
     complete_authorization,
@@ -145,6 +146,19 @@ class IntegrationRequest(BaseModel):
     team_id: UUID | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     configuration: dict[str, object] = Field(default_factory=dict)
+
+
+class IntegrationExecuteRequest(BaseModel):
+    request_id: UUID
+    capability: Literal["document.create", "notification.send"]
+    connection_id: UUID | None = None
+    workflow_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+    )
+    payload: dict[str, object] = Field(default_factory=dict)
 
 
 class SlackMessageRequest(BaseModel):
@@ -490,6 +504,37 @@ async def request_integration(
         )
         await session.commit()
         return jsonable_encoder(connection_payload(connection))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/execute",
+    status_code=status.HTTP_201_CREATED,
+)
+async def execute_integration(
+    organization_id: UUID,
+    payload: IntegrationExecuteRequest,
+    request: Request,
+):
+    """Execute a Satchy capability without exposing provider-specific plumbing."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery = await execute_integration_capability(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            capability=payload.capability,
+            request_id=payload.request_id,
+            payload=payload.payload,
+            agent_key="satchy",
+            workflow_key=payload.workflow_key,
+            connection_id=payload.connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
 
 
 @router.post("/organizations/{organization_id}/integrations/{connection_id}/authorize")

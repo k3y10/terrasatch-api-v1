@@ -20,6 +20,7 @@ class ProviderDefinition(TypedDict):
     auth: str
     setup_status: Literal["managed", "planned", "available"]
     scopes: list[str]
+    capabilities: list[str]
     description: str
 
 
@@ -31,6 +32,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "managed",
         "setup_status": "managed",
         "scopes": ["organization"],
+        "capabilities": [],
         "description": "TerraSatch-managed field runtime and device connection.",
     },
     "google_drive": {
@@ -40,6 +42,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "oauth2",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": ["document.create"],
         "description": "Per-file Drive access for approved exports and operational files.",
     },
     "microsoft_365": {
@@ -49,6 +52,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "oauth2",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Microsoft productivity and document workflows.",
     },
     "slack": {
@@ -58,6 +62,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "oauth2",
         "setup_status": "planned",
         "scopes": ["team", "organization"],
+        "capabilities": ["notification.send"],
         "description": (
             "Approved operational notifications to an explicitly selected Slack destination."
         ),
@@ -69,6 +74,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "service_account",
         "setup_status": "planned",
         "scopes": ["organization"],
+        "capabilities": [],
         "description": "Organization-scoped data exchange and analytics.",
     },
     "esri_arcgis": {
@@ -78,6 +84,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "oauth2_or_token",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Approved map layers, features, and operational GIS context.",
     },
     "mapbox": {
@@ -87,6 +94,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "token",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Map rendering and approved location context.",
     },
     "onx_backcountry": {
@@ -96,6 +104,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "provider_specific",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Outdoor mapping context where provider access permits.",
     },
     "caltopo": {
@@ -105,6 +114,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "provider_specific",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Outdoor mapping and approved operational layers.",
     },
     "gaia_gps": {
@@ -114,6 +124,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "provider_specific",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Outdoor map and route context where provider access permits.",
     },
     "garmin": {
@@ -123,6 +134,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "provider_specific",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Approved device, activity, or field data where provider access permits.",
     },
     "alltrails": {
@@ -132,6 +144,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "auth": "provider_specific",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
+        "capabilities": [],
         "description": "Outdoor route context where provider access permits.",
     },
 }

@@ -18,7 +18,12 @@ from terrasatch.identity.access import role_allows
 from terrasatch.identity.models import MembershipRole, Team
 
 from .catalog import PROVIDERS
-from .models import IntegrationConnection, IntegrationScope, IntegrationStatus
+from .models import (
+    IntegrationConnection,
+    IntegrationGrant,
+    IntegrationScope,
+    IntegrationStatus,
+)
 
 _SENSITIVE_KEY_PARTS = (
     "secret",
@@ -162,6 +167,38 @@ async def create_connection_request(
         enabled=True,
     )
     session.add(connection)
+    await session.flush()
+
+    subject_id = (
+        str(user_id)
+        if scope == IntegrationScope.USER
+        else str(team.id)
+        if scope == IntegrationScope.TEAM and team is not None
+        else str(organization_id)
+    )
+    capabilities = list(provider["capabilities"])
+    session.add_all(
+        [
+            IntegrationGrant(
+                organization_id=organization_id,
+                connection_id=connection.id,
+                subject_type=scope.value,
+                subject_id=subject_id,
+                capabilities=capabilities,
+                created_by_user_id=user_id,
+                enabled=True,
+            ),
+            IntegrationGrant(
+                organization_id=organization_id,
+                connection_id=connection.id,
+                subject_type="agent",
+                subject_id="satchy",
+                capabilities=capabilities,
+                created_by_user_id=user_id,
+                enabled=True,
+            ),
+        ]
+    )
     await session.flush()
     return connection
 
