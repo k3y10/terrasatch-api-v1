@@ -17,7 +17,9 @@ def _fernet(settings: Settings) -> Fernet:
     try:
         return Fernet(secret.get_secret_value().encode("ascii"))
     except (UnicodeEncodeError, ValueError) as error:
-        raise InvalidConfiguration("Integration encryption key is not a valid Fernet key") from error
+        raise InvalidConfiguration(
+            "Integration encryption key is not a valid Fernet key"
+        ) from error
 
 
 def encrypt_payload(settings: Settings, payload: dict[str, object]) -> str:
