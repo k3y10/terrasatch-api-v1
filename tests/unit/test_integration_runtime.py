@@ -774,3 +774,109 @@ async def test_mapbox_managed_runtime_enforces_style_allowlist(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "operation_name"),
+    [
+        ("microsoft_teams", "send_teams_message"),
+        ("webhook", "send_webhook_notification"),
+    ],
+)
+async def test_notification_runtime_routes_manual_webhook_providers(
+    monkeypatch,
+    provider: str,
+    operation_name: str,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name=f"{provider} runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name=f"{provider} runtime org",
+            slug=f"{provider.replace('_', '-')}-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Notification User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider=provider,
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name=provider,
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["notification.send"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["notification.send"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"webhook_url": "https://example.com/hook"}, object()
+
+        async def fake_send(*args, **kwargs):
+            assert kwargs["text"] == "Field update"
+            if provider == "webhook":
+                assert "request_id" in kwargs
+            return ProviderOperationResult(
+                external_id=f"{provider}-1",
+                metadata={"status_code": 202},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            f"terrasatch.integrations.runtime.{operation_name}",
+            fake_send,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=user.id,
+            capability="notification.send",
+            request_id=uuid4(),
+            payload={"text": "Field update"},
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == f"{provider}-1"
+
+    await engine.dispose()
