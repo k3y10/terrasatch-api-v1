@@ -19,6 +19,7 @@ from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.crypto import decrypt_payload, encrypt_payload
 from terrasatch.integrations.provider_config import resolve_provider_app_config
 
+
 def configured_settings() -> Settings:
     return Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -41,6 +42,7 @@ def configured_settings() -> Settings:
             "integrations/oauth/esri_arcgis/callback"
         ),
     )
+
 
 def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> None:
     planned = {item["key"]: item["setup_status"] for item in provider_catalog(Settings())}
@@ -74,6 +76,7 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     assert catalog["garmin"]["support_status"] == "coming_soon"
     assert catalog["garmin"]["connect_status"] == "coming_soon"
 
+
 def test_manual_provider_requires_encrypted_credential_store() -> None:
     without_store = {
         item["key"]: item
@@ -97,6 +100,7 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["snowflake"]["connect_status"] == "external_setup_required"
     assert with_store["snowflake"]["can_connect"] is True
 
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -115,6 +119,7 @@ def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     assert resolved.redirect_uri == "https://api.example.com/callback"
     assert resolved.source == "bundle"
 
+
 def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
     catalog = {item["key"]: item for item in provider_catalog(configured_settings())}
     labels = {
@@ -128,9 +133,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
     }
     assert slack_labels["notification.send"] == "Send notifications"
 
+
 def test_invalid_integration_encryption_key_is_rejected_at_startup() -> None:
     with pytest.raises(ValidationError, match="integration encryption key"):
         Settings(integration_encryption_key=SecretStr("not-a-fernet-key"))
+
 
 def test_provider_credentials_are_encrypted_at_rest() -> None:
     settings = configured_settings()
@@ -138,6 +145,7 @@ def test_provider_credentials_are_encrypted_at_rest() -> None:
     encrypted = encrypt_payload(settings, payload)
     assert "secret-token" not in encrypted
     assert decrypt_payload(settings, encrypted) == payload
+
 
 @pytest.mark.asyncio
 async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identity() -> None:
@@ -182,6 +190,7 @@ async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identi
     assert result.account_id == "permission-123"
     assert result.credentials["refresh_token"] == "google-refresh"
 
+
 @pytest.mark.asyncio
 async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_metadata() -> None:
     settings = configured_settings()
@@ -219,6 +228,7 @@ async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_meta
     assert result.account_id == "T123"
     assert result.credentials["incoming_webhook"]["channel_id"] == "C123"
 
+
 @pytest.mark.asyncio
 async def test_slack_oauth_rejects_install_without_approved_webhook_destination() -> None:
     settings = configured_settings()
@@ -243,6 +253,7 @@ async def test_slack_oauth_rejects_install_without_approved_webhook_destination(
     )
     with pytest.raises(ProviderUnavailable, match="webhook destination"):
         await adapter.exchange_code(code="slack-code")
+
 
 @pytest.mark.asyncio
 async def test_slack_revocation_refreshes_rotated_token_before_remote_revoke() -> None:
@@ -292,6 +303,7 @@ async def test_slack_revocation_refreshes_rotated_token_before_remote_revoke() -
         ("POST", SlackOAuthAdapter.revoke_endpoint),
     ]
 
+
 @pytest.mark.asyncio
 async def test_arcgis_oauth_exchanges_refreshable_user_token_and_probes_identity() -> None:
     settings = configured_settings()
@@ -338,6 +350,7 @@ async def test_arcgis_oauth_exchanges_refreshable_user_token_and_probes_identity
     assert result.account_id == "ORG123:field_user"
     assert result.credentials["refresh_token"] == "arcgis-refresh"
 
+
 @pytest.mark.asyncio
 async def test_arcgis_revoke_invalidates_refresh_token() -> None:
     settings = configured_settings()
@@ -360,6 +373,7 @@ async def test_arcgis_revoke_invalidates_refresh_token() -> None:
             "refresh_token": "arcgis-refresh",
         }
     )
+
 
 @pytest.mark.asyncio
 async def test_microsoft_oauth_requests_one_drive_scopes_and_probes_identity() -> None:
