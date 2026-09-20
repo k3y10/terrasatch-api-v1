@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy import select
 
 from terrasatch.actions.models import ActionType, SatchyAction
@@ -189,14 +189,15 @@ class IntegrationQueryRequest(BaseModel):
 
 
 class IntegrationCredentialRequest(BaseModel):
-    values: dict[str, str]
+    values: dict[str, SecretStr]
 
     @model_validator(mode="after")
     def validate_values(self):
         if not 1 <= len(self.values) <= 4:
             raise ValueError("Credential setup requires between 1 and 4 values")
         for key, value in self.values.items():
-            if not key or len(key) > 100 or not value or len(value) > 8192:
+            raw = value.get_secret_value()
+            if not key or len(key) > 100 or not raw or len(raw) > 8192:
                 raise ValueError("Credential setup contains an invalid value")
         return self
 
@@ -684,7 +685,10 @@ async def configure_integration_credentials(
             user_id=user.id,
             role=membership.role,
             connection_id=connection_id,
-            values=payload.values,
+            values={
+                key: value.get_secret_value()
+                for key, value in payload.values.items()
+            },
         )
         await session.commit()
         return jsonable_encoder(connection_payload(connection))
