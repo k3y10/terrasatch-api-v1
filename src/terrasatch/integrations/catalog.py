@@ -160,7 +160,9 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "setup_status": "planned",
         "scopes": ["team", "organization"],
         "capabilities": ["notification.send"],
-        "description": "Signed outbound notifications to an organization-controlled HTTPS endpoint.",
+        "description": (
+            "Signed outbound notifications to an organization-controlled HTTPS endpoint."
+        ),
     },
     "snowflake": {
         "key": "snowflake",
