@@ -33,6 +33,7 @@ class SatchyIntegrationPlan(BaseModel):
     action_type: Literal["notify_team", "generate_report", "none"] = "none"
     confidence: float = Field(ge=0, le=1)
     summary: str = Field(min_length=1, max_length=1000)
+    audience_scope: Literal["user", "team", "organization"] = "user"
     notification_text: str | None = Field(default=None, max_length=4000)
     document_name: str | None = Field(default=None, max_length=255)
     document_content: str | None = Field(default=None, max_length=500000)
