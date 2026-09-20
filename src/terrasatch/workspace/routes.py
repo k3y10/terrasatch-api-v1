@@ -62,7 +62,13 @@ from terrasatch.satchy.assets import (
     update_field_asset,
 )
 from terrasatch.satchy.context import build_satchy_context
-from terrasatch.satchy.schemas import ActiveMapContext, FieldAssetCreate, FieldAssetUpdate
+from terrasatch.satchy.intents import resolve_intent
+from terrasatch.satchy.schemas import (
+    ActiveMapContext,
+    FieldAssetCreate,
+    FieldAssetUpdate,
+    SatchyIntent,
+)
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
@@ -984,15 +990,21 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         ):
             raise HTTPException(409, "Satchy request ID is already in use")
         existing_action = existing_by_id
-        planner_context = context.model_dump(mode="json")
-        planner_context["request_source"] = "workspace"
-        planned_action = await plan_integration_action(
-            settings=settings,
-            text=payload.message,
-            context=planner_context,
-        )
+        planned_action = None
+        if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
+            planner_context = context.model_dump(mode="json")
+            planner_context["request_source"] = "workspace"
+            planned_action = await plan_integration_action(
+                settings=settings,
+                text=payload.message,
+                context=planner_context,
+            )
         action = existing_action
-        if action is None and planned_action.action_type != "none":
+        if (
+            action is None
+            and planned_action is not None
+            and planned_action.action_type != "none"
+        ):
             if planned_action.missing_context:
                 missing = ", ".join(planned_action.missing_context)
                 answer = (
