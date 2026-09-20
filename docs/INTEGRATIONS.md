@@ -102,7 +102,8 @@ connection stores only the Snowflake account hostname and optional warehouse/dat
 metadata. The PAT is submitted through the protected credential setup endpoint and encrypted
 immediately. The `data.query` capability accepts one read-only `SELECT` statement, rejects
 multi-statement/comment syntax, and calls the Snowflake SQL API over the fixed
-`*.snowflakecomputing.com` host.
+`*.snowflakecomputing.com` host. Snowflake PAT users must also satisfy Snowflake's account
+authentication and network-policy requirements.
 
 ## CalTopo
 
@@ -110,7 +111,9 @@ CalTopo uses its supported Teams service-account API. A team or organization adm
 CalTopo service account, then provides its credential ID and one-time credential secret through the
 protected credential setup endpoint. TerraSatch stores the secret only in the encrypted credential
 record. Requests use CalTopo's documented HMAC-SHA256 signing flow. The
-`map.features.query` capability can read team data or specifically allowlisted map IDs.
+`map.features.query` capability can read specifically allowlisted map IDs with READ access. When
+no map ID is configured, TerraSatch uses the team account endpoint for discovery, which requires the
+CalTopo service account to have ADMIN access.
 
 ## Mapbox
 
@@ -129,19 +132,30 @@ visible so customers can see the intended stack without being offered a broken C
 
 ## Lifecycle
 
+OAuth providers use:
+
 `requested -> awaiting_authorization -> connected`
 
-A failed provider exchange or connection test moves the record to `error`. A successful provider revocation deletes the encrypted credential and marks the connection `revoked`. OAuth state values are stored only as SHA-256 digests, expire quickly, and are single-use.
+Manual service-account providers use:
 
-Roadmap providers remain `planned` until their server adapter and deployment configuration actually exist.
+`requested -> connected`
 
+after the protected credential setup endpoint validates the supplied credential. A failed provider
+exchange, manual credential validation, or connection test moves the record to `error`. A successful provider revocation deletes the encrypted credential and marks the connection `revoked`. OAuth state values are stored only as SHA-256 digests, expire quickly, and are single-use.
 
-## First provider output operations
+Providers without an implemented, documented access path remain `planned` or `partner_required`
+instead of being exposed as connectable.
 
-Connected providers now expose two server-side output primitives that keep credentials out of the browser:
+## Supported runtime capabilities
 
-- Slack: send a text notification through the channel-specific incoming webhook returned during OAuth.
-- Google Drive: create a UTF-8 text, Markdown, CSV, or JSON file using a multipart Drive upload. A configured `folder_id` is used as the file parent.
+Connected or TerraSatch-managed providers currently expose these server-side capabilities while
+keeping customer credentials out of browser state:
+
+- `notification.send`: Slack, through the OAuth-selected incoming webhook destination.
+- `document.create`: Google Drive and Microsoft OneDrive.
+- `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
+- `data.query`: one read-only Snowflake SELECT statement through the SQL API.
+- `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.
 
