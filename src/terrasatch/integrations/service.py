@@ -24,6 +24,7 @@ from .models import (
     IntegrationScope,
     IntegrationStatus,
 )
+from .operations import validate_arcgis_feature_layer_url
 
 _SENSITIVE_KEY_PARTS = (
     "secret",
@@ -36,6 +37,7 @@ _SENSITIVE_KEY_PARTS = (
 )
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
+    "esri_arcgis": {"feature_layer_urls"},
 }
 
 
@@ -50,6 +52,21 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         folder_id = configuration["folder_id"]
         if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
+
+    if provider_key == "esri_arcgis":
+        raw_layers = configuration.get("feature_layer_urls")
+        if not isinstance(raw_layers, list) or not 1 <= len(raw_layers) <= 20:
+            raise InvalidConfiguration(
+                "ArcGIS requires between 1 and 20 approved feature_layer_urls"
+            )
+        normalized_layers: list[str] = []
+        for raw_layer in raw_layers:
+            if not isinstance(raw_layer, str):
+                raise InvalidConfiguration("ArcGIS feature_layer_urls must contain strings")
+            normalized_layers.append(validate_arcgis_feature_layer_url(raw_layer))
+        if len(set(normalized_layers)) != len(normalized_layers):
+            raise InvalidConfiguration("ArcGIS feature_layer_urls cannot contain duplicates")
+        configuration["feature_layer_urls"] = normalized_layers
 
 
 def _assert_non_secret_configuration(value: object, *, path: str = "configuration") -> None:

@@ -9,7 +9,11 @@ from pydantic import SecretStr, ValidationError
 
 from terrasatch.config import Settings
 from terrasatch.errors import ProviderUnavailable
-from terrasatch.integrations.adapters import GoogleDriveOAuthAdapter, SlackOAuthAdapter
+from terrasatch.integrations.adapters import (
+    ArcGISOAuthAdapter,
+    GoogleDriveOAuthAdapter,
+    SlackOAuthAdapter,
+)
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.crypto import decrypt_payload, encrypt_payload
 
@@ -29,6 +33,12 @@ def configured_settings() -> Settings:
             "https://api.example.com/api/v1/workspace/"
             "integrations/oauth/slack/callback"
         ),
+        arcgis_oauth_client_id="arcgis-client",
+        arcgis_oauth_client_secret=SecretStr("arcgis-secret"),
+        arcgis_oauth_redirect_uri=(
+            "https://api.example.com/api/v1/workspace/"
+            "integrations/oauth/esri_arcgis/callback"
+        ),
     )
 
 
@@ -36,12 +46,14 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     planned = {item["key"]: item["setup_status"] for item in provider_catalog(Settings())}
     assert planned["google_drive"] == "planned"
     assert planned["slack"] == "planned"
+    assert planned["esri_arcgis"] == "planned"
     available = {
         item["key"]: item["setup_status"]
         for item in provider_catalog(configured_settings())
     }
     assert available["google_drive"] == "available"
     assert available["slack"] == "available"
+    assert available["esri_arcgis"] == "available"
     assert available["garmin"] == "planned"
 
 
@@ -208,3 +220,75 @@ async def test_slack_revocation_refreshes_rotated_token_before_remote_revoke() -
         ("POST", SlackOAuthAdapter.token_endpoint),
         ("POST", SlackOAuthAdapter.revoke_endpoint),
     ]
+
+
+
+@pytest.mark.asyncio
+async def test_arcgis_oauth_exchanges_refreshable_user_token_and_probes_identity() -> None:
+    settings = configured_settings()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == ArcGISOAuthAdapter.token_endpoint:
+            body = request.content.decode("utf-8")
+            assert "grant_type=authorization_code" in body
+            assert "client_secret=arcgis-secret" in body
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "arcgis-access",
+                    "refresh_token": "arcgis-refresh",
+                    "expires_in": 1800,
+                    "refresh_token_expires_in": 604800,
+                    "username": "field_user",
+                },
+            )
+        if str(request.url).startswith(ArcGISOAuthAdapter.self_endpoint):
+            assert request.headers["Authorization"] == "Bearer arcgis-access"
+            return httpx.Response(
+                200,
+                json={
+                    "username": "field_user",
+                    "fullName": "Field User",
+                    "orgId": "ORG123",
+                },
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = ArcGISOAuthAdapter(
+        settings,
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="arcgis-state"))
+    params = parse_qs(authorization.query)
+    assert authorization.hostname == "www.arcgis.com"
+    assert params["response_type"] == ["code"]
+    assert params["state"] == ["arcgis-state"]
+
+    result = await adapter.exchange_code(code="arcgis-code")
+    assert result.account_label == "Field User"
+    assert result.account_id == "ORG123:field_user"
+    assert result.credentials["refresh_token"] == "arcgis-refresh"
+
+
+@pytest.mark.asyncio
+async def test_arcgis_revoke_invalidates_refresh_token() -> None:
+    settings = configured_settings()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == ArcGISOAuthAdapter.revoke_endpoint
+        body = request.content.decode("utf-8")
+        assert "auth_token=arcgis-refresh" in body
+        assert "token_type_hint=refresh_token" in body
+        assert "client_id=arcgis-client" in body
+        return httpx.Response(200, json={"success": True})
+
+    adapter = ArcGISOAuthAdapter(
+        settings,
+        transport=httpx.MockTransport(responder),
+    )
+    await adapter.revoke(
+        {
+            "access_token": "arcgis-access",
+            "refresh_token": "arcgis-refresh",
+        }
+    )

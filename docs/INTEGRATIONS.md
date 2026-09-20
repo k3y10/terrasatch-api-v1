@@ -42,6 +42,28 @@ Slack code exchange uses HTTP Basic authentication for the client credentials. T
 
 The webhook is bound to the channel selected during Slack authorization; TerraSatch does not override that channel at send time. When token rotation is enabled, TerraSatch refreshes an expired access token before remote revocation so Slack can remove the associated installation and incoming webhook before the local encrypted credential is deleted.
 
+## Esri ArcGIS Online
+
+The first ArcGIS adapter is intentionally read-only and targets ArcGIS Online. TerraSatch uses the
+server-side OAuth authorization-code flow and keeps the client secret and refresh token on the API
+host. Connected ArcGIS accounts currently expose the provider-neutral `map.features.query`
+capability.
+
+Each connection must declare between 1 and 20 approved ArcGIS Online FeatureServer layer URLs.
+Satchy can query only those allowlisted layers. Query requests use HTTPS POST, put the OAuth access
+token in the HTTP Authorization header, cap a response at 200 features and 2 MB, and reject
+non-`*.arcgis.com` destinations. This prevents the layer URL from becoming a general-purpose
+server-side request primitive.
+
+ArcGIS Enterprise and feature-editing capabilities remain planned; this adapter does not claim those
+capabilities yet.
+
+1. Create ArcGIS OAuth credentials for a server-side application.
+2. Register the callback:
+   `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/esri_arcgis/callback`.
+3. Set the API-only ArcGIS client ID, client secret, and redirect URI environment values.
+4. Create the TerraSatch connection with its approved `feature_layer_urls`.
+
 ## Lifecycle
 
 `requested -> awaiting_authorization -> connected`

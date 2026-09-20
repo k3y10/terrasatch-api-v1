@@ -81,11 +81,11 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "key": "esri_arcgis",
         "name": "Esri ArcGIS",
         "category": "mapping",
-        "auth": "oauth2_or_token",
+        "auth": "oauth2",
         "setup_status": "planned",
         "scopes": ["user", "team", "organization"],
-        "capabilities": [],
-        "description": "Approved map layers, features, and operational GIS context.",
+        "capabilities": ["map.features.query"],
+        "description": "Read approved ArcGIS Online feature layers through Satchy.",
     },
     "mapbox": {
         "key": "mapbox",
@@ -158,6 +158,8 @@ def provider_catalog(settings: Settings | None = None) -> list[ProviderDefinitio
             if provider["key"] == "google_drive" and settings.google_drive_oauth_is_configured:
                 item["setup_status"] = "available"
             elif provider["key"] == "slack" and settings.slack_oauth_is_configured:
+                item["setup_status"] = "available"
+            elif provider["key"] == "esri_arcgis" and settings.arcgis_oauth_is_configured:
                 item["setup_status"] = "available"
         items.append(cast(ProviderDefinition, item))
     return items

@@ -8,6 +8,7 @@ import pytest
 from terrasatch.errors import InvalidConfiguration
 from terrasatch.integrations.operations import (
     create_google_drive_file,
+    query_arcgis_features,
     send_slack_message,
 )
 
@@ -80,3 +81,57 @@ async def test_drive_export_uses_multipart_upload_and_optional_parent() -> None:
     )
     assert result.external_id == "file-123"
     assert result.metadata["name"] == "shift-report.txt"
+
+
+
+@pytest.mark.asyncio
+async def test_arcgis_feature_query_uses_bearer_auth_and_post_body() -> None:
+    layer_url = (
+        "https://services3.arcgis.com/ORG/arcgis/rest/services/"
+        "Avalanche_Observations/FeatureServer/0"
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == f"{layer_url}/query"
+        assert request.method == "POST"
+        assert request.headers["Authorization"] == "Bearer arcgis-access"
+        body = request.content.decode("utf-8")
+        assert "where=zone%3D%27Cardiff%27" in body
+        assert "outFields=OBJECTID%2Czone" in body
+        assert "resultRecordCount=25" in body
+        return httpx.Response(
+            200,
+            json={
+                "geometryType": "esriGeometryPoint",
+                "features": [
+                    {
+                        "attributes": {
+                            "OBJECTID": 1,
+                            "zone": "Cardiff",
+                        },
+                        "geometry": {"x": -111.65, "y": 40.59},
+                    }
+                ],
+                "exceededTransferLimit": False,
+            },
+        )
+
+    result = await query_arcgis_features(
+        {"access_token": "arcgis-access"},
+        layer_url=layer_url,
+        where="zone='Cardiff'",
+        out_fields=["OBJECTID", "zone"],
+        result_record_count=25,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["feature_count"] == 1
+    assert result.metadata["geometry_type"] == "esriGeometryPoint"
+
+
+@pytest.mark.asyncio
+async def test_arcgis_feature_query_rejects_non_arcgis_destination() -> None:
+    with pytest.raises(InvalidConfiguration, match="ArcGIS Online"):
+        await query_arcgis_features(
+            {"access_token": "arcgis-access"},
+            layer_url="https://example.com/arcgis/rest/services/Test/FeatureServer/0",
+        )

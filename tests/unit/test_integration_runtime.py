@@ -5,15 +5,17 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.errors import ResourceNotFound
+from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Organization, Team, User
 from terrasatch.integrations.models import (
     IntegrationConnection,
     IntegrationGrant,
     IntegrationStatus,
 )
-from terrasatch.integrations.runtime import resolve_connection
+from terrasatch.integrations.operations import ProviderQueryResult
+from terrasatch.integrations.runtime import query, resolve_connection
 
 
 @pytest.mark.asyncio
@@ -207,5 +209,120 @@ async def test_notification_send_requires_team_and_satchy_grants() -> None:
             agent_key="satchy",
         )
         assert resolved.id == slack.id
+
+    await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_arcgis_query_runtime_enforces_connection_layer_allowlist(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    approved_layer = (
+        "https://services3.arcgis.com/ORG/arcgis/rest/services/"
+        "Avalanche_Observations/FeatureServer/0"
+    )
+    other_layer = (
+        "https://services3.arcgis.com/ORG/arcgis/rest/services/"
+        "Other_Layer/FeatureServer/0"
+    )
+
+    async with factory() as session:
+        account = Account(name="ArcGIS runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="ArcGIS runtime org",
+            slug=f"arcgis-runtime-{uuid4().hex[:8]}",
+        )
+        owner = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="GIS User",
+            enabled=True,
+        )
+        session.add_all([organization, owner])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="esri_arcgis",
+            scope_type="user",
+            owner_user_id=owner.id,
+            created_by_user_id=owner.id,
+            display_name="GIS Layers",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={"feature_layer_urls": [approved_layer]},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="user",
+                    subject_id=str(owner.id),
+                    capabilities=["map.features.query"],
+                    created_by_user_id=owner.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["map.features.query"],
+                    created_by_user_id=owner.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "arcgis-access"}, object()
+
+        async def fake_query(*args, **kwargs):
+            return ProviderQueryResult(
+                data={"features": []},
+                metadata={"feature_count": 0},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_arcgis_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=owner.id,
+            capability="map.features.query",
+            payload={"layer_url": approved_layer},
+            agent_key="satchy",
+        )
+        assert result["metadata"]["feature_count"] == 0
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=owner.id,
+                capability="map.features.query",
+                payload={"layer_url": other_layer},
+                agent_key="satchy",
+            )
 
     await engine.dispose()

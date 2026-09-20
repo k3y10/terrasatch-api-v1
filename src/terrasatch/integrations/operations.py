@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -25,6 +26,37 @@ _ALLOWED_DRIVE_MIME_TYPES = {
 class ProviderOperationResult:
     external_id: str | None
     metadata: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderQueryResult:
+    data: dict[str, object]
+    metadata: dict[str, object]
+
+
+_ARCGIS_LAYER_PATH = re.compile(r"/FeatureServer/\d+/?$", re.I)
+_ARCGIS_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_arcgis_feature_layer_url(value: str) -> str:
+    """Validate an ArcGIS Online feature-layer URL and return its canonical form."""
+
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not hostname.endswith(".arcgis.com")
+        or not _ARCGIS_LAYER_PATH.search(parsed.path)
+    ):
+        raise InvalidConfiguration(
+            "ArcGIS feature layer must be an HTTPS ArcGIS Online FeatureServer layer URL"
+        )
+    return normalized
 
 
 async def _request(
@@ -170,3 +202,89 @@ async def create_google_drive_file(
         external_id=external_id,
         metadata={key: value for key, value in safe.items() if value is not None},
     )
+
+
+
+async def query_arcgis_features(
+    credentials: dict[str, object],
+    *,
+    layer_url: str,
+    where: str = "1=1",
+    out_fields: list[str] | None = None,
+    return_geometry: bool = True,
+    result_record_count: int = 100,
+    result_offset: int = 0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    """Query one allowlisted ArcGIS Online feature layer with a bearer token."""
+
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("ArcGIS access token is unavailable")
+
+    normalized_layer = validate_arcgis_feature_layer_url(layer_url)
+    normalized_where = " ".join(where.split()).strip()
+    if not normalized_where or len(normalized_where) > 2000:
+        raise InvalidConfiguration("ArcGIS where clause must be between 1 and 2000 characters")
+
+    fields = out_fields or ["*"]
+    if not fields or len(fields) > 50:
+        raise InvalidConfiguration("ArcGIS out_fields must contain between 1 and 50 fields")
+    normalized_fields: list[str] = []
+    for field in fields:
+        candidate = field.strip()
+        if candidate != "*" and not _ARCGIS_FIELD.fullmatch(candidate):
+            raise InvalidConfiguration("ArcGIS out_fields contains an invalid field name")
+        normalized_fields.append(candidate)
+
+    if not 1 <= result_record_count <= 200:
+        raise InvalidConfiguration("ArcGIS queries are limited to 200 features per request")
+    if not 0 <= result_offset <= 1_000_000:
+        raise InvalidConfiguration("ArcGIS result offset is outside the allowed range")
+
+    response = await _request(
+        transport,
+        "POST",
+        f"{normalized_layer}/query",
+        data={
+            "f": "json",
+            "where": normalized_where,
+            "outFields": ",".join(normalized_fields),
+            "returnGeometry": "true" if return_geometry else "false",
+            "resultRecordCount": str(result_record_count),
+            "resultOffset": str(result_offset),
+        },
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"ArcGIS feature query failed with HTTP {response.status_code}"
+        )
+    if len(response.content) > 2_000_000:
+        raise ProviderUnavailable("ArcGIS feature query response exceeded the 2 MB safety limit")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("ArcGIS returned an invalid feature response") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("ArcGIS returned an invalid feature response")
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        code = error_payload.get("code")
+        message = error_payload.get("message") or "query_failed"
+        raise ProviderUnavailable(f"ArcGIS query failed ({code}: {message})")
+
+    features = payload.get("features")
+    if features is not None and not isinstance(features, list):
+        raise ProviderUnavailable("ArcGIS returned an invalid feature collection")
+    feature_count = len(features or [])
+    metadata: dict[str, object] = {
+        "feature_count": feature_count,
+        "layer_url": normalized_layer,
+        "return_geometry": return_geometry,
+    }
+    if payload.get("geometryType"):
+        metadata["geometry_type"] = payload["geometryType"]
+    if payload.get("exceededTransferLimit") is not None:
+        metadata["exceeded_transfer_limit"] = bool(payload["exceededTransferLimit"])
+    return ProviderQueryResult(data=payload, metadata=metadata)

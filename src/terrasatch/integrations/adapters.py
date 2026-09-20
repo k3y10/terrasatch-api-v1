@@ -1,4 +1,4 @@
-"""OAuth provider adapters for Google Drive and Slack."""
+"""OAuth provider adapters for Google Drive, Slack, and ArcGIS Online."""
 
 from __future__ import annotations
 
@@ -82,6 +82,15 @@ def _validated_slack_webhook(payload: dict[str, object]) -> dict[str, object]:
         for key, value in incoming.items()
         if key in {"channel", "channel_id", "configuration_url", "url"}
     }
+
+
+def _raise_arcgis_error(payload: dict[str, object], *, context: str) -> None:
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return
+    code = error.get("code")
+    message = error.get("message") or error.get("error_description") or "request_failed"
+    raise ProviderUnavailable(f"ArcGIS {context} failed ({code}: {message})")
 
 
 def _expiry(expires_in: object) -> str | None:
@@ -393,11 +402,180 @@ class SlackOAuthAdapter:
             raise ProviderUnavailable("Slack credential revocation could not be confirmed")
 
 
+class ArcGISOAuthAdapter:
+    """ArcGIS Online OAuth adapter for server-side user authorization."""
+
+    provider_key = "esri_arcgis"
+    authorization_endpoint = "https://www.arcgis.com/sharing/rest/oauth2/authorize"
+    token_endpoint = "https://www.arcgis.com/sharing/rest/oauth2/token"
+    revoke_endpoint = "https://www.arcgis.com/sharing/rest/oauth2/revokeToken"
+    self_endpoint = "https://www.arcgis.com/sharing/rest/community/self"
+
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        if not settings.arcgis_oauth_is_configured:
+            raise ProviderUnavailable("ArcGIS Online OAuth is not configured")
+        self.client_id = settings.arcgis_oauth_client_id or ""
+        secret = settings.arcgis_oauth_client_secret
+        if secret is None:
+            raise ProviderUnavailable("ArcGIS OAuth client secret is unavailable")
+        self.client_secret = secret.get_secret_value()
+        self.redirect_uri = str(settings.arcgis_oauth_redirect_uri)
+        self.transport = transport
+
+    def authorization_url(self, *, state: str) -> str:
+        params = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "state": state,
+        }
+        return f"{self.authorization_endpoint}?{urlencode(params)}"
+
+    async def exchange_code(self, *, code: str) -> OAuthExchangeResult:
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": self.redirect_uri,
+                "f": "json",
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("ArcGIS authorization code exchange failed")
+        payload = _json_payload(response, provider="ArcGIS")
+        _raise_arcgis_error(payload, context="authorization")
+        access_token = payload.get("access_token")
+        refresh_token = payload.get("refresh_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("ArcGIS did not return an access token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable(
+                "ArcGIS did not return a refresh token; reconnect the integration"
+            )
+
+        credentials: dict[str, object] = {
+            "provider": self.provider_key,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "Bearer",
+        }
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            credentials["expires_at"] = expires_at
+        refresh_expires_at = _expiry(payload.get("refresh_token_expires_in"))
+        if refresh_expires_at:
+            credentials["refresh_token_expires_at"] = refresh_expires_at
+
+        label, account_id = await self.probe(credentials)
+        return OAuthExchangeResult(credentials, label, account_id, [])
+
+    async def refresh(self, credentials: dict[str, object]) -> dict[str, object]:
+        refresh_token = credentials.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable("ArcGIS refresh token is unavailable; reconnect ArcGIS")
+
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            data={
+                "client_id": self.client_id,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "f": "json",
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("ArcGIS access-token refresh failed")
+        payload = _json_payload(response, provider="ArcGIS")
+        _raise_arcgis_error(payload, context="token refresh")
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("ArcGIS did not return a refreshed access token")
+
+        next_credentials = dict(credentials)
+        next_credentials["access_token"] = access_token
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            next_credentials["expires_at"] = expires_at
+        return next_credentials
+
+    async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
+        access_token = credentials.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("ArcGIS access token is unavailable")
+        response = await _request(
+            self.transport,
+            "GET",
+            self.self_endpoint,
+            params={"f": "json"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("ArcGIS account check failed")
+        payload = _json_payload(response, provider="ArcGIS")
+        _raise_arcgis_error(payload, context="account check")
+
+        username = payload.get("username")
+        full_name = payload.get("fullName")
+        org_id = payload.get("orgId")
+        label = full_name or username
+        account_id = (
+            f"{org_id}:{username}"
+            if isinstance(org_id, str)
+            and org_id
+            and isinstance(username, str)
+            and username
+            else username
+        )
+        return (
+            str(label)[:255] if label else None,
+            str(account_id)[:255] if account_id else None,
+        )
+
+    async def revoke(self, credentials: dict[str, object]) -> None:
+        refresh_token = credentials.get("refresh_token")
+        access_token = credentials.get("access_token")
+        token = refresh_token or access_token
+        if not isinstance(token, str) or not token:
+            return
+        token_hint = "refresh_token" if refresh_token else "access_token"
+        response = await _request(
+            self.transport,
+            "POST",
+            self.revoke_endpoint,
+            data={
+                "auth_token": token,
+                "token_type_hint": token_hint,
+                "client_id": self.client_id,
+                "f": "json",
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("ArcGIS credential revocation failed")
+        payload = _json_payload(response, provider="ArcGIS")
+        _raise_arcgis_error(payload, context="credential revocation")
+        if payload.get("success") is not True:
+            raise ProviderUnavailable("ArcGIS credential revocation could not be confirmed")
+
+
 def provider_is_available(provider_key: str, settings: Settings) -> bool:
     if provider_key == "google_drive":
         return settings.google_drive_oauth_is_configured
     if provider_key == "slack":
         return settings.slack_oauth_is_configured
+    if provider_key == "esri_arcgis":
+        return settings.arcgis_oauth_is_configured
     return False
 
 
@@ -411,4 +589,6 @@ def get_adapter(
         return GoogleDriveOAuthAdapter(settings, transport=transport)
     if provider_key == "slack":
         return SlackOAuthAdapter(settings, transport=transport)
+    if provider_key == "esri_arcgis":
+        return ArcGISOAuthAdapter(settings, transport=transport)
     raise ProviderUnavailable("This provider does not have an enabled OAuth adapter")

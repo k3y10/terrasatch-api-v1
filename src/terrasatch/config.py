@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     slack_oauth_client_id: str | None = Field(default=None, max_length=512)
     slack_oauth_client_secret: SecretStr | None = None
     slack_oauth_redirect_uri: AnyHttpUrl | None = None
+    arcgis_oauth_client_id: str | None = Field(default=None, max_length=512)
+    arcgis_oauth_client_secret: SecretStr | None = None
+    arcgis_oauth_redirect_uri: AnyHttpUrl | None = None
 
     # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
@@ -198,6 +201,7 @@ class Settings(BaseSettings):
         "integration_encryption_key",
         "google_oauth_client_secret",
         "slack_oauth_client_secret",
+        "arcgis_oauth_client_secret",
         mode="before",
     )
     @classmethod
@@ -270,6 +274,17 @@ class Settings(BaseSettings):
             and self.slack_oauth_client_id
             and self.slack_oauth_client_secret
             and self.slack_oauth_redirect_uri
+        )
+
+    @property
+    def arcgis_oauth_is_configured(self) -> bool:
+        """Return whether the ArcGIS Online server-side OAuth flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.arcgis_oauth_client_id
+            and self.arcgis_oauth_client_secret
+            and self.arcgis_oauth_redirect_uri
         )
 
     @property
