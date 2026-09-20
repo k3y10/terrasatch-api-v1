@@ -319,17 +319,25 @@ async def query(
         config = resolve_provider_secret_fields(
             settings,
             "mapbox",
-            required_fields={"access_token"},
+            required_fields={"access_token", "username", "style_ids"},
             required=True,
         )
         assert config is not None
-        username = payload.get("username")
         style_id = payload.get("style_id")
-        if not isinstance(username, str) or not isinstance(style_id, str):
-            raise InvalidConfiguration("map.style.read requires username and style_id")
+        if not isinstance(style_id, str):
+            raise InvalidConfiguration("map.style.read requires style_id")
+        allowed_styles = {
+            item.strip()
+            for item in config["style_ids"].split(",")
+            if item.strip()
+        }
+        if not allowed_styles or style_id not in allowed_styles:
+            raise InvalidConfiguration(
+                "Mapbox style is not approved for the TerraSatch runtime"
+            )
         result = await read_mapbox_style(
             access_token=config["access_token"],
-            username=username,
+            username=config["username"],
             style_id=style_id,
         )
         return {
