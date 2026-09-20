@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from base64 import urlsafe_b64decode
+from binascii import Error as BinasciiError
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
@@ -207,6 +209,22 @@ class Settings(BaseSettings):
             return SecretStr(raw) if raw else None
         raw = str(value).strip()
         return raw or None
+
+    @field_validator("integration_encryption_key")
+    @classmethod
+    def validate_integration_encryption_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        try:
+            decoded = urlsafe_b64decode(value.get_secret_value().encode("ascii"))
+        except (BinasciiError, UnicodeEncodeError, ValueError) as error:
+            raise ValueError("integration encryption key must be a Fernet key") from error
+        if len(decoded) != 32:
+            raise ValueError("integration encryption key must decode to 32 bytes")
+        return value
 
     @field_validator("uac_archive_path")
     @classmethod
