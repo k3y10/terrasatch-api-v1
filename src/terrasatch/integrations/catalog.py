@@ -265,6 +265,11 @@ def provider_catalog(
             )
         )
         manual_supported = support_status == "supported" and auth_type == "service_account"
+        manual_ready = bool(
+            manual_supported
+            and settings is not None
+            and settings.integration_secret_store_is_configured
+        )
 
         if support_status == "managed":
             connect_status = "managed"
@@ -278,10 +283,14 @@ def provider_catalog(
             connect_status = "coming_soon"
             setup_status = "planned"
             runtime_ready = False
-        elif manual_supported:
+        elif manual_ready:
             connect_status = "external_setup_required"
             setup_status = "available"
             runtime_ready = True
+        elif manual_supported:
+            connect_status = "needs_configuration"
+            setup_status = "planned"
+            runtime_ready = False
         elif oauth_configured:
             connect_status = "available"
             setup_status = "available"
