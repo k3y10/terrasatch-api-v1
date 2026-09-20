@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 from pydantic import SecretStr, ValidationError
 
 from terrasatch.config import Settings
+from terrasatch.errors import ProviderUnavailable
 from terrasatch.integrations.adapters import GoogleDriveOAuthAdapter, SlackOAuthAdapter
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.crypto import decrypt_payload, encrypt_payload
@@ -131,3 +132,79 @@ async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_meta
     assert result.account_label == "Field Ops"
     assert result.account_id == "T123"
     assert result.credentials["incoming_webhook"]["channel_id"] == "C123"
+
+
+
+@pytest.mark.asyncio
+async def test_slack_oauth_rejects_install_without_approved_webhook_destination() -> None:
+    settings = configured_settings()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == SlackOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "access_token": "xoxb-test",
+                    "token_type": "bot",
+                    "scope": "incoming-webhook",
+                    "team": {"name": "Field Ops", "id": "T123"},
+                },
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = SlackOAuthAdapter(
+        settings,
+        transport=httpx.MockTransport(responder),
+    )
+    with pytest.raises(ProviderUnavailable, match="webhook destination"):
+        await adapter.exchange_code(code="slack-code")
+
+
+@pytest.mark.asyncio
+async def test_slack_revocation_refreshes_rotated_token_before_remote_revoke() -> None:
+    settings = configured_settings()
+    calls: list[tuple[str, str]] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, str(request.url)))
+        if str(request.url) == SlackOAuthAdapter.token_endpoint:
+            body = request.content.decode("utf-8")
+            assert "grant_type=refresh_token" in body
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "access_token": "xoxe.xoxb-rotated",
+                    "refresh_token": "xoxe-refresh-2",
+                    "expires_in": 43200,
+                    "scope": "incoming-webhook",
+                    "token_type": "bot",
+                },
+            )
+        if str(request.url) == SlackOAuthAdapter.revoke_endpoint:
+            assert request.headers["Authorization"] == "Bearer xoxe.xoxb-rotated"
+            return httpx.Response(200, json={"ok": True, "revoked": True})
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = SlackOAuthAdapter(
+        settings,
+        transport=httpx.MockTransport(responder),
+    )
+    await adapter.revoke(
+        {
+            "provider": "slack",
+            "access_token": "xoxe.xoxb-expired",
+            "refresh_token": "xoxe-refresh-1",
+            "expires_at": "2000-01-01T00:00:00+00:00",
+            "incoming_webhook": {
+                "channel": "#field-ops",
+                "channel_id": "C123",
+                "url": "https://hooks.slack.com/services/T/B/secret",
+            },
+        }
+    )
+    assert calls == [
+        ("POST", SlackOAuthAdapter.token_endpoint),
+        ("POST", SlackOAuthAdapter.revoke_endpoint),
+    ]

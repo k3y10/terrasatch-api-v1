@@ -38,7 +38,9 @@ The initial Slack adapter deliberately requests only the `incoming-webhook` scop
 4. Set the server-only Slack client ID, client secret, and redirect URI environment values.
 5. Distribute or approve the app as required before installing it into customer workspaces.
 
-Slack code exchange uses HTTP Basic authentication for the client credentials. Returned bot tokens, refresh tokens when rotation is enabled, and incoming webhook URLs stay inside the encrypted credential payload.
+Slack code exchange uses HTTP Basic authentication for the client credentials. TerraSatch treats the OAuth install as incomplete unless Slack returns the approved incoming webhook destination and channel identifier. Returned bot tokens, refresh tokens when rotation is enabled, and incoming webhook URLs stay inside the encrypted credential payload.
+
+The webhook is bound to the channel selected during Slack authorization; TerraSatch does not override that channel at send time. When token rotation is enabled, TerraSatch refreshes an expired access token before remote revocation so Slack can remove the associated installation and incoming webhook before the local encrypted credential is deleted.
 
 ## Lifecycle
 

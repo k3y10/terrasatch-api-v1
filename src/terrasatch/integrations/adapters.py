@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -55,6 +55,33 @@ def _json_payload(response: httpx.Response, *, provider: str) -> dict[str, objec
     if not isinstance(payload, dict):
         raise ProviderUnavailable(f"{provider} returned an invalid response")
     return payload
+
+
+_SLACK_WEBHOOK_HOST = "hooks.slack.com"
+
+
+def _validated_slack_webhook(payload: dict[str, object]) -> dict[str, object]:
+    incoming = payload.get("incoming_webhook")
+    if not isinstance(incoming, dict):
+        raise ProviderUnavailable(
+            "Slack did not return the approved incoming webhook destination"
+        )
+    url = incoming.get("url")
+    channel_id = incoming.get("channel_id")
+    if not isinstance(url, str) or not url:
+        raise ProviderUnavailable(
+            "Slack did not return the approved incoming webhook destination"
+        )
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname != _SLACK_WEBHOOK_HOST:
+        raise ProviderUnavailable("Slack returned an invalid incoming webhook destination")
+    if not isinstance(channel_id, str) or not channel_id:
+        raise ProviderUnavailable("Slack did not return the approved channel identifier")
+    return {
+        key: value
+        for key, value in incoming.items()
+        if key in {"channel", "channel_id", "configuration_url", "url"}
+    }
 
 
 def _expiry(expires_in: object) -> str | None:
@@ -273,13 +300,7 @@ class SlackOAuthAdapter:
         expires_at = _expiry(payload.get("expires_in"))
         if expires_at:
             credentials["expires_at"] = expires_at
-        incoming = payload.get("incoming_webhook")
-        if isinstance(incoming, dict):
-            credentials["incoming_webhook"] = {
-                key: value
-                for key, value in incoming.items()
-                if key in {"channel", "channel_id", "configuration_url", "url"}
-            }
+        credentials["incoming_webhook"] = _validated_slack_webhook(payload)
         team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
         label = team.get("name")
         account_id = team.get("id")
@@ -346,9 +367,14 @@ class SlackOAuthAdapter:
         )
 
     async def revoke(self, credentials: dict[str, object]) -> None:
-        access_token = credentials.get("access_token")
+        current = credentials
+        if token_is_expiring(current) and current.get("refresh_token"):
+            current = await self.refresh(current)
+        access_token = current.get("access_token")
         if not isinstance(access_token, str) or not access_token:
-            return
+            raise ProviderUnavailable(
+                "Slack access token is unavailable; remote revocation was not attempted"
+            )
         response = await _request(
             self.transport,
             "POST",
