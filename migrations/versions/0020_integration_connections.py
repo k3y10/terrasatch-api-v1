@@ -115,6 +115,71 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "integration_deliveries",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
+        sa.Column("connection_id", sa.Uuid(), nullable=False),
+        sa.Column("requested_by_user_id", sa.Uuid(), nullable=True),
+        sa.Column("request_id", sa.Uuid(), nullable=False),
+        sa.Column("operation", sa.String(length=64), nullable=False),
+        sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
+        sa.Column(
+            "request_metadata",
+            sa.JSON(),
+            server_default=sa.text("'{}'"),
+            nullable=False,
+        ),
+        sa.Column(
+            "response_metadata",
+            sa.JSON(),
+            server_default=sa.text("'{}'"),
+            nullable=False,
+        ),
+        sa.Column("external_id", sa.String(length=512), nullable=True),
+        sa.Column("last_error", sa.String(length=1000), nullable=True),
+        *_timestamps(),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["connection_id"],
+            ["integration_connections.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["requested_by_user_id"],
+            ["users.id"],
+            ondelete="SET NULL",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "organization_id",
+            "connection_id",
+            "request_id",
+            name="uq_integration_deliveries_request",
+        ),
+    )
+    for column in (
+        "organization_id",
+        "connection_id",
+        "requested_by_user_id",
+        "operation",
+        "status",
+    ):
+        op.create_index(
+            f"ix_integration_deliveries_{column}",
+            "integration_deliveries",
+            [column],
+        )
+    op.create_index(
+        "ix_integration_deliveries_status",
+        "integration_deliveries",
+        ["organization_id", "connection_id", "status", "created_at"],
+    )
+
+    op.create_table(
         "integration_credentials",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("organization_id", sa.Uuid(), nullable=False),
@@ -202,4 +267,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("integration_oauth_states")
     op.drop_table("integration_credentials")
+    op.drop_table("integration_deliveries")
     op.drop_table("integration_connections")

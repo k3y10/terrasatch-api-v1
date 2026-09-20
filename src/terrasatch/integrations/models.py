@@ -84,6 +84,63 @@ class IntegrationConnection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
+class IntegrationDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Idempotency and audit record for one outbound provider operation."""
+
+    __tablename__ = "integration_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "connection_id",
+            "request_id",
+            name="uq_integration_deliveries_request",
+        ),
+        Index(
+            "ix_integration_deliveries_status",
+            "organization_id",
+            "connection_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        ForeignKey("integration_connections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    request_id: Mapped[UUID] = mapped_column(nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        default="pending",
+        nullable=False,
+        index=True,
+    )
+    request_metadata: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    response_metadata: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
 class IntegrationCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "integration_credentials"
     __table_args__ = (

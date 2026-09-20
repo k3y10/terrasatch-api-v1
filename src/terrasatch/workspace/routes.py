@@ -27,6 +27,13 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import MembershipRole, Site, Team, User
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.models import IntegrationScope
+from terrasatch.integrations.delivery_service import (
+    content_metadata,
+    delivery_payload,
+    execute_drive_export,
+    execute_slack_delivery,
+    prepare_delivery,
+)
 from terrasatch.integrations.oauth_service import (
     begin_authorization,
     complete_authorization,
@@ -138,6 +145,23 @@ class IntegrationRequest(BaseModel):
     team_id: UUID | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     configuration: dict[str, object] = Field(default_factory=dict)
+
+
+class SlackMessageRequest(BaseModel):
+    request_id: UUID
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class DriveExportRequest(BaseModel):
+    request_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    content: str = Field(max_length=5_000_000)
+    mime_type: Literal[
+        "application/json",
+        "text/csv",
+        "text/markdown",
+        "text/plain",
+    ] = "text/plain"
 
 
 def csrf(request):
@@ -339,6 +363,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             session,
             organization_id=organization_id,
             user_id=user.id,
+            role=membership.role,
         )
         actions = await session.scalars(
             select(SatchyAction)
@@ -562,6 +587,101 @@ async def revoke_integration(organization_id: UUID, connection_id: UUID, request
         )
         await session.commit()
         return jsonable_encoder(connection_payload(connection))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/slack/messages",
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_slack_integration_message(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: SlackMessageRequest,
+    request: Request,
+):
+    """Send one audited Slack webhook message through a connected Slack integration."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery, created = await prepare_delivery(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            request_id=payload.request_id,
+            operation="slack_message",
+            request_metadata=content_metadata(
+                payload.text,
+                character_count=len(payload.text),
+            ),
+        )
+        await session.commit()
+        if not created:
+            return jsonable_encoder(delivery_payload(delivery))
+
+        delivery = await execute_slack_delivery(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            delivery_id=delivery.id,
+            text=payload.text,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/drive/files",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_drive_integration_file(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: DriveExportRequest,
+    request: Request,
+):
+    """Create one audited text export through a connected Google Drive integration."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery, created = await prepare_delivery(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            request_id=payload.request_id,
+            operation="drive_export",
+            request_metadata=content_metadata(
+                payload.content,
+                name=payload.name,
+                mime_type=payload.mime_type,
+            ),
+        )
+        await session.commit()
+        if not created:
+            return jsonable_encoder(delivery_payload(delivery))
+
+        delivery = await execute_drive_export(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            delivery_id=delivery.id,
+            name=payload.name,
+            content=payload.content,
+            mime_type=payload.mime_type,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
 
 
 @router.get("/organizations/{organization_id}/assets")

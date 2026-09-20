@@ -45,3 +45,15 @@ Slack code exchange uses HTTP Basic authentication for the client credentials. R
 A failed provider exchange or connection test moves the record to `error`. A successful provider revocation deletes the encrypted credential and marks the connection `revoked`. OAuth state values are stored only as SHA-256 digests, expire quickly, and are single-use.
 
 Roadmap providers remain `planned` until their server adapter and deployment configuration actually exist.
+
+
+## First provider output operations
+
+Connected providers now expose two server-side output primitives that keep credentials out of the browser:
+
+- Slack: send a text notification through the channel-specific incoming webhook returned during OAuth.
+- Google Drive: create a UTF-8 text, Markdown, CSV, or JSON file using a multipart Drive upload. A configured `folder_id` is used as the file parent.
+
+Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.
+
+Shared team integrations remain administrator-visible in the member portal until TerraSatch has an explicit portal team-membership mapping. This is intentionally conservative: team connection metadata is not exposed to every organization member merely because they share the same organization.

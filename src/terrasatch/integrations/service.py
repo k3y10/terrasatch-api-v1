@@ -167,17 +167,37 @@ async def create_connection_request(
 
 
 async def list_visible_connections(
-    session: AsyncSession, *, organization_id: UUID, user_id: UUID
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+    role: MembershipRole,
 ) -> list[IntegrationConnection]:
+    """
+    Return connection metadata visible to this member.
+
+    Team membership is not yet represented in portal identity, so team-scoped connection
+    metadata remains administrator-only instead of being exposed to every organization member.
+    """
+
+    visible_scope = or_(
+        IntegrationConnection.scope_type == IntegrationScope.ORGANIZATION.value,
+        (
+            (IntegrationConnection.scope_type == IntegrationScope.USER.value)
+            & (IntegrationConnection.owner_user_id == user_id)
+        ),
+    )
+    if role_allows(role, MembershipRole.ADMIN):
+        visible_scope = or_(
+            visible_scope,
+            IntegrationConnection.scope_type == IntegrationScope.TEAM.value,
+        )
     return list(
         await session.scalars(
             select(IntegrationConnection)
             .where(
                 IntegrationConnection.organization_id == organization_id,
-                or_(
-                    IntegrationConnection.scope_type != IntegrationScope.USER.value,
-                    IntegrationConnection.owner_user_id == user_id,
-                ),
+                visible_scope,
             )
             .order_by(IntegrationConnection.created_at.desc())
         )
