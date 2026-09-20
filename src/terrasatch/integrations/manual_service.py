@@ -103,6 +103,10 @@ async def bind_manual_credentials(
     connection_id: UUID,
     values: dict[str, str],
 ) -> IntegrationConnection:
+    if not settings.integration_secret_store_is_configured:
+        raise ProviderUnavailable(
+            "Integration credential storage is not configured"
+        )
     connection = await get_connection_for_management(
         session,
         organization_id=organization_id,
