@@ -365,6 +365,13 @@ async def records(session, organization_id):
     ]
 
 
+def _connection_scopes(connections) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for connection in connections:
+        result.setdefault(connection.provider, set()).add(connection.scope_type)
+    return result
+
+
 @router.get("/organizations/{organization_id}")
 async def workspace(organization_id: UUID, request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -474,7 +481,14 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "provider": request.app.state.settings.intelligence_provider,
                         "model": request.app.state.settings.ollama_model,
                     },
-                    "catalog": provider_catalog(request.app.state.settings),
+                    "catalog": provider_catalog(
+                        request.app.state.settings,
+                        admin_access=role_allows(
+                            membership.role,
+                            MembershipRole.ADMIN,
+                        ),
+                        connected_scopes=_connection_scopes(connections),
+                    ),
                     "connections": [connection_payload(connection) for connection in connections],
                 },
                 "subscription": subscription,
@@ -523,8 +537,21 @@ async def integration_catalog(organization_id: UUID, request: Request, response:
 
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
-        await access(request, session, organization_id)
-        return provider_catalog(request.app.state.settings)
+        user, membership = await access(request, session, organization_id)
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+        )
+        return provider_catalog(
+            request.app.state.settings,
+            admin_access=role_allows(
+                membership.role,
+                MembershipRole.ADMIN,
+            ),
+            connected_scopes=_connection_scopes(connections),
+        )
 
 
 @router.post(

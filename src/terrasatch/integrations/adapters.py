@@ -12,6 +12,8 @@ import httpx
 from terrasatch.config import Settings
 from terrasatch.errors import ProviderUnavailable
 
+from .provider_config import ProviderAppConfig, resolve_provider_app_config
+
 
 @dataclass(frozen=True, slots=True)
 class OAuthExchangeResult:
@@ -124,15 +126,15 @@ class GoogleDriveOAuthAdapter:
     revoke_endpoint = "https://oauth2.googleapis.com/revoke"
     about_endpoint = "https://www.googleapis.com/drive/v3/about"
 
-    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None):
-        if not settings.google_drive_oauth_is_configured:
-            raise ProviderUnavailable("Google Drive OAuth is not configured")
-        self.client_id = settings.google_oauth_client_id or ""
-        google_secret = settings.google_oauth_client_secret
-        if google_secret is None:
-            raise ProviderUnavailable("Google Drive OAuth client secret is unavailable")
-        self.client_secret = google_secret.get_secret_value()
-        self.redirect_uri = str(settings.google_oauth_redirect_uri)
+    def __init__(
+        self,
+        app_config: ProviderAppConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.client_id = app_config.client_id
+        self.client_secret = app_config.client_secret
+        self.redirect_uri = app_config.redirect_uri
         self.transport = transport
 
     def authorization_url(self, *, state: str) -> str:
@@ -259,15 +261,15 @@ class SlackOAuthAdapter:
     auth_test_endpoint = "https://slack.com/api/auth.test"
     revoke_endpoint = "https://slack.com/api/auth.revoke"
 
-    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None):
-        if not settings.slack_oauth_is_configured:
-            raise ProviderUnavailable("Slack OAuth is not configured")
-        self.client_id = settings.slack_oauth_client_id or ""
-        slack_secret = settings.slack_oauth_client_secret
-        if slack_secret is None:
-            raise ProviderUnavailable("Slack OAuth client secret is unavailable")
-        self.client_secret = slack_secret.get_secret_value()
-        self.redirect_uri = str(settings.slack_oauth_redirect_uri)
+    def __init__(
+        self,
+        app_config: ProviderAppConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.client_id = app_config.client_id
+        self.client_secret = app_config.client_secret
+        self.redirect_uri = app_config.redirect_uri
         self.transport = transport
 
     def authorization_url(self, *, state: str) -> str:
@@ -413,18 +415,13 @@ class ArcGISOAuthAdapter:
 
     def __init__(
         self,
-        settings: Settings,
+        app_config: ProviderAppConfig,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
-        if not settings.arcgis_oauth_is_configured:
-            raise ProviderUnavailable("ArcGIS Online OAuth is not configured")
-        self.client_id = settings.arcgis_oauth_client_id or ""
-        secret = settings.arcgis_oauth_client_secret
-        if secret is None:
-            raise ProviderUnavailable("ArcGIS OAuth client secret is unavailable")
-        self.client_secret = secret.get_secret_value()
-        self.redirect_uri = str(settings.arcgis_oauth_redirect_uri)
+        self.client_id = app_config.client_id
+        self.client_secret = app_config.client_secret
+        self.redirect_uri = app_config.redirect_uri
         self.transport = transport
 
     def authorization_url(self, *, state: str) -> str:
@@ -570,13 +567,11 @@ class ArcGISOAuthAdapter:
 
 
 def provider_is_available(provider_key: str, settings: Settings) -> bool:
-    if provider_key == "google_drive":
-        return settings.google_drive_oauth_is_configured
-    if provider_key == "slack":
-        return settings.slack_oauth_is_configured
-    if provider_key == "esri_arcgis":
-        return settings.arcgis_oauth_is_configured
-    return False
+    try:
+        resolve_provider_app_config(settings, provider_key, required=True)
+        return settings.integration_secret_store_is_configured
+    except ProviderUnavailable:
+        return False
 
 
 def get_adapter(
@@ -585,10 +580,16 @@ def get_adapter(
     *,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> OAuthProviderAdapter:
+    app_config = resolve_provider_app_config(
+        settings,
+        provider_key,
+        required=True,
+    )
+    assert app_config is not None
     if provider_key == "google_drive":
-        return GoogleDriveOAuthAdapter(settings, transport=transport)
+        return GoogleDriveOAuthAdapter(app_config, transport=transport)
     if provider_key == "slack":
-        return SlackOAuthAdapter(settings, transport=transport)
+        return SlackOAuthAdapter(app_config, transport=transport)
     if provider_key == "esri_arcgis":
-        return ArcGISOAuthAdapter(settings, transport=transport)
+        return ArcGISOAuthAdapter(app_config, transport=transport)
     raise ProviderUnavailable("This provider does not have an enabled OAuth adapter")

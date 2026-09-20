@@ -16,6 +16,7 @@ from terrasatch.integrations.adapters import (
 )
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.crypto import decrypt_payload, encrypt_payload
+from terrasatch.integrations.provider_config import resolve_provider_app_config
 
 
 def configured_settings() -> Settings:
@@ -55,6 +56,57 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     assert available["slack"] == "available"
     assert available["esri_arcgis"] == "available"
     assert available["garmin"] == "planned"
+
+    catalog = {
+        item["key"]: item
+        for item in provider_catalog(
+            configured_settings(),
+            admin_access=False,
+            connected_scopes={"google_drive": {"user"}},
+        )
+    }
+    assert catalog["google_drive"]["support_status"] == "supported"
+    assert catalog["google_drive"]["connect_status"] == "available"
+    assert catalog["google_drive"]["allowed_scopes"] == ["user"]
+    assert catalog["google_drive"]["connected"] is True
+    assert catalog["google_drive"]["connected_scopes"] == ["user"]
+    assert catalog["slack"]["allowed"] is False
+    assert catalog["slack"]["requires_admin"] is True
+    assert catalog["garmin"]["support_status"] == "coming_soon"
+    assert catalog["garmin"]["connect_status"] == "coming_soon"
+
+
+def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"slack":{"client_id":"bundle-client","client_secret":"bundle-secret",'
+            '"redirect_uri":"https://api.example.com/callback"}}'
+        ),
+        slack_oauth_client_id="legacy-client",
+        slack_oauth_client_secret=SecretStr("legacy-secret"),
+        slack_oauth_redirect_uri="https://legacy.example.com/callback",
+    )
+    resolved = resolve_provider_app_config(settings, "slack", required=True)
+    assert resolved is not None
+    assert resolved.client_id == "bundle-client"
+    assert resolved.client_secret == "bundle-secret"
+    assert resolved.redirect_uri == "https://api.example.com/callback"
+    assert resolved.source == "bundle"
+
+
+def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
+    catalog = {item["key"]: item for item in provider_catalog(configured_settings())}
+    labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["google_drive"]["capability_details"]
+    }
+    assert labels["document.create"] == "Create reports and files"
+    slack_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["slack"]["capability_details"]
+    }
+    assert slack_labels["notification.send"] == "Send notifications"
 
 
 def test_invalid_integration_encryption_key_is_rejected_at_startup() -> None:
@@ -98,7 +150,10 @@ async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identi
                 },
             )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
-    adapter = GoogleDriveOAuthAdapter(settings, transport=httpx.MockTransport(responder))
+    adapter = GoogleDriveOAuthAdapter(
+        resolve_provider_app_config(settings, "google_drive", required=True),
+        transport=httpx.MockTransport(responder),
+    )
     authorization = urlparse(adapter.authorization_url(state="state-value"))
     params = parse_qs(authorization.query)
     assert authorization.hostname == "accounts.google.com"
@@ -134,7 +189,10 @@ async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_meta
                 },
             )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
-    adapter = SlackOAuthAdapter(settings, transport=httpx.MockTransport(responder))
+    adapter = SlackOAuthAdapter(
+        resolve_provider_app_config(settings, "slack", required=True),
+        transport=httpx.MockTransport(responder),
+    )
     authorization = urlparse(adapter.authorization_url(state="slack-state"))
     params = parse_qs(authorization.query)
     assert authorization.hostname == "slack.com"
@@ -255,7 +313,7 @@ async def test_arcgis_oauth_exchanges_refreshable_user_token_and_probes_identity
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     adapter = ArcGISOAuthAdapter(
-        settings,
+        resolve_provider_app_config(settings, "esri_arcgis", required=True),
         transport=httpx.MockTransport(responder),
     )
     authorization = urlparse(adapter.authorization_url(state="arcgis-state"))
@@ -283,7 +341,7 @@ async def test_arcgis_revoke_invalidates_refresh_token() -> None:
         return httpx.Response(200, json={"success": True})
 
     adapter = ArcGISOAuthAdapter(
-        settings,
+        resolve_provider_app_config(settings, "esri_arcgis", required=True),
         transport=httpx.MockTransport(responder),
     )
     await adapter.revoke(

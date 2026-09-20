@@ -4,6 +4,22 @@ TerraSatch treats an integration as a tenant-scoped connection, not as a logo or
 
 ## Credential boundary
 
+## Provider registry and connection experience
+
+The API now separates three questions that the client can present directly: whether a provider is
+supported by TerraSatch, whether this deployment is configured to connect it, and whether the
+current member is allowed to connect it at personal, team, or organization scope. Catalog responses
+also include visible connected scopes and human labels for runtime capabilities. This lets clients
+render states such as **Connected**, **Available**, **Needs admin**, and **Coming soon** without
+recreating authorization policy in the frontend.
+
+Platform OAuth application secrets are resolved through one provider-config boundary. The preferred
+deployment input is a single server-only `TERRASATCH_INTEGRATION_PROVIDER_CONFIG_JSON` secret
+bundle, which can be injected from OCI Vault or another deployment secret store. Existing
+per-provider environment variables remain only as a compatibility fallback. Customer access tokens,
+refresh tokens, webhook URLs, and account credentials are never stored in this bundle; those stay
+encrypted per connection in `integration_credentials`.
+
 Provider passwords, API keys, OAuth access tokens, refresh tokens, private keys, and Slack webhook URLs must never be sent to the browser integration form or stored in `integration_connections.configuration`. OAuth credentials are obtained by the API callback, encrypted with Fernet, and stored in `integration_credentials`. The connection table holds only an opaque `credential_ref` and safe provider account metadata.
 
 Generate the encryption key once per deployment and keep it stable:

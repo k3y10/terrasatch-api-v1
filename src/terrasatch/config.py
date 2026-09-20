@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     # External provider integrations. Provider credentials stay server-side; browser clients
     # receive only connection metadata and authorization destinations.
     integration_encryption_key: SecretStr | None = None
+    integration_provider_config_json: SecretStr | None = None
     integration_encryption_key_id: str = Field(default="v1", min_length=1, max_length=64)
     integration_oauth_state_ttl_minutes: int = Field(default=10, ge=3, le=30)
     integration_return_url: AnyHttpUrl = "https://terrasatch.com/workspace?view=Integrations"
@@ -199,6 +200,7 @@ class Settings(BaseSettings):
         "billing_email_webhook_secret",
         "billing_activation_signing_secret",
         "integration_encryption_key",
+        "integration_provider_config_json",
         "google_oauth_client_secret",
         "slack_oauth_client_secret",
         "arcgis_oauth_client_secret",

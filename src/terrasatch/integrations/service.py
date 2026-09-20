@@ -17,7 +17,7 @@ from terrasatch.errors import (
 from terrasatch.identity.access import role_allows
 from terrasatch.identity.models import MembershipRole, Team
 
-from .catalog import PROVIDERS
+from .catalog import PROVIDERS, provider_support_status
 from .models import (
     IntegrationConnection,
     IntegrationGrant,
@@ -129,6 +129,10 @@ async def create_connection_request(
     if provider["setup_status"] == "managed":
         raise InvalidConfiguration(
             f"{provider['name']} is managed by TerraSatch and is not added here"
+        )
+    if provider_support_status(provider_key) == "coming_soon":
+        raise InvalidConfiguration(
+            f"{provider['name']} is listed as coming soon and cannot be connected yet"
         )
     if not can_manage_scope(role=role, scope=scope):
         raise TenantAccessDenied(
