@@ -26,6 +26,8 @@ The first Drive adapter uses the narrow `https://www.googleapis.com/auth/drive.f
 
 The authorization request uses a random single-use `state`, requests offline access, and stores any refresh token only in the encrypted credential record.
 
+Drive exports use multipart `files.create` requests and set `supportsAllDrives=true`. That keeps the same export path compatible with My Drive and Shared Drive destinations when the authenticated user and the narrow `drive.file` grant can access the selected parent folder. If no parent folder is configured, Google places the export in the user's My Drive root.
+
 ## Slack
 
 The initial Slack adapter deliberately requests only the `incoming-webhook` scope so the installing workspace chooses the destination explicitly and TerraSatch does not receive broad message-history access.

@@ -53,9 +53,11 @@ async def test_drive_export_uses_multipart_upload_and_optional_parent() -> None:
         assert request.url.host == "www.googleapis.com"
         assert request.url.path == "/upload/drive/v3/files"
         assert request.url.params["uploadType"] == "multipart"
+        assert request.url.params["supportsAllDrives"] == "true"
         assert request.headers["Authorization"] == "Bearer google-access"
         body = request.content.decode("utf-8")
         assert '"name":"shift-report.txt"' in body
+        assert '"mimeType":"text/plain"' in body
         assert '"parents":["folder-123"]' in body
         assert "Shift report" in body
         return httpx.Response(

@@ -114,7 +114,10 @@ async def create_google_drive_file(
     if len(media) > 5_000_000:
         raise InvalidConfiguration("Drive export is limited to 5 MB")
 
-    metadata: dict[str, object] = {"name": clean_name}
+    metadata: dict[str, object] = {
+        "name": clean_name,
+        "mimeType": mime_type,
+    }
     if folder_id is not None:
         clean_folder = folder_id.strip()
         if not clean_folder or len(clean_folder) > 512:
@@ -136,6 +139,7 @@ async def create_google_drive_file(
         _DRIVE_UPLOAD_URL,
         params={
             "uploadType": "multipart",
+            "supportsAllDrives": "true",
             "fields": "id,name,mimeType,webViewLink",
         },
         headers={
