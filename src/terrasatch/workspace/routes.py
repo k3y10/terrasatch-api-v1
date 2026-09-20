@@ -30,8 +30,6 @@ from terrasatch.identity.access import (
 )
 from terrasatch.identity.models import MembershipRole, Site, Team, User
 from terrasatch.integrations.catalog import provider_catalog
-from terrasatch.integrations.manual_service import bind_manual_credentials
-from terrasatch.integrations.models import IntegrationScope, IntegrationStatus
 from terrasatch.integrations.delivery_service import (
     content_metadata,
     delivery_payload,
@@ -39,16 +37,18 @@ from terrasatch.integrations.delivery_service import (
     execute_slack_delivery,
     prepare_delivery,
 )
-from terrasatch.integrations.runtime import (
-    execute as execute_integration_capability,
-    query as query_integration_capability,
-)
+from terrasatch.integrations.manual_service import bind_manual_credentials
+from terrasatch.integrations.models import IntegrationScope, IntegrationStatus
 from terrasatch.integrations.oauth_service import (
     begin_authorization,
     complete_authorization,
     disconnect_connection,
     probe_connection,
     workspace_return_url,
+)
+from terrasatch.integrations.runtime import (
+    execute as execute_integration_capability,
+    query as query_integration_capability,
 )
 from terrasatch.integrations.service import (
     connection_payload,
