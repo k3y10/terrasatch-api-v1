@@ -96,7 +96,7 @@ class IntegrationDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="uq_integration_deliveries_request",
         ),
         Index(
-            "ix_integration_deliveries_status",
+            "ix_integration_deliveries_queue",
             "organization_id",
             "connection_id",
             "status",
