@@ -26,10 +26,12 @@ _ALLOWED_DRIVE_MIME_TYPES = {
     "text/plain",
 }
 
+
 @dataclass(frozen=True, slots=True)
 class ProviderOperationResult:
     external_id: str | None
     metadata: dict[str, object]
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderQueryResult:
@@ -38,6 +40,7 @@ class ProviderQueryResult:
 
 _ARCGIS_LAYER_PATH = re.compile(r"/FeatureServer/\d+/?$", re.I)
 _ARCGIS_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def validate_arcgis_feature_layer_url(value: str) -> str:
     """Validate an ArcGIS Online feature-layer URL and return its canonical form."""
@@ -59,6 +62,7 @@ def validate_arcgis_feature_layer_url(value: str) -> str:
         )
     return normalized
 
+
 async def _request(
     transport: httpx.AsyncBaseTransport | None,
     method: str,
@@ -75,6 +79,7 @@ async def _request(
     except httpx.HTTPError as error:
         raise ProviderUnavailable("Provider delivery request failed") from error
 
+
 def _slack_webhook(credentials: dict[str, object]) -> tuple[str, dict[str, object]]:
     incoming = credentials.get("incoming_webhook")
     if not isinstance(incoming, dict):
@@ -86,6 +91,7 @@ def _slack_webhook(credentials: dict[str, object]) -> tuple[str, dict[str, objec
     if parsed.scheme != "https" or parsed.hostname != _SLACK_WEBHOOK_HOST:
         raise InvalidConfiguration("Stored Slack webhook destination is invalid")
     return url, incoming
+
 
 async def send_slack_message(
     credentials: dict[str, object],
@@ -119,6 +125,7 @@ async def send_slack_message(
         external_id=str(incoming.get("channel_id") or "") or None,
         metadata={key: value for key, value in metadata.items() if value},
     )
+
 
 async def create_google_drive_file(
     credentials: dict[str, object],
@@ -199,6 +206,7 @@ async def create_google_drive_file(
         external_id=external_id,
         metadata={key: value for key, value in safe.items() if value is not None},
     )
+
 
 async def query_arcgis_features(
     credentials: dict[str, object],
@@ -288,6 +296,7 @@ _MICROSOFT_GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 _CALTOPO_ROOT = "https://caltopo.com"
 _MAPBOX_STYLES_ROOT = "https://api.mapbox.com/styles/v1"
 
+
 async def create_microsoft_drive_file(
     credentials: dict[str, object],
     *,
@@ -351,6 +360,7 @@ async def create_microsoft_drive_file(
         metadata={key: value for key, value in safe.items() if value is not None},
     )
 
+
 def _caltopo_signature(
     method: str,
     endpoint: str,
@@ -365,6 +375,7 @@ def _caltopo_signature(
     message = f"{method.upper()} {endpoint}\n{expires}\n{payload_string}"
     digest = hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()
     return base64.b64encode(digest).decode("ascii")
+
 
 async def _caltopo_get(
     credentials: dict[str, object],
@@ -413,6 +424,7 @@ async def _caltopo_get(
         raise ProviderUnavailable("CalTopo returned no result")
     return result
 
+
 async def query_caltopo_team(
     credentials: dict[str, object],
     *,
@@ -441,6 +453,7 @@ async def query_caltopo_team(
         },
     )
 
+
 async def query_caltopo_map(
     credentials: dict[str, object],
     *,
@@ -468,6 +481,7 @@ async def query_caltopo_map(
             "timestamp": data.get("timestamp"),
         },
     )
+
 
 async def query_snowflake(
     credentials: dict[str, object],
@@ -549,6 +563,7 @@ async def query_snowflake(
             "statement_handle": payload.get("statementHandle"),
         },
     )
+
 
 async def read_mapbox_style(
     *,
