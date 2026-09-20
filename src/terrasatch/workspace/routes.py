@@ -31,7 +31,7 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import MembershipRole, Site, Team, User
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.manual_service import bind_manual_credentials
-from terrasatch.integrations.models import IntegrationScope
+from terrasatch.integrations.models import IntegrationScope, IntegrationStatus
 from terrasatch.integrations.delivery_service import (
     content_metadata,
     delivery_payload,
@@ -382,7 +382,11 @@ async def records(session, organization_id):
 def _connection_scopes(connections) -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
     for connection in connections:
-        result.setdefault(connection.provider, set()).add(connection.scope_type)
+        if (
+            connection.enabled
+            and connection.status == IntegrationStatus.CONNECTED.value
+        ):
+            result.setdefault(connection.provider, set()).add(connection.scope_type)
     return result
 
 
