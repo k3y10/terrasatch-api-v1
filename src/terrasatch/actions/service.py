@@ -246,13 +246,23 @@ def _payload_uuid(payload: dict[str, object], key: str) -> UUID | None:
 
 def _integration_action_request(
     action: SatchyAction,
-) -> tuple[str, dict[str, object], UUID | None, str]:
+) -> tuple[str, dict[str, object], UUID | None, str, str]:
     capability = _INTEGRATION_ACTION_CAPABILITIES.get(action.action_type)
     if capability is None:
         raise InvalidConfiguration("This Satchy action does not use an integration capability")
 
     structured = dict(action.structured_payload or {})
     connection_id = _payload_uuid(structured, "integration_connection_id")
+    integration_scope = structured.get("integration_scope")
+    if integration_scope is None:
+        integration_scope = (
+            "team"
+            if action.action_type == ActionType.NOTIFY_TEAM.value
+            else "user"
+        )
+    if integration_scope not in {"user", "team", "organization"}:
+        raise InvalidConfiguration("integration_scope is invalid")
+
     workflow_key = structured.get("workflow_key")
     if workflow_key is None:
         workflow_key = f"satchy.action.{action.action_type}"
@@ -268,6 +278,7 @@ def _integration_action_request(
             {"text": text.strip()},
             connection_id,
             workflow_key.strip(),
+            integration_scope,
         )
 
     content = structured.get("content") or structured.get("report") or action.proposed_message
@@ -290,6 +301,7 @@ def _integration_action_request(
         },
         connection_id,
         workflow_key.strip(),
+        integration_scope,
     )
 
 
@@ -345,14 +357,22 @@ async def execute_approved_integration_action(
         raise InvalidConfiguration("Integration action must be approved before execution")
 
     try:
-        capability, payload, connection_id, workflow_key = _integration_action_request(action)
+        (
+            capability,
+            payload,
+            connection_id,
+            workflow_key,
+            integration_scope,
+        ) = _integration_action_request(action)
         team_ids = await _integration_action_team_ids(session, action)
+        resolver_user_id = approver_user_id if integration_scope == "user" else None
+        resolver_team_ids = team_ids if integration_scope == "team" else ()
         connection = await resolve_integration_connection(
             session,
             organization_id=action.organization_id,
-            user_id=approver_user_id,
+            user_id=resolver_user_id,
             capability=capability,
-            team_ids=team_ids,
+            team_ids=resolver_team_ids,
             agent_key="satchy",
             workflow_key=workflow_key,
             connection_id=connection_id,
@@ -376,11 +396,11 @@ async def execute_approved_integration_action(
             session,
             settings,
             organization_id=action.organization_id,
-            user_id=approver_user_id,
+            user_id=resolver_user_id,
             capability=capability,
             request_id=action.id,
             payload=payload,
-            team_ids=team_ids,
+            team_ids=resolver_team_ids,
             agent_key="satchy",
             workflow_key=workflow_key,
             connection_id=connection.id,
@@ -407,6 +427,7 @@ async def execute_approved_integration_action(
     structured["integration_execution"] = {
         "status": delivery.status,
         "capability": capability,
+        "scope": integration_scope,
         "delivery_id": str(delivery.id),
     }
     if delivery.last_error:
