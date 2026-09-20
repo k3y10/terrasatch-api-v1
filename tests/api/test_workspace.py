@@ -11,7 +11,7 @@ from terrasatch.admin.security import hash_admin_password
 from terrasatch.billing.models import BillingCustomer
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, User
+from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, Team, User
 from terrasatch.main import create_app
 
 
@@ -51,6 +51,9 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         site = Site(organization_id=org.id, name="Real test site", slug="real")
         session.add(site)
+        await session.flush()
+        team = Team(organization_id=org.id, site_id=site.id, name="Field team", enabled=True)
+        session.add(team)
         session.add(
             BillingCustomer(
                 account_id=account.id,
@@ -60,6 +63,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         await session.commit()
         site_id = site.id
+        team_id = team.id
         organization_id, user_id = org.id, user.id
     app = create_app(
         Settings(
@@ -120,6 +124,99 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
 
         assert own.json()["modules"] == ["Map", "Radio Log", "Observations", "Satchy"]
         assert own.json()["integrations"]["devices"] == []
+        assert own.json()["teams"] == [
+            {"id": str(team_id), "name": "Field team", "site_id": str(site_id)}
+        ]
+        catalog = own.json()["integrations"]["catalog"]
+        assert {provider["key"] for provider in catalog} >= {
+            "terrasatch_edge",
+            "google_drive",
+            "slack",
+            "garmin",
+            "alltrails",
+        }
+        assert own.json()["integrations"]["connections"] == []
+
+        integration_url = f"/api/v1/workspace/organizations/{organization_id}/integrations"
+        assert (await client.post(
+            integration_url,
+            json={"provider": "google_drive", "scope": "user"},
+        )).status_code == 403
+
+        personal = await client.post(
+            integration_url,
+            json={
+                "provider": "google_drive",
+                "scope": "user",
+                "display_name": "My field Drive",
+                "configuration": {"folder": "TerraSatch"},
+            },
+            headers=headers,
+        )
+        assert personal.status_code == 201
+        assert personal.json()["scope"] == "user"
+        assert personal.json()["owner_user_id"] == str(user_id)
+        assert personal.json()["status"] == "requested"
+
+        team_connection = await client.post(
+            integration_url,
+            json={
+                "provider": "slack",
+                "scope": "team",
+                "team_id": str(team_id),
+                "display_name": "Field team Slack",
+            },
+            headers=headers,
+        )
+        assert team_connection.status_code == 201
+        assert team_connection.json()["team_id"] == str(team_id)
+
+        organization_connection = await client.post(
+            integration_url,
+            json={"provider": "snowflake", "scope": "organization"},
+            headers=headers,
+        )
+        assert organization_connection.status_code == 201
+        assert organization_connection.json()["scope"] == "organization"
+
+        duplicate = await client.post(
+            integration_url,
+            json={"provider": "google_drive", "scope": "user"},
+            headers=headers,
+        )
+        assert duplicate.status_code == 409
+
+        secret_rejected = await client.post(
+            integration_url,
+            json={
+                "provider": "mapbox",
+                "scope": "user",
+                "configuration": {"api_token": "must-not-be-stored"},
+            },
+            headers=headers,
+        )
+        assert secret_rejected.status_code == 400
+
+        managed_rejected = await client.post(
+            integration_url,
+            json={"provider": "terrasatch_edge", "scope": "organization"},
+            headers=headers,
+        )
+        assert managed_rejected.status_code == 400
+
+        with_integrations = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()
+        assert len(with_integrations["integrations"]["connections"]) == 3
+
+        revoked = await client.post(
+            f"{integration_url}/{personal.json()['id']}/revoke",
+            headers=headers,
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["status"] == "revoked"
+        assert revoked.json()["enabled"] is False
+
         prefs_url = f"/api/v1/workspace/organizations/{organization_id}/preferences"
         assert (await client.post(prefs_url, json={"modules": []})).status_code == 403
         assert (
