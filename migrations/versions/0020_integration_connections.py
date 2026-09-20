@@ -174,7 +174,7 @@ def upgrade() -> None:
             [column],
         )
     op.create_index(
-        "ix_integration_deliveries_status",
+        "ix_integration_deliveries_queue",
         "integration_deliveries",
         ["organization_id", "connection_id", "status", "created_at"],
     )
