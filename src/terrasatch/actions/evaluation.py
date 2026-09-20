@@ -190,6 +190,7 @@ async def _radio_decision(
 
     action, _ = await approve_action(session, **kwargs)
     queue_detail: str | None = None
+    integration_delivery = None
     try:
         if action.action_type == ActionType.REPLY_RADIO.value:
             await queue_approved_action(
@@ -212,19 +213,35 @@ async def _radio_decision(
             if settings is None:
                 queue_detail = "Integration runtime settings are unavailable"
             else:
-                _, _, queue_detail = await execute_approved_integration_action(
-                    session,
-                    settings,
-                    action=action,
-                    approver_user_id=None,
+                _, integration_delivery, queue_detail = (
+                    await execute_approved_integration_action(
+                        session,
+                        settings,
+                        action=action,
+                        approver_user_id=None,
+                    )
                 )
     except (InvalidConfiguration, ResourceNotFound, ValueError) as exc:
         queue_detail = str(exc)
 
-    payload: dict[str, object] = {"decision": "approved", "action_id": str(action.id)}
+    payload: dict[str, object] = {
+        "decision": "approved",
+        "action_id": str(action.id),
+        "action_status": action.status,
+    }
+    if integration_delivery is not None:
+        payload["integration_execution"] = {
+            "status": integration_delivery.status,
+            "delivery_id": str(integration_delivery.id),
+        }
     if queue_detail:
         payload["queue_detail"] = queue_detail
-    return f"{speaker.name} approved the pending Satchy action", payload, action
+    interpretation = f"{speaker.name} approved the pending Satchy action"
+    if integration_delivery is not None and integration_delivery.status == "delivered":
+        interpretation += " and the approved integration output was delivered"
+    elif queue_detail:
+        interpretation += f"; integration execution is blocked: {queue_detail}"
+    return interpretation, payload, action
 
 
 async def _latest_conversation_event(
@@ -497,7 +514,10 @@ async def process_transmission_control_plane(
                 "summaries": summaries,
             }
         }
-        if operational_event is not None:
+        if (
+            operational_event is not None
+            and operational_event.event_type != "GENERAL_UPDATE"
+        ):
             planner_context["current_event"] = {
                 "id": str(operational_event.id),
                 "type": operational_event.event_type,
