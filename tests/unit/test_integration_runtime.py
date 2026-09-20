@@ -11,7 +11,6 @@ from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Organization, Team, User
 from terrasatch.integrations.models import (
     IntegrationConnection,
-    IntegrationCredential,
     IntegrationDelivery,
     IntegrationGrant,
     IntegrationStatus,
