@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import base64
-from binascii import Error as BinasciiError
 import hashlib
 import hmac
 import json
 import re
 import secrets
 import time
+from binascii import Error as BinasciiError
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
