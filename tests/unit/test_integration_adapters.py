@@ -421,3 +421,17 @@ async def test_microsoft_oauth_requests_one_drive_scopes_and_probes_identity() -
     result = await adapter.exchange_code(code="ms-code")
     assert result.account_id == "user-123"
     assert result.credentials["refresh_token"] == "ms-refresh"
+
+
+
+def test_mapbox_managed_service_requires_fixed_style_allowlist() -> None:
+    settings = Settings(
+        integration_provider_config_json=SecretStr(
+            '{"mapbox":{"access_token":"pk.test","username":"terrasatch",'
+            '"style_ids":"field-style,incident-style"}}'
+        ),
+    )
+    catalog = {item["key"]: item for item in provider_catalog(settings)}
+    assert catalog["mapbox"]["support_status"] == "managed"
+    assert catalog["mapbox"]["runtime_ready"] is True
+    assert catalog["mapbox"]["connected"] is True
