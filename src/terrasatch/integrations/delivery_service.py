@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
@@ -82,7 +83,20 @@ async def prepare_delivery(
         response_metadata={},
     )
     session.add(delivery)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        existing = await session.scalar(
+            select(IntegrationDelivery).where(
+                IntegrationDelivery.organization_id == organization_id,
+                IntegrationDelivery.connection_id == connection_id,
+                IntegrationDelivery.request_id == request_id,
+            )
+        )
+        if existing is None:
+            raise
+        return existing, False
     return delivery, True
 
 
