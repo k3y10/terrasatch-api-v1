@@ -17,7 +17,6 @@ from terrasatch.integrations.operations import (
     send_slack_message,
 )
 
-
 @pytest.mark.asyncio
 async def test_slack_webhook_posts_only_to_the_oauth_destination() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
@@ -39,7 +38,6 @@ async def test_slack_webhook_posts_only_to_the_oauth_destination() -> None:
     assert result.external_id == "C123"
     assert result.metadata == {"channel": "#field", "channel_id": "C123"}
 
-
 @pytest.mark.asyncio
 async def test_slack_webhook_rejects_untrusted_destination() -> None:
     with pytest.raises(InvalidConfiguration, match="destination"):
@@ -51,7 +49,6 @@ async def test_slack_webhook_rejects_untrusted_destination() -> None:
             },
             text="Do not send",
         )
-
 
 @pytest.mark.asyncio
 async def test_drive_export_uses_multipart_upload_and_optional_parent() -> None:
@@ -86,8 +83,6 @@ async def test_drive_export_uses_multipart_upload_and_optional_parent() -> None:
     )
     assert result.external_id == "file-123"
     assert result.metadata["name"] == "shift-report.txt"
-
-
 
 @pytest.mark.asyncio
 async def test_arcgis_feature_query_uses_bearer_auth_and_post_body() -> None:
@@ -132,7 +127,6 @@ async def test_arcgis_feature_query_uses_bearer_auth_and_post_body() -> None:
     assert result.metadata["feature_count"] == 1
     assert result.metadata["geometry_type"] == "esriGeometryPoint"
 
-
 @pytest.mark.asyncio
 async def test_arcgis_feature_query_rejects_non_arcgis_destination() -> None:
     with pytest.raises(InvalidConfiguration, match="ArcGIS Online"):
@@ -140,8 +134,6 @@ async def test_arcgis_feature_query_rejects_non_arcgis_destination() -> None:
             {"access_token": "arcgis-access"},
             layer_url="https://example.com/arcgis/rest/services/Test/FeatureServer/0",
         )
-
-
 
 @pytest.mark.asyncio
 async def test_microsoft_file_export_uses_graph_and_bearer_token() -> None:
@@ -171,7 +163,6 @@ async def test_microsoft_file_export_uses_graph_and_bearer_token() -> None:
     )
     assert result.external_id == "drive-item-1"
 
-
 @pytest.mark.asyncio
 async def test_caltopo_map_query_signs_request_and_never_sends_secret() -> None:
     secret = base64.b64encode(b"cal-secret").decode("ascii")
@@ -196,7 +187,6 @@ async def test_caltopo_map_query_signs_request_and_never_sends_secret() -> None:
         transport=httpx.MockTransport(responder),
     )
     assert result.metadata["feature_count"] == 0
-
 
 @pytest.mark.asyncio
 async def test_snowflake_query_allows_only_single_select() -> None:
@@ -226,7 +216,6 @@ async def test_snowflake_query_allows_only_single_select() -> None:
             account_host="org-account.snowflakecomputing.com",
             statement="DELETE FROM observations",
         )
-
 
 @pytest.mark.asyncio
 async def test_mapbox_style_read_uses_fixed_api_host() -> None:
