@@ -11,7 +11,15 @@ from terrasatch.admin.security import hash_admin_password
 from terrasatch.billing.models import BillingCustomer
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, Team, User
+from terrasatch.identity.models import (
+    Account,
+    Membership,
+    MembershipRole,
+    Organization,
+    Site,
+    Team,
+    User,
+)
 from terrasatch.main import create_app
 
 

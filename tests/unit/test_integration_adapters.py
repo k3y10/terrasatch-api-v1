@@ -18,10 +18,16 @@ def configured_settings() -> Settings:
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
         google_oauth_client_id="google-client",
         google_oauth_client_secret=SecretStr("google-secret"),
-        google_oauth_redirect_uri="https://api.example.com/api/v1/workspace/integrations/oauth/google_drive/callback",
+        google_oauth_redirect_uri=(
+            "https://api.example.com/api/v1/workspace/"
+            "integrations/oauth/google_drive/callback"
+        ),
         slack_oauth_client_id="slack-client",
         slack_oauth_client_secret=SecretStr("slack-secret"),
-        slack_oauth_redirect_uri="https://api.example.com/api/v1/workspace/integrations/oauth/slack/callback",
+        slack_oauth_redirect_uri=(
+            "https://api.example.com/api/v1/workspace/"
+            "integrations/oauth/slack/callback"
+        ),
     )
 
 
@@ -29,7 +35,10 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     planned = {item["key"]: item["setup_status"] for item in provider_catalog(Settings())}
     assert planned["google_drive"] == "planned"
     assert planned["slack"] == "planned"
-    available = {item["key"]: item["setup_status"] for item in provider_catalog(configured_settings())}
+    available = {
+        item["key"]: item["setup_status"]
+        for item in provider_catalog(configured_settings())
+    }
     assert available["google_drive"] == "available"
     assert available["slack"] == "available"
     assert available["garmin"] == "planned"
@@ -48,10 +57,28 @@ async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identi
     settings = configured_settings()
     def responder(request: httpx.Request) -> httpx.Response:
         if str(request.url) == GoogleDriveOAuthAdapter.token_endpoint:
-            return httpx.Response(200, json={"access_token":"google-access","refresh_token":"google-refresh","expires_in":3600,"scope":"https://www.googleapis.com/auth/drive.file","token_type":"Bearer"})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "google-access",
+                    "refresh_token": "google-refresh",
+                    "expires_in": 3600,
+                    "scope": "https://www.googleapis.com/auth/drive.file",
+                    "token_type": "Bearer",
+                },
+            )
         if str(request.url).startswith(GoogleDriveOAuthAdapter.about_endpoint):
             assert request.headers["Authorization"] == "Bearer google-access"
-            return httpx.Response(200, json={"user":{"displayName":"Field User","emailAddress":"field@example.com","permissionId":"permission-123"}})
+            return httpx.Response(
+                200,
+                json={
+                    "user": {
+                        "displayName": "Field User",
+                        "emailAddress": "field@example.com",
+                        "permissionId": "permission-123",
+                    }
+                },
+            )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
     adapter = GoogleDriveOAuthAdapter(settings, transport=httpx.MockTransport(responder))
     authorization = urlparse(adapter.authorization_url(state="state-value"))
@@ -72,7 +99,22 @@ async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_meta
     def responder(request: httpx.Request) -> httpx.Response:
         if str(request.url) == SlackOAuthAdapter.token_endpoint:
             assert request.headers.get("Authorization", "").startswith("Basic ")
-            return httpx.Response(200, json={"ok":True,"access_token":"xoxb-test","token_type":"bot","scope":"incoming-webhook","team":{"name":"Field Ops","id":"T123"},"incoming_webhook":{"channel":"#field-ops","channel_id":"C123","configuration_url":"https://slack.example/config","url":"https://hooks.slack.com/services/secret"}})
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "access_token": "xoxb-test",
+                    "token_type": "bot",
+                    "scope": "incoming-webhook",
+                    "team": {"name": "Field Ops", "id": "T123"},
+                    "incoming_webhook": {
+                        "channel": "#field-ops",
+                        "channel_id": "C123",
+                        "configuration_url": "https://slack.example/config",
+                        "url": "https://hooks.slack.com/services/secret",
+                    },
+                },
+            )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
     adapter = SlackOAuthAdapter(settings, transport=httpx.MockTransport(responder))
     authorization = urlparse(adapter.authorization_url(state="slack-state"))

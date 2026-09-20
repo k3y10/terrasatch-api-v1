@@ -394,7 +394,14 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 },
                 "subscription": subscription,
                 "sites": [{"id": str(s.id), "name": s.name} for s in sites],
-                "teams": [{"id": str(t.id), "name": t.name, "site_id": str(t.site_id) if t.site_id else None} for t in teams],
+                "teams": [
+                    {
+                        "id": str(t.id),
+                        "name": t.name,
+                        "site_id": str(t.site_id) if t.site_id else None,
+                    }
+                    for t in teams
+                ],
                 "assets": [_asset_payload(asset) for asset in asset_rows],
                 "records": await records(session, organization_id),
                 "actions": [
@@ -418,7 +425,9 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
 
 @router.get("/organizations/{organization_id}/integrations/catalog")
 async def integration_catalog(organization_id: UUID, request: Request, response: Response):
-    """Return provider capabilities without exposing credentials or pretending roadmap adapters are live."""
+    """
+    Return provider capabilities without exposing credentials or claiming roadmap adapters are live.
+    """
 
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
@@ -435,7 +444,9 @@ async def request_integration(
     payload: IntegrationRequest,
     request: Request,
 ):
-    """Record a safely scoped provider connection request; raw provider secrets are never accepted."""
+    """
+    Record a safely scoped provider request without accepting raw provider secrets.
+    """
 
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
@@ -473,7 +484,11 @@ async def authorize_integration(organization_id: UUID, connection_id: UUID, requ
             connection_id=connection_id,
         )
         await session.commit()
-        return {"connection": jsonable_encoder(connection_payload(connection)), "url": url, "expires_at": expires_at}
+        return {
+            "connection": jsonable_encoder(connection_payload(connection)),
+            "url": url,
+            "expires_at": expires_at,
+        }
 
 
 @router.get("/integrations/oauth/{provider}/callback", include_in_schema=False)
@@ -484,7 +499,9 @@ async def integration_oauth_callback(
     code: str | None = Query(default=None, max_length=4096),
     error: str | None = Query(default=None, max_length=128),
 ):
-    """Consume one OAuth state and immediately redirect away from authorization-code query params."""
+    """
+    Consume one OAuth state and immediately redirect away from authorization-code query params.
+    """
 
     async with create_session_factory(request.app.state.settings)() as session:
         connection, success, reason = await complete_authorization(

@@ -8,14 +8,27 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from terrasatch.errors import InvalidConfiguration, ResourceConflict, ResourceNotFound, TenantAccessDenied
+from terrasatch.errors import (
+    InvalidConfiguration,
+    ResourceConflict,
+    ResourceNotFound,
+    TenantAccessDenied,
+)
 from terrasatch.identity.access import role_allows
 from terrasatch.identity.models import MembershipRole, Team
 
 from .catalog import PROVIDERS
 from .models import IntegrationConnection, IntegrationScope, IntegrationStatus
 
-_SENSITIVE_KEY_PARTS = ("secret", "token", "password", "credential", "api_key", "apikey", "private_key")
+_SENSITIVE_KEY_PARTS = (
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "api_key",
+    "apikey",
+    "private_key",
+)
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
 }
@@ -40,7 +53,10 @@ def _assert_non_secret_configuration(value: object, *, path: str = "configuratio
             normalized = str(key).casefold().replace("-", "_")
             if any(part in normalized for part in _SENSITIVE_KEY_PARTS):
                 raise InvalidConfiguration(
-                    f"{path} cannot contain credentials or secrets; provider credentials are stored server-side"
+                    (
+                        f"{path} cannot contain credentials or secrets; "
+                        "provider credentials are stored server-side"
+                    )
                 )
             _assert_non_secret_configuration(nested, path=f"{path}.{key}")
     elif isinstance(value, list):
@@ -89,9 +105,13 @@ async def create_connection_request(
     if scope.value not in provider["scopes"]:
         raise InvalidConfiguration(f"{provider['name']} does not support {scope.value} scope")
     if provider["setup_status"] == "managed":
-        raise InvalidConfiguration(f"{provider['name']} is managed by TerraSatch and is not added here")
+        raise InvalidConfiguration(
+            f"{provider['name']} is managed by TerraSatch and is not added here"
+        )
     if not can_manage_scope(role=role, scope=scope):
-        raise TenantAccessDenied("Administrator access is required for team or organization integrations")
+        raise TenantAccessDenied(
+            "Administrator access is required for team or organization integrations"
+        )
 
     team = await _validated_team(
         session,

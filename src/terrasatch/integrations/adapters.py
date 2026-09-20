@@ -147,7 +147,9 @@ class GoogleDriveOAuthAdapter:
     async def refresh(self, credentials: dict[str, object]) -> dict[str, object]:
         refresh_token = credentials.get("refresh_token")
         if not isinstance(refresh_token, str) or not refresh_token:
-            raise ProviderUnavailable("Google refresh token is unavailable; reconnect Google Drive")
+            raise ProviderUnavailable(
+                "Google refresh token is unavailable; reconnect Google Drive"
+            )
         response = await _request(
             self.transport,
             "POST",
@@ -348,7 +350,9 @@ class SlackOAuthAdapter:
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if response.status_code >= 400:
-            raise ProviderUnavailable("Slack credential revocation could not be confirmed")
+            raise ProviderUnavailable(
+                "Slack credential revocation could not be confirmed"
+            )
         payload = _json_payload(response, provider="Slack")
         if payload.get("ok") is not True and payload.get("error") not in {
             "token_revoked",
