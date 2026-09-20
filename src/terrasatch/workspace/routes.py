@@ -1,16 +1,22 @@
 """Member sessions, tenant-scoped field records, Satchy chat and human reviews."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, Field, model_validator
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from sqlalchemy import select
 
-from terrasatch.actions.models import SatchyAction
-from terrasatch.actions.service import approve_action, reject_action
+from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction
+from terrasatch.actions.service import (
+    approve_action,
+    execute_approved_integration_action,
+    reject_action,
+)
+from terrasatch.actions.state import transition_action
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.billing.rate_limit import enforce_public_rate_limit
 from terrasatch.billing.service import get_stripe_customer_id, get_subscription_for_organization
@@ -23,11 +29,39 @@ from terrasatch.identity.access import (
     list_user_access,
     role_allows,
 )
-from terrasatch.identity.models import MembershipRole, Site, User
+from terrasatch.identity.models import MembershipRole, Site, Team, User
+from terrasatch.integrations.catalog import provider_catalog
+from terrasatch.integrations.delivery_service import (
+    content_metadata,
+    delivery_payload,
+    execute_drive_export,
+    execute_slack_delivery,
+    prepare_delivery,
+)
+from terrasatch.integrations.manual_service import bind_manual_credentials
+from terrasatch.integrations.models import IntegrationScope, IntegrationStatus
+from terrasatch.integrations.oauth_service import (
+    begin_authorization,
+    complete_authorization,
+    disconnect_connection,
+    probe_connection,
+    workspace_return_url,
+)
+from terrasatch.integrations.runtime import (
+    execute as execute_integration_capability,
+)
+from terrasatch.integrations.runtime import (
+    query as query_integration_capability,
+)
+from terrasatch.integrations.service import (
+    connection_payload,
+    create_connection_request,
+    list_visible_connections,
+)
 from terrasatch.portal.routes import _clear_portal_auth, _enabled, _require_user, _verify_csrf
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
 from terrasatch.satchy.adaptation import observe_workspace_context
-from terrasatch.satchy.agent import answer_workspace
+from terrasatch.satchy.agent import answer_workspace, plan_integration_action
 from terrasatch.satchy.assets import (
     create_field_asset,
     list_authorized_assets,
@@ -35,7 +69,13 @@ from terrasatch.satchy.assets import (
     update_field_asset,
 )
 from terrasatch.satchy.context import build_satchy_context
-from terrasatch.satchy.schemas import ActiveMapContext, FieldAssetCreate, FieldAssetUpdate
+from terrasatch.satchy.intents import resolve_intent
+from terrasatch.satchy.schemas import (
+    ActiveMapContext,
+    FieldAssetCreate,
+    FieldAssetUpdate,
+    SatchyIntent,
+)
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
@@ -89,6 +129,7 @@ class Login(BaseModel):
 
 
 class Chat(BaseModel):
+    request_id: UUID | None = None
     message: str = Field(min_length=1, max_length=4000)
     site_id: UUID | None = None
     transmission_id: UUID | None = None
@@ -115,6 +156,70 @@ class Observation(BaseModel):
 class Decision(BaseModel):
     decision: Literal["approve", "reject"]
     notes: str = Field(default="", max_length=2000)
+
+
+class IntegrationRequest(BaseModel):
+    provider: str = Field(min_length=2, max_length=100, pattern=r"^[a-z0-9_]+$")
+    scope: IntegrationScope
+    team_id: UUID | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    configuration: dict[str, object] = Field(default_factory=dict)
+
+
+class IntegrationExecuteRequest(BaseModel):
+    request_id: UUID
+    capability: Literal["document.create", "notification.send"]
+    connection_id: UUID | None = None
+    workflow_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+    )
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class IntegrationQueryRequest(BaseModel):
+    capability: Literal["map.features.query", "map.style.read", "data.query"]
+    connection_id: UUID | None = None
+    workflow_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+    )
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class IntegrationCredentialRequest(BaseModel):
+    values: dict[str, SecretStr]
+
+    @model_validator(mode="after")
+    def validate_values(self):
+        if not 1 <= len(self.values) <= 4:
+            raise ValueError("Credential setup requires between 1 and 4 values")
+        for key, value in self.values.items():
+            raw = value.get_secret_value()
+            if not key or len(key) > 100 or not raw or len(raw) > 8192:
+                raise ValueError("Credential setup contains an invalid value")
+        return self
+
+
+class SlackMessageRequest(BaseModel):
+    request_id: UUID
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class DriveExportRequest(BaseModel):
+    request_id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    content: str = Field(max_length=5_000_000)
+    mime_type: Literal[
+        "application/json",
+        "text/csv",
+        "text/markdown",
+        "text/plain",
+    ] = "text/plain"
 
 
 def csrf(request):
@@ -278,6 +383,17 @@ async def records(session, organization_id):
     ]
 
 
+def _connection_scopes(connections) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for connection in connections:
+        if (
+            connection.enabled
+            and connection.status == IntegrationStatus.CONNECTED.value
+        ):
+            result.setdefault(connection.provider, set()).add(connection.scope_type)
+    return result
+
+
 @router.get("/organizations/{organization_id}")
 async def workspace(organization_id: UUID, request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -302,12 +418,48 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 )
             )
         )
-        actions = await session.scalars(
-            select(SatchyAction)
-            .where(SatchyAction.organization_id == organization_id)
-            .order_by(SatchyAction.created_at.desc())
-            .limit(100)
+        teams = list(
+            await session.scalars(
+                select(Team)
+                .where(
+                    Team.organization_id == organization_id,
+                    Team.enabled.is_(True),
+                )
+                .order_by(Team.name)
+            )
         )
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+        )
+        actions = list(
+            await session.scalars(
+                select(SatchyAction)
+                .where(SatchyAction.organization_id == organization_id)
+                .order_by(SatchyAction.created_at.desc())
+                .limit(100)
+            )
+        )
+        visible_actions = []
+        for action in actions:
+            action_payload = dict(action.structured_payload or {})
+            if action_payload.get("origin") != "workspace_chat":
+                visible_actions.append(action)
+                continue
+            requester = action_payload.get("requester_user_id")
+            integration_scope = action_payload.get("integration_scope", "user")
+            if requester == str(user.id):
+                visible_actions.append(action)
+            elif (
+                integration_scope == "organization"
+                or (
+                    integration_scope == "team"
+                    and role_allows(membership.role, MembershipRole.ADMIN)
+                )
+            ):
+                visible_actions.append(action)
         messages = list(
             await session.scalars(
                 select(WorkspaceMessage)
@@ -351,21 +503,45 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "provider": request.app.state.settings.intelligence_provider,
                         "model": request.app.state.settings.ollama_model,
                     },
+                    "catalog": provider_catalog(
+                        request.app.state.settings,
+                        admin_access=role_allows(
+                            membership.role,
+                            MembershipRole.ADMIN,
+                        ),
+                        connected_scopes=_connection_scopes(connections),
+                    ),
+                    "connections": [connection_payload(connection) for connection in connections],
                 },
                 "subscription": subscription,
                 "sites": [{"id": str(s.id), "name": s.name} for s in sites],
+                "teams": [
+                    {
+                        "id": str(t.id),
+                        "name": t.name,
+                        "site_id": str(t.site_id) if t.site_id else None,
+                    }
+                    for t in teams
+                ],
                 "assets": [_asset_payload(asset) for asset in asset_rows],
                 "records": await records(session, organization_id),
                 "actions": [
                     {
                         "id": str(a.id),
-                        "source_id": str(a.source_transmission_id),
+                        "source_id": (
+                            str(a.source_transmission_id)
+                            if a.source_transmission_id is not None
+                            else None
+                        ),
                         "type": a.action_type,
                         "reason": a.reason,
                         "message": a.proposed_message,
                         "status": a.status,
+                        "integration_execution": dict(
+                            (a.structured_payload or {}).get("integration_execution") or {}
+                        ),
                     }
-                    for a in actions
+                    for a in visible_actions
                 ],
                 "messages": [
                     {"id": str(m.id), "role": m.role, "content": m.content}
@@ -373,6 +549,344 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 ],
             }
         )
+
+
+@router.get("/organizations/{organization_id}/integrations/catalog")
+async def integration_catalog(organization_id: UUID, request: Request, response: Response):
+    """
+    Return provider capabilities without exposing credentials or claiming roadmap adapters are live.
+    """
+
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+        )
+        return provider_catalog(
+            request.app.state.settings,
+            admin_access=role_allows(
+                membership.role,
+                MembershipRole.ADMIN,
+            ),
+            connected_scopes=_connection_scopes(connections),
+        )
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def request_integration(
+    organization_id: UUID,
+    payload: IntegrationRequest,
+    request: Request,
+):
+    """
+    Record a safely scoped provider request without accepting raw provider secrets.
+    """
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await create_connection_request(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            provider_key=payload.provider,
+            scope=payload.scope,
+            team_id=payload.team_id,
+            display_name=payload.display_name,
+            configuration=payload.configuration,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/execute",
+    status_code=status.HTTP_201_CREATED,
+)
+async def execute_integration(
+    organization_id: UUID,
+    payload: IntegrationExecuteRequest,
+    request: Request,
+):
+    """Execute a Satchy capability without exposing provider-specific plumbing."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery = await execute_integration_capability(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            capability=payload.capability,
+            request_id=payload.request_id,
+            payload=payload.payload,
+            agent_key="satchy",
+            workflow_key=payload.workflow_key,
+            connection_id=payload.connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
+
+
+@router.post("/organizations/{organization_id}/integrations/query")
+async def query_integration(
+    organization_id: UUID,
+    payload: IntegrationQueryRequest,
+    request: Request,
+):
+    """Query a provider-neutral Satchy read capability."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        result = await query_integration_capability(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            capability=payload.capability,
+            payload=payload.payload,
+            agent_key="satchy",
+            workflow_key=payload.workflow_key,
+            connection_id=payload.connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(result)
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/credentials"
+)
+async def configure_integration_credentials(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: IntegrationCredentialRequest,
+    request: Request,
+):
+    """Store one manual provider credential set without returning secrets."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await bind_manual_credentials(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            values={
+                key: value.get_secret_value()
+                for key, value in payload.values.items()
+            },
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/authorize")
+async def authorize_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Start a single-use server-side OAuth flow for a configured provider."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection, url, expires_at = await begin_authorization(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return {
+            "connection": jsonable_encoder(connection_payload(connection)),
+            "url": url,
+            "expires_at": expires_at,
+        }
+
+
+@router.get("/integrations/oauth/{provider}/callback", include_in_schema=False)
+async def integration_oauth_callback(
+    provider: str,
+    request: Request,
+    state: str = Query(min_length=16, max_length=256),
+    code: str | None = Query(default=None, max_length=4096),
+    error: str | None = Query(default=None, max_length=128),
+):
+    """
+    Consume one OAuth state and immediately redirect away from authorization-code query params.
+    """
+
+    async with create_session_factory(request.app.state.settings)() as session:
+        connection, success, reason = await complete_authorization(
+            session,
+            request.app.state.settings,
+            provider=provider,
+            state=state,
+            code=code,
+            provider_error=error,
+        )
+        await session.commit()
+        return RedirectResponse(
+            workspace_return_url(
+                request.app.state.settings,
+                connection=connection,
+                success=success,
+                reason=reason,
+            ),
+            status_code=303,
+        )
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/test")
+async def test_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Verify the live provider credential without returning the credential itself."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await probe_connection(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/revoke")
+async def revoke_integration(organization_id: UUID, connection_id: UUID, request: Request):
+    """Revoke provider credentials first, then remove the encrypted local credential."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        connection = await disconnect_connection(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+        )
+        await session.commit()
+        return jsonable_encoder(connection_payload(connection))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/slack/messages",
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_slack_integration_message(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: SlackMessageRequest,
+    request: Request,
+):
+    """Send one audited Slack webhook message through a connected Slack integration."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery, created = await prepare_delivery(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            request_id=payload.request_id,
+            operation="slack_message",
+            request_metadata=content_metadata(
+                payload.text,
+                character_count=len(payload.text),
+            ),
+        )
+        await session.commit()
+        if not created:
+            return jsonable_encoder(delivery_payload(delivery))
+
+        delivery = await execute_slack_delivery(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            delivery_id=delivery.id,
+            text=payload.text,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
+
+
+@router.post(
+    "/organizations/{organization_id}/integrations/{connection_id}/drive/files",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_drive_integration_file(
+    organization_id: UUID,
+    connection_id: UUID,
+    payload: DriveExportRequest,
+    request: Request,
+):
+    """Create one audited text export through a connected Google Drive integration."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        delivery, created = await prepare_delivery(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            connection_id=connection_id,
+            request_id=payload.request_id,
+            operation="drive_export",
+            request_metadata=content_metadata(
+                payload.content,
+                name=payload.name,
+                mime_type=payload.mime_type,
+            ),
+        )
+        await session.commit()
+        if not created:
+            return jsonable_encoder(delivery_payload(delivery))
+
+        delivery = await execute_drive_export(
+            session,
+            request.app.state.settings,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+            delivery_id=delivery.id,
+            name=payload.name,
+            content=payload.content,
+            mime_type=payload.mime_type,
+        )
+        await session.commit()
+        return jsonable_encoder(delivery_payload(delivery))
 
 
 @router.get("/organizations/{organization_id}/assets")
@@ -447,17 +961,44 @@ async def review(organization_id: UUID, action_id: UUID, payload: Decision, requ
     async with create_session_factory(request.app.state.settings)() as session:
         user, membership = await access(request, session, organization_id)
         await writable(session, membership)
-        operation = approve_action if payload.decision == "approve" else reject_action
-        action, _ = await operation(
-            session,
-            organization_id=organization_id,
-            action_id=action_id,
-            approver_role=membership.role.value,
-            approver_user_id=user.id,
-            notes=payload.notes,
-        )
+        integration_detail = None
+        if payload.decision == "approve":
+            action, _ = await approve_action(
+                session,
+                organization_id=organization_id,
+                action_id=action_id,
+                approver_role=membership.role.value,
+                approver_user_id=user.id,
+                notes=payload.notes,
+            )
+            if action.action_type in {
+                ActionType.NOTIFY_TEAM.value,
+                ActionType.GENERATE_REPORT.value,
+            }:
+                action, _, integration_detail = await execute_approved_integration_action(
+                    session,
+                    request.app.state.settings,
+                    action=action,
+                    approver_user_id=user.id,
+                )
+        else:
+            action, _ = await reject_action(
+                session,
+                organization_id=organization_id,
+                action_id=action_id,
+                approver_role=membership.role.value,
+                approver_user_id=user.id,
+                notes=payload.notes,
+            )
         await session.commit()
-        return {"id": str(action.id), "status": action.status}
+        return {
+            "id": str(action.id),
+            "status": action.status,
+            "integration_detail": integration_detail,
+            "integration_execution": dict(
+                (action.structured_payload or {}).get("integration_execution") or {}
+            ),
+        }
 
 
 @router.post("/organizations/{organization_id}/billing")
@@ -563,15 +1104,110 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             objective=payload.objective,
             active_map=payload.active_map,
         )
-        answer, model = await answer_workspace(
-            settings=settings,
-            context=context,
-            message=payload.message,
-            history=[
-                {"role": item.role, "content": item.content}
-                for item in reversed(history)
-            ],
-        )
+        request_id = payload.request_id or uuid4()
+        existing_by_id = await session.get(SatchyAction, request_id)
+        if (
+            existing_by_id is not None
+            and existing_by_id.organization_id != organization_id
+        ):
+            raise HTTPException(409, "Satchy request ID is already in use")
+        existing_action = existing_by_id
+        planned_action = None
+        if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
+            planner_context = context.model_dump(mode="json")
+            planner_context["request_source"] = "workspace"
+            planned_action = await plan_integration_action(
+                settings=settings,
+                text=payload.message,
+                context=planner_context,
+            )
+        action = existing_action
+        if (
+            action is None
+            and planned_action is not None
+            and planned_action.action_type != "none"
+        ):
+            if planned_action.missing_context:
+                missing = ", ".join(planned_action.missing_context)
+                answer = (
+                    f"I need {missing} before I can prepare that integration action."
+                )
+                model = "satchy-integration-planner"
+            else:
+                action_type = (
+                    ActionType.NOTIFY_TEAM
+                    if planned_action.action_type == "notify_team"
+                    else ActionType.GENERATE_REPORT
+                )
+                if action_type == ActionType.NOTIFY_TEAM:
+                    proposed_message = planned_action.notification_text
+                    structured_payload = {
+                        "origin": "workspace_chat",
+                        "requester_user_id": str(user.id),
+                        "capability": "notification.send",
+                        "integration_scope": planned_action.audience_scope,
+                        "text": planned_action.notification_text,
+                        "workflow_key": "satchy.action.notify_team",
+                        "planner_confidence": planned_action.confidence,
+                    }
+                    preview = "team notification"
+                else:
+                    proposed_message = planned_action.document_content
+                    structured_payload = {
+                        "origin": "workspace_chat",
+                        "requester_user_id": str(user.id),
+                        "capability": "document.create",
+                        "integration_scope": planned_action.audience_scope,
+                        "name": planned_action.document_name,
+                        "content": planned_action.document_content,
+                        "mime_type": planned_action.mime_type,
+                        "workflow_key": "satchy.action.generate_report",
+                        "planner_confidence": planned_action.confidence,
+                    }
+                    preview = "report"
+                if context.team_id is not None:
+                    structured_payload["team_id"] = str(context.team_id)
+                action = SatchyAction(
+                    id=request_id,
+                    organization_id=organization_id,
+                    site_id=selected_site.id,
+                    conversation_id=None,
+                    source_transmission_id=None,
+                    evaluation_id=None,
+                    action_type=action_type.value,
+                    risk_level="low",
+                    reason=planned_action.summary,
+                    proposed_message=proposed_message,
+                    structured_payload=structured_payload,
+                    confidence=planned_action.confidence,
+                    approval_required=True,
+                    status=ActionStatus.PROPOSED.value,
+                    expires_at=datetime.now(UTC) + timedelta(minutes=15),
+                )
+                session.add(action)
+                await session.flush()
+                transition_action(action, ActionStatus.AWAITING_APPROVAL)
+                answer = (
+                    f"I prepared that {preview} for human approval. "
+                    "Nothing has been sent or created yet. Review it in Workflows."
+                )
+                model = "satchy-integration-planner"
+        elif action is not None:
+            answer = (
+                f"That integration action already exists with status {action.status}. "
+                "Review it in Workflows."
+            )
+            model = "satchy-integration-planner"
+        else:
+            answer, model = await answer_workspace(
+                settings=settings,
+                context=context,
+                message=payload.message,
+                history=[
+                    {"role": item.role, "content": item.content}
+                    for item in reversed(history)
+                ],
+            )
         session.add_all(
             [
                 WorkspaceMessage(
@@ -590,7 +1226,12 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             ]
         )
         await session.commit()
-        return {"answer": answer[:16000]}
+        return {
+            "answer": answer[:16000],
+            "action_id": str(action.id) if action is not None else None,
+            "action_status": action.status if action is not None else None,
+            "approval_required": bool(action is not None and action.approval_required),
+        }
 
 
 @router.post("/organizations/{organization_id}/observations")

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.actions import models as action_models
 from terrasatch.auth import models as auth_models
+from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.edge import models as edge_models
 from terrasatch.errors import TenantAccessDenied
@@ -27,7 +28,7 @@ from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 from terrasatch.satchy import models as satchy_models
 from terrasatch.satchy.adaptation import observe_workspace_context
-from terrasatch.satchy.agent import resolve_radio_intent
+from terrasatch.satchy.agent import plan_integration_action, resolve_radio_intent
 from terrasatch.satchy.assets import (
     create_mission_plan,
     list_authorized_assets,
@@ -58,6 +59,8 @@ def test_radio_intent_and_workflow_are_conservative() -> None:
     log = resolve_intent("Satchy, log that last report.")
     approve = resolve_intent("Satchy, Control 2. Approve.")
     mission = resolve_intent("Satchy, get eyes on Cardiff.")
+    notify = resolve_intent("Satchy, notify the team that Cardiff is clear.")
+    report = resolve_intent("Satchy, generate a shift report.")
 
     assert log.intent == SatchyIntent.LOG_OBSERVATION
     assert log.references_context is True
@@ -66,6 +69,9 @@ def test_radio_intent_and_workflow_are_conservative() -> None:
     assert approve.intent == SatchyIntent.APPROVE_ACTION
     assert resolve_workflow(approve) == WorkflowMode.CONFIRM
     assert resolve_intent("Satchy, Control 2. Do not approve.").intent == SatchyIntent.REJECT_ACTION
+
+    assert notify.intent == SatchyIntent.REQUEST_ACTION
+    assert report.intent == SatchyIntent.REQUEST_ACTION
 
     assert mission.intent == SatchyIntent.REQUEST_MISSION
     assert resolve_workflow(mission) == WorkflowMode.CONFIRM
@@ -80,6 +86,42 @@ def test_radio_intent_and_workflow_are_conservative() -> None:
         )
         == WorkflowMode.CLARIFY
     )
+
+
+@pytest.mark.asyncio
+async def test_integration_planner_is_provider_neutral_and_always_approval_gated() -> None:
+    settings = Settings(intelligence_provider="deterministic")
+    notify = await plan_integration_action(
+        settings=settings,
+        text="Satchy, notify the team that Cardiff is clear.",
+        context={},
+    )
+    assert notify.action_type == "notify_team"
+    assert notify.notification_text == "Cardiff is clear"
+    assert notify.audience_scope == "team"
+    assert notify.approval_required is True
+    assert "slack" not in str(notify.model_dump()).casefold()
+
+    report = await plan_integration_action(
+        settings=settings,
+        text="Satchy, generate a shift handoff.",
+        context={
+            "conversation": {
+                "active_location": "Cardiff Bowl",
+                "summaries": [
+                    "No avalanche activity observed.",
+                    "Wind transport increasing along the ridge.",
+                ],
+            }
+        },
+    )
+    assert report.action_type == "generate_report"
+    assert report.document_name == "satchy-shift-handoff.md"
+    assert report.audience_scope == "user"
+    assert "Cardiff Bowl" in (report.document_content or "")
+    assert "No avalanche activity observed" in (report.document_content or "")
+    assert report.approval_required is True
+    assert "google" not in str(report.model_dump()).casefold()
 
 
 def test_workspace_adaptation_records_usage_without_precise_map_location() -> None:

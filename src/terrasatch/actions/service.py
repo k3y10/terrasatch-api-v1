@@ -16,10 +16,24 @@ from terrasatch.actions.models import (
 )
 from terrasatch.actions.state import transition_action
 from terrasatch.admin.ai_channel import ai_channel_config, rf_reply_policy_allows
+from terrasatch.config import Settings
 from terrasatch.edge.models import EdgeCommand, EdgeDevice
-from terrasatch.errors import InvalidConfiguration, ResourceNotFound, TenantAccessDenied
+from terrasatch.errors import (
+    InvalidConfiguration,
+    ResourceNotFound,
+    TenantAccessDenied,
+    TerraSatchError,
+)
+from terrasatch.identity.models import Team
+from terrasatch.integrations.models import IntegrationDelivery
+from terrasatch.integrations.runtime import (
+    execute as execute_integration_capability,
+)
+from terrasatch.integrations.runtime import (
+    resolve_connection as resolve_integration_connection,
+)
 from terrasatch.outbound.models import OutboundStatus, OutboundTransmission
-from terrasatch.radio.models import RadioConversation, Transmission
+from terrasatch.radio.models import Callsign, RadioConversation, Transmission
 
 DEFAULT_AUTHORIZED_APPROVER_ROLES = frozenset({"owner", "admin", "operator"})
 
@@ -130,10 +144,19 @@ async def approve_action(
     if ActionStatus(action.status) != ActionStatus.AWAITING_APPROVAL:
         raise InvalidConfiguration("Only actions awaiting approval can be approved")
     if edited_message is not None:
-        normalized = " ".join(edited_message.split())
+        if action.action_type == ActionType.GENERATE_REPORT.value:
+            normalized = edited_message.strip()
+        else:
+            normalized = " ".join(edited_message.split())
         if not normalized:
-            raise InvalidConfiguration("Approved radio message cannot be empty")
+            raise InvalidConfiguration("Approved action content cannot be empty")
         action.proposed_message = normalized
+        structured = dict(action.structured_payload or {})
+        if action.action_type == ActionType.NOTIFY_TEAM.value:
+            structured["text"] = normalized
+        elif action.action_type == ActionType.GENERATE_REPORT.value:
+            structured["content"] = normalized
+        action.structured_payload = structured
 
     now = datetime.now(UTC)
     transition_action(action, ActionStatus.APPROVED, now=now)
@@ -203,6 +226,219 @@ async def reject_action(
     return action, approval
 
 
+_INTEGRATION_ACTION_CAPABILITIES = {
+    ActionType.NOTIFY_TEAM.value: "notification.send",
+    ActionType.GENERATE_REPORT.value: "document.create",
+}
+
+
+def _payload_uuid(payload: dict[str, object], key: str) -> UUID | None:
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, UUID):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return UUID(raw)
+        except ValueError as error:
+            raise InvalidConfiguration(f"{key} must be a UUID") from error
+    raise InvalidConfiguration(f"{key} must be a UUID")
+
+
+def _integration_action_request(
+    action: SatchyAction,
+) -> tuple[str, dict[str, object], UUID | None, str, str]:
+    capability = _INTEGRATION_ACTION_CAPABILITIES.get(action.action_type)
+    if capability is None:
+        raise InvalidConfiguration("This Satchy action does not use an integration capability")
+
+    structured = dict(action.structured_payload or {})
+    connection_id = _payload_uuid(structured, "integration_connection_id")
+    integration_scope = structured.get("integration_scope")
+    if integration_scope is None:
+        integration_scope = (
+            "team"
+            if action.action_type == ActionType.NOTIFY_TEAM.value
+            else "user"
+        )
+    if integration_scope not in {"user", "team", "organization"}:
+        raise InvalidConfiguration("integration_scope is invalid")
+
+    workflow_key = structured.get("workflow_key")
+    if workflow_key is None:
+        workflow_key = f"satchy.action.{action.action_type}"
+    if not isinstance(workflow_key, str) or not workflow_key.strip():
+        raise InvalidConfiguration("workflow_key must be a non-empty string")
+
+    if action.action_type == ActionType.NOTIFY_TEAM.value:
+        text = action.proposed_message or structured.get("text") or structured.get("message")
+        if not isinstance(text, str) or not text.strip():
+            raise InvalidConfiguration("notify_team requires an approved message")
+        return (
+            capability,
+            {"text": text.strip()},
+            connection_id,
+            workflow_key.strip(),
+            integration_scope,
+        )
+
+    content = structured.get("content") or structured.get("report") or action.proposed_message
+    if not isinstance(content, str) or not content.strip():
+        raise InvalidConfiguration("generate_report requires report content")
+    name = structured.get("name") or structured.get("filename")
+    if name is None:
+        name = f"satchy-report-{action.id}.md"
+    mime_type = structured.get("mime_type", "text/markdown")
+    if not isinstance(name, str) or not name.strip():
+        raise InvalidConfiguration("generate_report requires a valid file name")
+    if not isinstance(mime_type, str) or not mime_type.strip():
+        raise InvalidConfiguration("generate_report requires a valid MIME type")
+    return (
+        capability,
+        {
+            "name": name.strip(),
+            "content": content,
+            "mime_type": mime_type.strip(),
+        },
+        connection_id,
+        workflow_key.strip(),
+        integration_scope,
+    )
+
+
+async def _integration_action_team_ids(
+    session: AsyncSession,
+    action: SatchyAction,
+) -> tuple[UUID, ...]:
+    team_ids: set[UUID] = set()
+    structured = dict(action.structured_payload or {})
+    explicit_team = _payload_uuid(structured, "team_id")
+    if explicit_team is not None:
+        team = await session.scalar(
+            select(Team).where(
+                Team.id == explicit_team,
+                Team.organization_id == action.organization_id,
+                Team.enabled.is_(True),
+            )
+        )
+        if team is None:
+            raise ResourceNotFound("Integration action team was not found")
+        team_ids.add(team.id)
+
+    source = None
+    if action.source_transmission_id is not None:
+        source = await session.scalar(
+            select(Transmission).where(
+                Transmission.id == action.source_transmission_id,
+                Transmission.organization_id == action.organization_id,
+            )
+        )
+    if source is not None and source.speaker_callsign_id is not None:
+        callsign = await session.scalar(
+            select(Callsign).where(
+                Callsign.id == source.speaker_callsign_id,
+                Callsign.organization_id == action.organization_id,
+            )
+        )
+        if callsign is not None and callsign.team_id is not None:
+            team_ids.add(callsign.team_id)
+    return tuple(sorted(team_ids, key=str))
+
+
+async def execute_approved_integration_action(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    action: SatchyAction,
+    approver_user_id: UUID | None,
+) -> tuple[SatchyAction, IntegrationDelivery | None, str | None]:
+    """Execute an approved Satchy integration action through capability grants."""
+
+    if ActionStatus(action.status) != ActionStatus.APPROVED:
+        raise InvalidConfiguration("Integration action must be approved before execution")
+
+    try:
+        (
+            capability,
+            payload,
+            connection_id,
+            workflow_key,
+            integration_scope,
+        ) = _integration_action_request(action)
+        team_ids = await _integration_action_team_ids(session, action)
+        resolver_user_id = approver_user_id if integration_scope == "user" else None
+        resolver_team_ids = team_ids if integration_scope == "team" else ()
+        connection = await resolve_integration_connection(
+            session,
+            organization_id=action.organization_id,
+            user_id=resolver_user_id,
+            capability=capability,
+            team_ids=resolver_team_ids,
+            agent_key="satchy",
+            workflow_key=workflow_key,
+            connection_id=connection_id,
+        )
+    except (InvalidConfiguration, ResourceNotFound) as error:
+        structured = dict(action.structured_payload or {})
+        structured["integration_execution"] = {
+            "status": "blocked",
+            "detail": error.message,
+        }
+        action.structured_payload = structured
+        await session.flush()
+        return action, None, error.message
+
+    now = datetime.now(UTC)
+    transition_action(action, ActionStatus.QUEUED, now=now)
+    transition_action(action, ActionStatus.EXECUTING, now=now)
+
+    try:
+        delivery = await execute_integration_capability(
+            session,
+            settings,
+            organization_id=action.organization_id,
+            user_id=resolver_user_id,
+            capability=capability,
+            request_id=action.id,
+            payload=payload,
+            team_ids=resolver_team_ids,
+            agent_key="satchy",
+            workflow_key=workflow_key,
+            connection_id=connection.id,
+        )
+    except TerraSatchError as error:
+        transition_action(action, ActionStatus.FAILED)
+        structured = dict(action.structured_payload or {})
+        structured["integration_execution"] = {
+            "status": "failed",
+            "capability": capability,
+            "detail": error.message,
+        }
+        action.structured_payload = structured
+        await session.flush()
+        return action, None, error.message
+
+    target = (
+        ActionStatus.COMPLETED
+        if delivery.status == "delivered"
+        else ActionStatus.FAILED
+    )
+    transition_action(action, target)
+    structured = dict(action.structured_payload or {})
+    structured["integration_execution"] = {
+        "status": delivery.status,
+        "capability": capability,
+        "scope": integration_scope,
+        "delivery_id": str(delivery.id),
+    }
+    if delivery.last_error:
+        structured["integration_execution"]["detail"] = delivery.last_error
+    action.structured_payload = structured
+    await session.flush()
+    return action, delivery, delivery.last_error
+
+
 async def _edge_for_action(session: AsyncSession, action: SatchyAction) -> EdgeDevice:
     device = await session.scalar(
         select(EdgeDevice)
@@ -254,6 +490,8 @@ async def queue_approved_action(
         raise InvalidConfiguration("Action must be approved before it can be queued")
     if action.action_type != ActionType.REPLY_RADIO.value:
         raise InvalidConfiguration("This action type does not create an outbound radio command")
+    if action.conversation_id is None or action.source_transmission_id is None:
+        raise InvalidConfiguration("Approved radio action is missing radio source context")
     if not action.proposed_message:
         raise InvalidConfiguration("Approved radio action is missing a message")
 

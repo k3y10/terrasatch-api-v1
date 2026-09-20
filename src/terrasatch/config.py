@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from base64 import urlsafe_b64decode
+from binascii import Error as BinasciiError
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
@@ -62,6 +64,23 @@ class Settings(BaseSettings):
     intelligence_fallback_to_deterministic: bool = True
     storage_provider: str = "local_filesystem"
     uac_archive_path: str | None = None
+
+    # External provider integrations. Provider credentials stay server-side; browser clients
+    # receive only connection metadata and authorization destinations.
+    integration_encryption_key: SecretStr | None = None
+    integration_provider_config_json: SecretStr | None = None
+    integration_encryption_key_id: str = Field(default="v1", min_length=1, max_length=64)
+    integration_oauth_state_ttl_minutes: int = Field(default=10, ge=3, le=30)
+    integration_return_url: AnyHttpUrl = "https://terrasatch.com/workspace?view=Integrations"
+    google_oauth_client_id: str | None = Field(default=None, max_length=512)
+    google_oauth_client_secret: SecretStr | None = None
+    google_oauth_redirect_uri: AnyHttpUrl | None = None
+    slack_oauth_client_id: str | None = Field(default=None, max_length=512)
+    slack_oauth_client_secret: SecretStr | None = None
+    slack_oauth_redirect_uri: AnyHttpUrl | None = None
+    arcgis_oauth_client_id: str | None = Field(default=None, max_length=512)
+    arcgis_oauth_client_secret: SecretStr | None = None
+    arcgis_oauth_redirect_uri: AnyHttpUrl | None = None
 
     # Billing stays disabled until the separate TerraSatch Stripe account is explicitly configured.
     billing_enabled: bool = False
@@ -180,6 +199,11 @@ class Settings(BaseSettings):
         "stripe_webhook_secret",
         "billing_email_webhook_secret",
         "billing_activation_signing_secret",
+        "integration_encryption_key",
+        "integration_provider_config_json",
+        "google_oauth_client_secret",
+        "slack_oauth_client_secret",
+        "arcgis_oauth_client_secret",
         mode="before",
     )
     @classmethod
@@ -191,6 +215,22 @@ class Settings(BaseSettings):
             return SecretStr(raw) if raw else None
         raw = str(value).strip()
         return raw or None
+
+    @field_validator("integration_encryption_key")
+    @classmethod
+    def validate_integration_encryption_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        try:
+            decoded = urlsafe_b64decode(value.get_secret_value().encode("ascii"))
+        except (BinasciiError, UnicodeEncodeError, ValueError) as error:
+            raise ValueError("integration encryption key must be a Fernet key") from error
+        if len(decoded) != 32:
+            raise ValueError("integration encryption key must decode to 32 bytes")
+        return value
 
     @field_validator("uac_archive_path")
     @classmethod
@@ -209,6 +249,45 @@ class Settings(BaseSettings):
         """Only expose browser administration when all required secrets are configured."""
 
         return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
+
+    @property
+    def integration_secret_store_is_configured(self) -> bool:
+        """Return whether encrypted provider credential storage is enabled."""
+
+        return self.integration_encryption_key is not None
+
+    @property
+    def google_drive_oauth_is_configured(self) -> bool:
+        """Return whether the Google Drive web-server OAuth flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.google_oauth_redirect_uri
+        )
+
+    @property
+    def slack_oauth_is_configured(self) -> bool:
+        """Return whether the Slack OAuth v2 flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.slack_oauth_client_id
+            and self.slack_oauth_client_secret
+            and self.slack_oauth_redirect_uri
+        )
+
+    @property
+    def arcgis_oauth_is_configured(self) -> bool:
+        """Return whether the ArcGIS Online server-side OAuth flow can be started."""
+
+        return bool(
+            self.integration_secret_store_is_configured
+            and self.arcgis_oauth_client_id
+            and self.arcgis_oauth_client_secret
+            and self.arcgis_oauth_redirect_uri
+        )
 
     @property
     def staging_payment_links_are_configured(self) -> bool:

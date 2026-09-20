@@ -38,6 +38,18 @@ _LOG_OBSERVATION = re.compile(
     r"field observation|add (?:that|this) (?:to )?(?:the )?log)\b",
     re.I,
 )
+_NOTIFY_TEAM = re.compile(
+    r"\b(?:notify|message|tell)\s+(?:the\s+)?(?:team|patrol|ops|operations|crew|everyone)\b"
+    r"|\b(?:send|share|post)\s+(?:that|this|it|an?\s+update|the\s+update)\s+"
+    r"(?:to|with)\s+(?:the\s+)?(?:team|patrol|ops|operations|crew)\b",
+    re.I,
+)
+_GENERATE_REPORT = re.compile(
+    r"\b(?:generate|create|write|build|save|export)\s+(?:a\s+|the\s+)?"
+    r"(?:field\s+|shift\s+)?(?:report|handoff|brief|document|file)\b"
+    r"|\b(?:shift|field)\s+handoff\b",
+    re.I,
+)
 _SUMMARIZE = re.compile(r"\b(?:summarize|summary|handoff|recap)\b", re.I)
 _REPEAT = re.compile(r"\b(?:repeat|say again|what did .* say|remind me)\b", re.I)
 _CORRECT = re.compile(r"\b(?:correction|correct that|not .{1,80},?\s*(?:it was|make that))\b", re.I)
@@ -61,6 +73,8 @@ def resolve_intent(text: str) -> IntentResolution:
         (_EXPLICIT_CANCEL, SatchyIntent.CANCEL_ACTION, 0.94),
         (_REQUEST_MISSION, SatchyIntent.REQUEST_MISSION, 0.92),
         (_LOG_OBSERVATION, SatchyIntent.LOG_OBSERVATION, 0.94),
+        (_NOTIFY_TEAM, SatchyIntent.REQUEST_ACTION, 0.95),
+        (_GENERATE_REPORT, SatchyIntent.REQUEST_ACTION, 0.95),
         (_SUMMARIZE, SatchyIntent.SUMMARIZE, 0.93),
         (_REPEAT, SatchyIntent.REPEAT, 0.91),
         (_CORRECT, SatchyIntent.CORRECT_RECORD, 0.9),

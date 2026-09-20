@@ -13,7 +13,12 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.models import ActionType, SatchyAction, SatchyEvaluation
-from terrasatch.actions.service import approve_action, queue_approved_action, reject_action
+from terrasatch.actions.service import (
+    approve_action,
+    execute_approved_integration_action,
+    queue_approved_action,
+    reject_action,
+)
 from terrasatch.admin.satchy_ui import render_satchy_control_plane
 from terrasatch.admin.security import csrf_token_is_valid, issue_csrf_token
 from terrasatch.config import Settings
@@ -187,7 +192,7 @@ async def admin_approve_satchy_action(
     _require_admin(request, settings)
     _verify_csrf(request, csrf_token)
 
-    async def approve(session: AsyncSession) -> None:
+    async def approve(session: AsyncSession) -> str | None:
         selected = await _selected_organization(session, organization)
         action, _ = await approve_action(
             session,
@@ -203,12 +208,32 @@ async def admin_approve_satchy_action(
                 organization_id=selected.id,
                 action_id=action.id,
             )
+        elif action.action_type in {
+            ActionType.NOTIFY_TEAM.value,
+            ActionType.GENERATE_REPORT.value,
+        }:
+            _, _, detail = await execute_approved_integration_action(
+                session,
+                settings,
+                action=action,
+                approver_user_id=None,
+            )
+            return detail
+        return None
 
     try:
-        await _run_database(settings, approve)
+        execution_detail = await _run_database(settings, approve)
     except TerraSatchError as error:
         return RedirectResponse(
             f"/admin/satchy?organization={quote(organization)}&error={quote(error.message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if execution_detail:
+        return RedirectResponse(
+            (
+                f"/admin/satchy?organization={quote(organization)}"
+                f"&error={quote(execution_detail)}"
+            ),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(

@@ -89,11 +89,15 @@ class SatchyAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     site_id: Mapped[UUID] = mapped_column(
         ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    conversation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("radio_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("radio_conversations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
-    source_transmission_id: Mapped[UUID] = mapped_column(
-        ForeignKey("transmissions.id", ondelete="CASCADE"), nullable=False, index=True
+    source_transmission_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("transmissions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     operational_event_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("operational_events.id", ondelete="SET NULL"), index=True

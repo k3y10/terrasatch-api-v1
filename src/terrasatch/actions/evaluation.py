@@ -10,7 +10,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.actions.models import ActionStatus, ActionType, SatchyAction, SatchyEvaluation
-from terrasatch.actions.service import approve_action, queue_approved_action, reject_action
+from terrasatch.actions.service import (
+    approve_action,
+    execute_approved_integration_action,
+    queue_approved_action,
+    reject_action,
+)
 from terrasatch.actions.state import transition_action
 from terrasatch.config import Settings
 from terrasatch.edge.models import EdgeDevice
@@ -19,7 +24,7 @@ from terrasatch.organizations.models import OrganizationOperationalProfile
 from terrasatch.organizations.profiles import get_operational_profile
 from terrasatch.radio.conversations import associate_transmission
 from terrasatch.radio.models import Callsign, OperationalEvent, RadioConversation, Transmission
-from terrasatch.satchy.agent import resolve_radio_intent
+from terrasatch.satchy.agent import plan_integration_action, resolve_radio_intent
 from terrasatch.satchy.assets import create_mission_plan, queue_field_mission
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.models import FieldAsset, FieldMission
@@ -126,6 +131,7 @@ async def _radio_decision(
     conversation: RadioConversation,
     intent: SatchyIntent,
     policy: dict[str, object],
+    settings: Settings | None,
 ) -> tuple[str, dict[str, object], SatchyAction | None] | None:
     if intent not in {SatchyIntent.APPROVE_ACTION, SatchyIntent.REJECT_ACTION}:
         return None
@@ -184,6 +190,7 @@ async def _radio_decision(
 
     action, _ = await approve_action(session, **kwargs)
     queue_detail: str | None = None
+    integration_delivery = None
     try:
         if action.action_type == ActionType.REPLY_RADIO.value:
             await queue_approved_action(
@@ -199,13 +206,42 @@ async def _radio_decision(
                     organization_id=transmission.organization_id,
                     mission_id=UUID(mission_id),
                 )
+        elif action.action_type in {
+            ActionType.NOTIFY_TEAM.value,
+            ActionType.GENERATE_REPORT.value,
+        }:
+            if settings is None:
+                queue_detail = "Integration runtime settings are unavailable"
+            else:
+                _, integration_delivery, queue_detail = (
+                    await execute_approved_integration_action(
+                        session,
+                        settings,
+                        action=action,
+                        approver_user_id=None,
+                    )
+                )
     except (InvalidConfiguration, ResourceNotFound, ValueError) as exc:
         queue_detail = str(exc)
 
-    payload: dict[str, object] = {"decision": "approved", "action_id": str(action.id)}
+    payload: dict[str, object] = {
+        "decision": "approved",
+        "action_id": str(action.id),
+        "action_status": action.status,
+    }
+    if integration_delivery is not None:
+        payload["integration_execution"] = {
+            "status": integration_delivery.status,
+            "delivery_id": str(integration_delivery.id),
+        }
     if queue_detail:
         payload["queue_detail"] = queue_detail
-    return f"{speaker.name} approved the pending Satchy action", payload, action
+    interpretation = f"{speaker.name} approved the pending Satchy action"
+    if integration_delivery is not None and integration_delivery.status == "delivered":
+        interpretation += " and the approved integration output was delivered"
+    elif queue_detail:
+        interpretation += f"; integration execution is blocked: {queue_detail}"
+    return interpretation, payload, action
 
 
 async def _latest_conversation_event(
@@ -431,6 +467,7 @@ async def process_transmission_control_plane(
         conversation=conversation,
         intent=intent.intent,
         policy=policy,
+        settings=settings,
     )
     if decision is not None:
         interpretation, proposed_payload, decided_action = decision
@@ -459,6 +496,40 @@ async def process_transmission_control_plane(
     transmission.emergency_candidate = emergency
     transmission.emergency_confidence = emergency_confidence
     transmission.emergency_reason = emergency_reason
+
+    integration_plan = None
+    if (
+        addressing.addressed_to_agent
+        and intent.intent == SatchyIntent.REQUEST_ACTION
+        and not emergency
+    ):
+        active_location, summaries, _ = await _conversation_summary(
+            session,
+            transmission=transmission,
+            conversation=conversation,
+        )
+        planner_context: dict[str, object] = {
+            "request_source": "radio",
+            "conversation": {
+                "active_location": active_location or conversation.active_location,
+                "summaries": summaries,
+            }
+        }
+        if (
+            operational_event is not None
+            and operational_event.event_type != "GENERAL_UPDATE"
+        ):
+            planner_context["current_event"] = {
+                "id": str(operational_event.id),
+                "type": operational_event.event_type,
+                "summary": operational_event.summary,
+                "location": operational_event.location_text,
+            }
+        integration_plan = await plan_integration_action(
+            settings=settings,
+            text=text,
+            context=planner_context,
+        )
 
     mission_feedback: str | None = None
     if (
@@ -556,13 +627,60 @@ async def process_transmission_control_plane(
     action_type: ActionType | None = None
     proposed_message: str | None = None
     risk_level = "low"
+    action_specific_payload: dict[str, object] = {}
     if emergency:
         action_type = ActionType.EMERGENCY_REVIEW
         risk_level = "critical"
         interpretation = emergency_reason or "Possible emergency requires human review"
     elif addressing.addressed_to_agent:
         caller = addressing.speaker_text or "Caller"
-        if intent.intent == SatchyIntent.REQUEST_MISSION and mission_feedback:
+        if intent.intent == SatchyIntent.REQUEST_ACTION and integration_plan is not None:
+            if integration_plan.missing_context:
+                action_type = ActionType.ASK_CLARIFICATION
+                missing = ", ".join(integration_plan.missing_context)
+                proposed_message = (
+                    f"{radio_prefix(caller)} I need {missing} before I can propose that action."
+                )
+                interpretation = integration_plan.summary
+            elif (
+                integration_plan.action_type == "notify_team"
+                and integration_plan.notification_text
+            ):
+                action_type = ActionType.NOTIFY_TEAM
+                proposed_message = integration_plan.notification_text
+                interpretation = integration_plan.summary
+                action_specific_payload = {
+                    "capability": "notification.send",
+                    "integration_scope": integration_plan.audience_scope,
+                    "text": integration_plan.notification_text,
+                    "workflow_key": "satchy.action.notify_team",
+                    "planner_confidence": integration_plan.confidence,
+                }
+            elif (
+                integration_plan.action_type == "generate_report"
+                and integration_plan.document_content
+                and integration_plan.document_name
+                and integration_plan.mime_type
+            ):
+                action_type = ActionType.GENERATE_REPORT
+                proposed_message = integration_plan.document_content
+                interpretation = integration_plan.summary
+                action_specific_payload = {
+                    "capability": "document.create",
+                    "integration_scope": integration_plan.audience_scope,
+                    "name": integration_plan.document_name,
+                    "content": integration_plan.document_content,
+                    "mime_type": integration_plan.mime_type,
+                    "workflow_key": "satchy.action.generate_report",
+                    "planner_confidence": integration_plan.confidence,
+                }
+            else:
+                action_type = ActionType.ASK_CLARIFICATION
+                proposed_message = (
+                    f"{radio_prefix(caller)} Tell me what you want sent or reported."
+                )
+                interpretation = "Integration action request needs clarification"
+        elif intent.intent == SatchyIntent.REQUEST_MISSION and mission_feedback:
             action_type = (
                 ActionType.ASK_CLARIFICATION
                 if "location" in mission_feedback.casefold()
@@ -686,6 +804,9 @@ async def process_transmission_control_plane(
         proposed_payload = {"type": action_type.value}
         if proposed_message is not None:
             proposed_payload["message"] = proposed_message
+        if action_type in {ActionType.NOTIFY_TEAM, ActionType.GENERATE_REPORT}:
+            proposed_payload["approval_required"] = True
+            proposed_payload["capability"] = action_specific_payload.get("capability")
 
     evaluation = SatchyEvaluation(
         organization_id=transmission.organization_id,
@@ -722,6 +843,7 @@ async def process_transmission_control_plane(
                 "emergency_candidate": emergency,
                 "emergency_auto_broadcast": False,
                 "satchy_intent": intent.intent.value,
+                **action_specific_payload,
             },
             confidence=addressing.confidence if not emergency else emergency_confidence or 0.9,
             approval_required=True,

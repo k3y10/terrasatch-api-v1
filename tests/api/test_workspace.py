@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -11,7 +12,15 @@ from terrasatch.admin.security import hash_admin_password
 from terrasatch.billing.models import BillingCustomer
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, Site, User
+from terrasatch.identity.models import (
+    Account,
+    Membership,
+    MembershipRole,
+    Organization,
+    Site,
+    Team,
+    User,
+)
 from terrasatch.main import create_app
 
 
@@ -51,6 +60,9 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         site = Site(organization_id=org.id, name="Real test site", slug="real")
         session.add(site)
+        await session.flush()
+        team = Team(organization_id=org.id, site_id=site.id, name="Field team", enabled=True)
+        session.add(team)
         session.add(
             BillingCustomer(
                 account_id=account.id,
@@ -60,12 +72,16 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         await session.commit()
         site_id = site.id
+        team_id = team.id
         organization_id, user_id = org.id, user.id
     app = create_app(
         Settings(
             environment="local",
             admin_session_secret="test-only-session-secret",
             intelligence_provider="ollama",
+            integration_encryption_key=SecretStr(
+                Fernet.generate_key().decode("ascii")
+            ),
             billing_enabled=True,
             stripe_secret_key=SecretStr("sk_test_workspace_portal"),
         )
@@ -120,6 +136,167 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
 
         assert own.json()["modules"] == ["Map", "Radio Log", "Observations", "Satchy"]
         assert own.json()["integrations"]["devices"] == []
+        assert own.json()["teams"] == [
+            {"id": str(team_id), "name": "Field team", "site_id": str(site_id)}
+        ]
+        catalog = own.json()["integrations"]["catalog"]
+        assert {provider["key"] for provider in catalog} >= {
+            "terrasatch_edge",
+            "google_drive",
+            "slack",
+            "garmin",
+            "alltrails",
+        }
+        setup = {provider["key"]: provider["setup_status"] for provider in catalog}
+        support = {provider["key"]: provider["support_status"] for provider in catalog}
+        connect = {provider["key"]: provider["connect_status"] for provider in catalog}
+        assert setup["google_drive"] == "planned"
+        assert setup["slack"] == "planned"
+        assert setup["snowflake"] == "available"
+        assert connect["snowflake"] == "external_setup_required"
+        assert support["garmin"] == "partner_required"
+        assert support["alltrails"] == "coming_soon"
+        assert own.json()["integrations"]["connections"] == []
+
+        integration_url = f"/api/v1/workspace/organizations/{organization_id}/integrations"
+        assert (await client.post(
+            integration_url,
+            json={"provider": "google_drive", "scope": "user"},
+        )).status_code == 403
+
+        personal = await client.post(
+            integration_url,
+            json={
+                "provider": "google_drive",
+                "scope": "user",
+                "display_name": "My field Drive",
+                "configuration": {"folder_id": "folder-test-123"},
+            },
+            headers=headers,
+        )
+        assert personal.status_code == 201
+        assert personal.json()["scope"] == "user"
+        assert personal.json()["owner_user_id"] == str(user_id)
+        assert personal.json()["status"] == "requested"
+
+        team_connection = await client.post(
+            integration_url,
+            json={
+                "provider": "slack",
+                "scope": "team",
+                "team_id": str(team_id),
+                "display_name": "Field team Slack",
+            },
+            headers=headers,
+        )
+        assert team_connection.status_code == 201
+        assert team_connection.json()["team_id"] == str(team_id)
+
+        organization_connection = await client.post(
+            integration_url,
+            json={
+                "provider": "snowflake",
+                "scope": "organization",
+                "configuration": {
+                    "account_host": "org-account.snowflakecomputing.com"
+                },
+            },
+            headers=headers,
+        )
+        assert organization_connection.status_code == 201
+        assert organization_connection.json()["scope"] == "organization"
+
+        duplicate = await client.post(
+            integration_url,
+            json={"provider": "google_drive", "scope": "user"},
+            headers=headers,
+        )
+        assert duplicate.status_code == 409
+
+        secret_rejected = await client.post(
+            integration_url,
+            json={
+                "provider": "mapbox",
+                "scope": "user",
+                "configuration": {"api_token": "must-not-be-stored"},
+            },
+            headers=headers,
+        )
+        assert secret_rejected.status_code == 400
+
+        managed_rejected = await client.post(
+            integration_url,
+            json={"provider": "terrasatch_edge", "scope": "organization"},
+            headers=headers,
+        )
+        assert managed_rejected.status_code == 400
+        partner_rejected = await client.post(
+            integration_url,
+            json={"provider": "garmin", "scope": "organization"},
+            headers=headers,
+        )
+        assert partner_rejected.status_code == 400
+
+        coming_soon_rejected = await client.post(
+            integration_url,
+            json={"provider": "alltrails", "scope": "user"},
+            headers=headers,
+        )
+        assert coming_soon_rejected.status_code == 400
+
+
+        with_integrations = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()
+        assert len(with_integrations["integrations"]["connections"]) == 3
+
+        satchy_request_id = uuid4()
+        proposal = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "request_id": str(satchy_request_id),
+                "site_id": str(site_id),
+                "message": "Satchy, notify the team that staging integration review is ready.",
+            },
+            headers=headers,
+        )
+        assert proposal.status_code == 200
+        assert proposal.json()["action_id"] == str(satchy_request_id)
+        assert proposal.json()["action_status"] == "awaiting_approval"
+        assert proposal.json()["approval_required"] is True
+        assert "Nothing has been sent" in proposal.json()["answer"]
+
+        proposed_workspace = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()
+        proposed_action = next(
+            item
+            for item in proposed_workspace["actions"]
+            if item["id"] == str(satchy_request_id)
+        )
+        assert proposed_action["source_id"] is None
+        assert proposed_action["status"] == "awaiting_approval"
+
+        approved_action = await client.post(
+            (
+                f"/api/v1/workspace/organizations/{organization_id}/actions/"
+                f"{satchy_request_id}"
+            ),
+            json={"decision": "approve"},
+            headers=headers,
+        )
+        assert approved_action.status_code == 200
+        assert approved_action.json()["status"] == "approved"
+        assert approved_action.json()["integration_execution"]["status"] == "blocked"
+
+        revoked = await client.post(
+            f"{integration_url}/{personal.json()['id']}/revoke",
+            headers=headers,
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["status"] == "revoked"
+        assert revoked.json()["enabled"] is False
+
         prefs_url = f"/api/v1/workspace/organizations/{organization_id}/preferences"
         assert (await client.post(prefs_url, json={"modules": []})).status_code == 403
         assert (

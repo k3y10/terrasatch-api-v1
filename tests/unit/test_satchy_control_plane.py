@@ -19,6 +19,7 @@ from terrasatch.actions.models import (
 from terrasatch.actions.service import (
     approve_action,
     approve_and_queue_action,
+    execute_approved_integration_action,
     queue_approved_action,
 )
 from terrasatch.actions.state import transition_action
@@ -271,6 +272,46 @@ async def test_log_that_uses_previous_structured_report_without_duplicate_workfl
         assert "Last report is already logged" in log_action.proposed_message
         assert "No avalanche activity observed" in log_action.proposed_message
         assert log_action.structured_payload["satchy_intent"] == "log_observation"
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_radio_integration_requests_become_approval_gated_satchy_actions() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        _, notify = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Notify the team that Cardiff is clear.",
+        )
+        assert notify.action_type == ActionType.NOTIFY_TEAM.value
+        assert notify.status == ActionStatus.AWAITING_APPROVAL.value
+        assert notify.approval_required is True
+        assert notify.structured_payload["capability"] == "notification.send"
+        assert notify.structured_payload["integration_scope"] == "team"
+        assert notify.structured_payload["text"] == "Cardiff is clear"
+        assert notify.proposed_message == "Cardiff is clear"
+
+        first, _ = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Field observation at Cardiff Bowl, no avalanches observed.",
+        )
+        second, report = await _ingest(
+            session,
+            seeded,
+            "Satchy, Control 2. Generate a shift handoff.",
+        )
+        assert second.conversation_id == first.conversation_id
+        assert report.action_type == ActionType.GENERATE_REPORT.value
+        assert report.status == ActionStatus.AWAITING_APPROVAL.value
+        assert report.approval_required is True
+        assert report.structured_payload["capability"] == "document.create"
+        assert report.structured_payload["integration_scope"] == "team"
+        assert report.structured_payload["name"] == "satchy-shift-handoff.md"
+        assert "No avalanche activity observed" in report.structured_payload["content"]
     finally:
         await session.close()
         await engine.dispose()
@@ -583,6 +624,159 @@ async def test_approval_gate_and_simulated_edge_lifecycle_are_idempotent() -> No
         assert action.status == ActionStatus.COMPLETED.value
         assert await session.scalar(select(func.count(OutboundTransmission.id))) == 1
         assert await session.scalar(select(func.count(EdgeCommand.id))) == 1
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_approved_integration_actions_use_generic_satchy_capabilities(
+    monkeypatch,
+) -> None:
+    engine, session, seeded = await _seed_session()
+    calls: list[tuple[str, dict[str, object]]] = []
+    connection_id = uuid4()
+
+    async def fake_resolve(*args, **kwargs):
+        calls.append(("resolve", kwargs))
+        return SimpleNamespace(id=connection_id)
+
+    async def fake_execute(*args, **kwargs):
+        calls.append(("execute", kwargs))
+        return SimpleNamespace(
+            id=uuid4(),
+            status="delivered",
+            last_error=None,
+        )
+
+    monkeypatch.setattr(
+        "terrasatch.actions.service.resolve_integration_connection",
+        fake_resolve,
+    )
+    monkeypatch.setattr(
+        "terrasatch.actions.service.execute_integration_capability",
+        fake_execute,
+    )
+    try:
+        organization = seeded["organization"]
+        assert isinstance(organization, Organization)
+
+        _, notify = await _ingest(session, seeded, "Satchy, Control 2.")
+        notify.action_type = ActionType.NOTIFY_TEAM.value
+        notify.proposed_message = "Patrol update: hold at the ridge."
+        notify.structured_payload = {}
+
+        with pytest.raises(InvalidConfiguration, match="approved"):
+            await execute_approved_integration_action(
+                session,
+                Settings(),
+                action=notify,
+                approver_user_id=None,
+            )
+
+        await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=notify.id,
+            approver_role="admin",
+        )
+        notify, delivery, detail = await execute_approved_integration_action(
+            session,
+            Settings(),
+            action=notify,
+            approver_user_id=None,
+        )
+        assert detail is None
+        assert delivery is not None
+        assert notify.status == ActionStatus.COMPLETED.value
+        assert notify.structured_payload["integration_execution"]["status"] == "delivered"
+        notify_execute = [item for item in calls if item[0] == "execute"][-1][1]
+        assert notify_execute["capability"] == "notification.send"
+        assert notify_execute["payload"] == {
+            "text": "Patrol update: hold at the ridge."
+        }
+        assert "slack" not in str(notify_execute).casefold()
+
+        _, report = await _ingest(session, seeded, "Satchy, Control 2. Status.")
+        report.action_type = ActionType.GENERATE_REPORT.value
+        report.proposed_message = None
+        report.structured_payload = {
+            "name": "shift-handoff.md",
+            "content": "# Shift handoff\nNo incidents.",
+            "mime_type": "text/markdown",
+        }
+        await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=report.id,
+            approver_role="admin",
+        )
+        report, delivery, detail = await execute_approved_integration_action(
+            session,
+            Settings(),
+            action=report,
+            approver_user_id=None,
+        )
+        assert detail is None
+        assert delivery is not None
+        assert report.status == ActionStatus.COMPLETED.value
+        assert report.structured_payload["integration_execution"]["status"] == "delivered"
+        report_execute = [item for item in calls if item[0] == "execute"][-1][1]
+        assert report_execute["capability"] == "document.create"
+        assert report_execute["payload"] == {
+            "name": "shift-handoff.md",
+            "content": "# Shift handoff\nNo incidents.",
+            "mime_type": "text/markdown",
+        }
+        assert "google_drive" not in str(report_execute).casefold()
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_non_radio_satchy_actions_can_use_the_same_human_approval_gate() -> None:
+    engine, session, seeded = await _seed_session()
+    try:
+        organization = seeded["organization"]
+        site = seeded["site"]
+        assert isinstance(organization, Organization)
+        assert isinstance(site, Site)
+
+        action = SatchyAction(
+            organization_id=organization.id,
+            site_id=site.id,
+            conversation_id=None,
+            source_transmission_id=None,
+            action_type=ActionType.NOTIFY_TEAM.value,
+            risk_level="low",
+            reason="Workspace user requested a team notification",
+            proposed_message="Cardiff is clear.",
+            structured_payload={
+                "origin": "workspace_chat",
+                "capability": "notification.send",
+                "text": "Cardiff is clear.",
+                "workflow_key": "satchy.action.notify_team",
+            },
+            confidence=0.99,
+            approval_required=True,
+            status=ActionStatus.PROPOSED.value,
+            expires_at=datetime.now(UTC) + timedelta(minutes=15),
+        )
+        session.add(action)
+        await session.flush()
+        transition_action(action, ActionStatus.AWAITING_APPROVAL)
+
+        approved, approval = await approve_action(
+            session,
+            organization_id=organization.id,
+            action_id=action.id,
+            approver_role="admin",
+        )
+        assert approved.status == ActionStatus.APPROVED.value
+        assert approval.decision == "approved"
+        assert approved.source_transmission_id is None
+        assert approved.conversation_id is None
     finally:
         await session.close()
         await engine.dispose()
