@@ -98,6 +98,7 @@ async def test_integration_planner_is_provider_neutral_and_always_approval_gated
     )
     assert notify.action_type == "notify_team"
     assert notify.notification_text == "Cardiff is clear"
+    assert notify.audience_scope == "team"
     assert notify.approval_required is True
     assert "slack" not in str(notify.model_dump()).casefold()
 
@@ -116,6 +117,7 @@ async def test_integration_planner_is_provider_neutral_and_always_approval_gated
     )
     assert report.action_type == "generate_report"
     assert report.document_name == "satchy-shift-handoff.md"
+    assert report.audience_scope == "user"
     assert "Cardiff Bowl" in (report.document_content or "")
     assert "No avalanche activity observed" in (report.document_content or "")
     assert report.approval_required is True
