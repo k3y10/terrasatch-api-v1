@@ -24,6 +24,7 @@ class ProviderAppConfig:
     redirect_uri: str
     source: str
 
+
 _LEGACY_FIELDS: dict[str, tuple[str, str, str]] = {
     "google_drive": (
         "google_oauth_client_id",
