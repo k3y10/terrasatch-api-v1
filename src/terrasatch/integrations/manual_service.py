@@ -14,7 +14,7 @@ from terrasatch.identity.models import MembershipRole
 
 from .crypto import encrypt_payload
 from .models import IntegrationConnection, IntegrationCredential, IntegrationStatus
-from .operations import query_caltopo_team, query_snowflake
+from .operations import query_caltopo_map, query_caltopo_team, query_snowflake
 from .service import get_connection_for_management
 
 MANUAL_CREDENTIAL_PROVIDERS = {"caltopo", "snowflake"}
@@ -41,11 +41,22 @@ async def probe_manual_credentials(
         team_id = configuration.get("caltopo_team_id")
         if not isinstance(team_id, str):
             raise InvalidConfiguration("CalTopo team configuration is missing")
-        await query_caltopo_team(
-            credentials,
-            team_id=team_id,
-            since=int(datetime.now(UTC).timestamp() * 1000) - 60_000,
-        )
+        map_ids = configuration.get("map_ids")
+        if isinstance(map_ids, list) and map_ids:
+            first_map = map_ids[0]
+            if not isinstance(first_map, str):
+                raise InvalidConfiguration("CalTopo map configuration is invalid")
+            await query_caltopo_map(
+                credentials,
+                map_id=first_map,
+                since=0,
+            )
+        else:
+            await query_caltopo_team(
+                credentials,
+                team_id=team_id,
+                since=int(datetime.now(UTC).timestamp() * 1000) - 60_000,
+            )
         return f"CalTopo Team {team_id}", team_id
 
     if provider == "snowflake":
