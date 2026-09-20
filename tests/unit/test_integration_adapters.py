@@ -77,6 +77,30 @@ def test_provider_catalog_only_marks_server_configured_oauth_as_available() -> N
     assert catalog["garmin"]["connect_status"] == "coming_soon"
 
 
+def test_manual_provider_requires_encrypted_credential_store() -> None:
+    without_store = {
+        item["key"]: item
+        for item in provider_catalog(Settings(), admin_access=True)
+    }
+    assert without_store["snowflake"]["support_status"] == "supported"
+    assert without_store["snowflake"]["connect_status"] == "needs_configuration"
+    assert without_store["snowflake"]["can_connect"] is False
+
+    with_store = {
+        item["key"]: item
+        for item in provider_catalog(
+            Settings(
+                integration_encryption_key=SecretStr(
+                    Fernet.generate_key().decode("ascii")
+                )
+            ),
+            admin_access=True,
+        )
+    }
+    assert with_store["snowflake"]["connect_status"] == "external_setup_required"
+    assert with_store["snowflake"]["can_connect"] is True
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
