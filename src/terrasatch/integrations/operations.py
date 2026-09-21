@@ -214,6 +214,19 @@ def validate_s3_bucket_name(value: str) -> str:
     return normalized
 
 
+def validate_aws_region(value: str) -> str:
+    normalized = value.strip().casefold()
+    if (
+        len(normalized) > 32
+        or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+){2,3}", normalized)
+        or normalized.startswith(("cn-", "us-iso-", "us-isob-"))
+    ):
+        raise InvalidConfiguration(
+            "Amazon S3 region must be a supported standard AWS region code"
+        )
+    return normalized
+
+
 def _aws4_sign(key: bytes, value: str) -> bytes:
     return hmac.new(key, value.encode(), hashlib.sha256).digest()
 
@@ -281,6 +294,210 @@ def _r2_authorization_headers(
         "x-amz-content-sha256": payload_hash,
         "x-amz-date": amz_date,
     }
+
+
+def _aws_s3_authorization_headers(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    host: str,
+    canonical_uri: str,
+    region: str,
+    body: bytes,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    access_key_id = credentials.get("access_key_id")
+    secret_access_key = credentials.get("secret_access_key")
+    session_token = credentials.get("session_token")
+    if not isinstance(access_key_id, str) or not access_key_id:
+        raise ProviderUnavailable("Amazon S3 access key is unavailable")
+    if not isinstance(secret_access_key, str) or not secret_access_key:
+        raise ProviderUnavailable("Amazon S3 secret access key is unavailable")
+    if session_token is not None and (
+        not isinstance(session_token, str) or not session_token
+    ):
+        raise InvalidConfiguration("Stored Amazon S3 session token is invalid")
+
+    safe_region = validate_aws_region(region)
+    instant = now or datetime.now(UTC)
+    amz_date = instant.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = instant.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    canonical_header_lines = [
+        f"host:{host}",
+        f"x-amz-content-sha256:{payload_hash}",
+        f"x-amz-date:{amz_date}",
+    ]
+    signed_header_names = ["host", "x-amz-content-sha256", "x-amz-date"]
+    if isinstance(session_token, str):
+        canonical_header_lines.append(f"x-amz-security-token:{session_token}")
+        signed_header_names.append("x-amz-security-token")
+
+    canonical_headers = "\n".join(canonical_header_lines) + "\n"
+    signed_headers = ";".join(signed_header_names)
+    canonical_request = "\n".join(
+        [
+            method,
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/{safe_region}/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
+    date_key = _aws4_sign(f"AWS4{secret_access_key}".encode(), date_stamp)
+    region_key = _aws4_sign(date_key, safe_region)
+    service_key = _aws4_sign(region_key, "s3")
+    signing_key = _aws4_sign(service_key, "aws4_request")
+    signature = hmac.new(
+        signing_key,
+        string_to_sign.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    headers = {
+        "Authorization": (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amz_date,
+    }
+    if isinstance(session_token, str):
+        headers["x-amz-security-token"] = session_token
+    return headers
+
+
+async def _aws_s3_request(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    region: str,
+    bucket: str,
+    key: str | None = None,
+    body: bytes = b"",
+    content_type: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.Response:
+    safe_region = validate_aws_region(region)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    host = f"{safe_bucket}.s3.{safe_region}.amazonaws.com"
+    canonical_uri = "/"
+    if key is not None:
+        canonical_uri = f"/{quote(key, safe='/-_.~')}"
+    headers = _aws_s3_authorization_headers(
+        credentials,
+        method=method,
+        host=host,
+        canonical_uri=canonical_uri,
+        region=safe_region,
+        body=body,
+    )
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    return await _request(
+        transport,
+        method,
+        f"https://{host}{canonical_uri}",
+        headers=headers,
+        content=body,
+    )
+
+
+async def probe_aws_s3_bucket(
+    credentials: dict[str, object],
+    *,
+    region: str,
+    bucket: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _aws_s3_request(
+        credentials,
+        method="HEAD",
+        region=region,
+        bucket=bucket,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Amazon S3 bucket probe failed with HTTP {response.status_code}"
+        )
+    safe_region = validate_aws_region(region)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    return ProviderOperationResult(
+        external_id=safe_bucket,
+        metadata={
+            "bucket": safe_bucket,
+            "region": safe_region,
+            "endpoint_host": f"{safe_bucket}.s3.{safe_region}.amazonaws.com",
+        },
+    )
+
+
+async def put_aws_s3_object(
+    credentials: dict[str, object],
+    *,
+    region: str,
+    bucket: str,
+    name: str,
+    content: str,
+    mime_type: str,
+    prefix: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    if mime_type not in _ALLOWED_DRIVE_MIME_TYPES:
+        raise InvalidConfiguration("Amazon S3 export MIME type is not allowed")
+    media = content.encode()
+    if len(media) > 5_000_000:
+        raise InvalidConfiguration("Amazon S3 export is limited to 5 MB")
+
+    clean_name = "/".join(
+        segment.strip()
+        for segment in name.replace("\\", "/").split("/")
+        if segment.strip()
+    )
+    if (
+        not clean_name
+        or len(clean_name) > 1024
+        or ".." in clean_name.split("/")
+    ):
+        raise InvalidConfiguration("Amazon S3 object name is invalid")
+    clean_prefix = prefix.strip("/")
+    key = f"{clean_prefix}/{clean_name}" if clean_prefix else clean_name
+
+    response = await _aws_s3_request(
+        credentials,
+        method="PUT",
+        region=region,
+        bucket=bucket,
+        key=key,
+        body=media,
+        content_type=mime_type,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Amazon S3 upload failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id=key,
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "region": validate_aws_region(region),
+            "key": key,
+            "etag": response.headers.get("etag"),
+        },
+    )
 
 
 async def _r2_request(
