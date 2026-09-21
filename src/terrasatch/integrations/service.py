@@ -68,6 +68,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "geojson": {"endpoint_url", "max_features"},
     "ogc_api_features": {"base_url", "collection_ids", "max_features"},
     "stac_api": {"base_url", "collection_ids", "max_items"},
+    "nws_forecast": {"max_periods"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "arcgis_enterprise_public": {"feature_layer_urls"},
@@ -249,6 +250,18 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
                 "STAC API max_items must be an integer between 1 and 1000"
             )
         configuration["max_items"] = max_items
+
+    if provider_key == "nws_forecast":
+        max_periods = configuration.get("max_periods", 14)
+        if (
+            not isinstance(max_periods, int)
+            or isinstance(max_periods, bool)
+            or not 1 <= max_periods <= 14
+        ):
+            raise InvalidConfiguration(
+                "NWS max_periods must be an integer between 1 and 14"
+            )
+        configuration["max_periods"] = max_periods
 
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
@@ -500,7 +513,11 @@ async def create_connection_request(
                             "ArcGIS Enterprise · "
                             f"{urlsplit(str(configuration['feature_layer_urls'][0])).hostname}"
                             if provider_key == "arcgis_enterprise_public"
-                            else None
+                            else (
+                                "National Weather Service"
+                                if provider_key == "nws_forecast"
+                                else None
+                            )
                         )
                     )
                 )
@@ -521,7 +538,11 @@ async def create_connection_request(
                         else (
                             urlsplit(str(configuration["feature_layer_urls"][0])).hostname
                             if provider_key == "arcgis_enterprise_public"
-                            else None
+                            else (
+                                "api.weather.gov"
+                                if provider_key == "nws_forecast"
+                                else None
+                            )
                         )
                     )
                 )
