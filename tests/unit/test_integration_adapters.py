@@ -111,6 +111,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["geojson"]["connect_status"] == "available"
     assert with_store["geojson"]["runtime_ready"] is True
     assert with_store["geojson"]["can_connect"] is True
+    assert with_store["ogc_api_features"]["connect_status"] == "available"
+    assert with_store["ogc_api_features"]["runtime_ready"] is True
+    assert with_store["ogc_api_features"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -216,6 +219,37 @@ def test_geojson_configuration_is_fixed_and_bounded() -> None:
         )
 
 
+def test_ogc_api_configuration_normalizes_allowlisted_collections() -> None:
+    configuration: dict[str, object] = {
+        "base_url": "https://maps.example.com/ogc/",
+        "collection_ids": ["observations", "incidents-2026"],
+        "max_features": 250,
+    }
+    _validate_configuration("ogc_api_features", configuration)
+    assert configuration == {
+        "base_url": "https://maps.example.com/ogc",
+        "collection_ids": ["observations", "incidents-2026"],
+        "max_features": 250,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "ogc_api_features",
+            {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["observations", "observations"],
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="collection ID"):
+        _validate_configuration(
+            "ogc_api_features",
+            {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["../private"],
+            },
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -277,6 +311,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["geojson"]["capability_details"]
     }
     assert geojson_labels["map.features.query"] == "Read map features"
+    ogc_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["ogc_api_features"]["capability_details"]
+    }
+    assert ogc_labels["map.features.query"] == "Read map features"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
