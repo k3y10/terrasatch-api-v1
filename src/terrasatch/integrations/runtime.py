@@ -371,17 +371,26 @@ async def execute(
                 capability == "document.create"
                 and connection.provider == "microsoft_365"
             ):
-                folder_path = dict(connection.configuration or {}).get("folder_path")
+                configuration = dict(connection.configuration or {})
+                folder_path = configuration.get("folder_path")
+                site_id = configuration.get("site_id")
+                drive_id = configuration.get("drive_id")
                 if folder_path is not None and not isinstance(folder_path, str):
                     raise InvalidConfiguration(
                         "Stored Microsoft folder_path is invalid"
                     )
+                if site_id is not None and not isinstance(site_id, str):
+                    raise InvalidConfiguration("Stored Microsoft site_id is invalid")
+                if drive_id is not None and not isinstance(drive_id, str):
+                    raise InvalidConfiguration("Stored Microsoft drive_id is invalid")
                 result = await create_microsoft_drive_file(
                     credentials,
                     name=name,
                     content=content,
                     mime_type=mime_type,
                     folder_path=folder_path,
+                    site_id=site_id,
+                    drive_id=drive_id,
                 )
             else:
                 raise InvalidConfiguration(
