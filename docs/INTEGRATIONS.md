@@ -111,6 +111,24 @@ TerraSatch accepts current Microsoft callback hosts under `*.logic.azure.com` an
 payload through the provider-neutral `notification.send` capability. The existing human approval,
 audience grant, `agent:satchy` grant, and durable idempotency boundary all remain in force.
 
+## Operational email
+
+Operational email is a TerraSatch-managed `notification.send` destination backed by the existing
+server-side Resend transport. An administrator creates a team- or organization-scoped connection
+with one to ten fixed recipient addresses and a fixed subject. Satchy supplies only the approved
+message body at execution time; it cannot choose new recipients, change the sender, or inject a new
+subject.
+
+The provider is connectable only when the API/worker has a Resend API key and a verified TerraSatch
+sender. `TERRASATCH_INTEGRATION_EMAIL_FROM` is preferred for operational mail; when omitted, the
+existing `TERRASATCH_BILLING_FROM` sender is used as a compatibility fallback. Reply-to follows the
+same operational-first, billing-fallback pattern. No Resend API key is stored per organization.
+
+Each send uses the durable TerraSatch delivery request ID plus the connection ID as Resend's
+`Idempotency-Key`. Resend documents idempotency keys for `POST /emails` with a maximum length of
+256 characters and a 24-hour deduplication window. TerraSatch stores only the returned provider
+message ID and recipient count in delivery metadata, not recipient addresses.
+
 ## Generic HTTPS webhooks
 
 Organization and team administrators can connect an HTTPS webhook as a provider-neutral
@@ -214,7 +232,7 @@ instead of being exposed as connectable.
 Connected or TerraSatch-managed providers currently expose these server-side capabilities while
 keeping customer credentials out of browser state:
 
-- `notification.send`: Slack, Microsoft Teams Workflows, and generic signed HTTPS webhooks.
+- `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
 - `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
