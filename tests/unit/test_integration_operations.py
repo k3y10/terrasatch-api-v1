@@ -30,12 +30,12 @@ from terrasatch.integrations.operations import (
     validate_generic_webhook_url,
     validate_geojson_url,
     validate_ogc_api_base_url,
-    validate_stac_api_base_url,
     validate_public_geojson_destination,
     validate_public_ogc_destination,
     validate_public_stac_destination,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
+    validate_stac_api_base_url,
     validate_teams_workflow_url,
 )
 
