@@ -19,6 +19,7 @@ from terrasatch.integrations.operations import (
     query_caltopo_map,
     query_snowflake,
     read_mapbox_style,
+    send_resend_notification,
     send_slack_message,
     send_teams_message,
     send_webhook_notification,
@@ -28,6 +29,45 @@ from terrasatch.integrations.operations import (
     validate_r2_endpoint_url,
     validate_teams_workflow_url,
 )
+
+
+@pytest.mark.asyncio
+async def test_operational_email_uses_fixed_recipients_and_idempotency() -> None:
+    connection_id = uuid4()
+    request_id = uuid4()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.resend.com/emails"
+        assert request.headers["Authorization"] == "Bearer re_test_ops"
+        assert request.headers["Idempotency-Key"] == (
+            f"terrasatch-email/{connection_id}/{request_id}"
+        )
+        payload = json.loads(request.content)
+        assert payload == {
+            "from": "TerraSatch Operations <operations@terrasatch.com>",
+            "to": ["ops@example.com", "lead@example.com"],
+            "subject": "Field operations update",
+            "text": "Field update",
+            "reply_to": "support@terrasatch.com",
+        }
+        return httpx.Response(200, json={"id": "email_ops_123"})
+
+    result = await send_resend_notification(
+        api_key="re_test_ops",
+        sender="TerraSatch Operations <operations@terrasatch.com>",
+        recipients=["ops@example.com", "lead@example.com"],
+        subject="Field operations update",
+        text="Field update",
+        request_id=request_id,
+        connection_id=connection_id,
+        reply_to="support@terrasatch.com",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "email_ops_123"
+    assert result.metadata == {
+        "provider": "resend",
+        "recipient_count": 2,
+    }
 
 
 @pytest.mark.asyncio
