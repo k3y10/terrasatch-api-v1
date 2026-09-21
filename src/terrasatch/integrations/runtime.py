@@ -26,6 +26,7 @@ from .operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_caltopo_team,
+    put_cloudflare_r2_object,
     query_snowflake,
     read_mapbox_style,
     send_slack_message,
@@ -276,6 +277,26 @@ async def execute(
                 content=content,
                 mime_type=mime_type,
                 folder_id=folder_id,
+            )
+        elif capability == "document.create" and connection.provider == "cloudflare_r2":
+            configuration = dict(connection.configuration or {})
+            endpoint_url = configuration.get("endpoint_url")
+            bucket = configuration.get("bucket")
+            prefix = configuration.get("prefix", "")
+            if (
+                not isinstance(endpoint_url, str)
+                or not isinstance(bucket, str)
+                or not isinstance(prefix, str)
+            ):
+                raise InvalidConfiguration("Stored Cloudflare R2 configuration is invalid")
+            result = await put_cloudflare_r2_object(
+                credentials,
+                endpoint_url=endpoint_url,
+                bucket=bucket,
+                prefix=prefix,
+                name=name,
+                content=content,
+                mime_type=mime_type,
             )
         elif capability == "document.create" and connection.provider == "microsoft_365":
             folder_path = dict(connection.configuration or {}).get("folder_path")
