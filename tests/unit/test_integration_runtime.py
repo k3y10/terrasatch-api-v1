@@ -2269,3 +2269,108 @@ async def test_confluence_runtime_uses_document_capability_and_fixed_space(
         assert delivery.external_id == "998877"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_uac_forecast_runtime_is_credential_free_and_region_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="UAC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="UAC runtime org",
+            slug=f"uac-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="UAC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="uac_forecast",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="UAC forecasts",
+            configuration={"regions": ["salt-lake", "uintas"]},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_label == "Utah Avalanche Center"
+        assert connection.provider_account_id == "utahavalanchecenter.org"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("UAC forecast must not load customer credentials")
+
+        async def fake_forecast(**kwargs):
+            assert kwargs == {"region": "salt-lake"}
+            return ProviderQueryResult(
+                data={"forecast": {"bottom_line": "Test"}},
+                metadata={
+                    "source_host": "utahavalanchecenter.org",
+                    "region": "salt-lake",
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_uac_forecast",
+            fake_forecast,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="avalanche.forecast.read",
+            payload={"region": "salt-lake"},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "uac_forecast"
+        assert result["metadata"]["region"] == "salt-lake"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="avalanche.forecast.read",
+                payload={"region": "moab"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="avalanche.forecast.read",
+                payload={
+                    "region": "salt-lake",
+                    "url": "https://example.com/forecast",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
