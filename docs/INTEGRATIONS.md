@@ -124,6 +124,23 @@ connection is configured with an optional `signing_secret`, TerraSatch adds
 `X-TerraSatch-Timestamp` and an HMAC-SHA256 `X-TerraSatch-Signature` over
 `<timestamp>.<raw-body>`. Receivers should verify the signature and reject stale timestamps.
 
+## Cloudflare R2
+
+Cloudflare R2 uses its S3-compatible API through the existing provider-neutral `document.create`
+capability. Team or organization administrators configure the public R2 S3 endpoint, bucket, and an
+optional object prefix. The R2 access key ID and secret access key are submitted once through the
+protected credential endpoint and stored only in the encrypted credential record.
+
+TerraSatch signs R2 requests with AWS Signature Version 4 using R2's required `auto` region. Connection
+setup performs a signed `HeadBucket` probe, and approved exports use a signed `PutObject` request.
+The current adapter accepts only Cloudflare's `*.r2.cloudflarestorage.com` S3 endpoints, keeps
+redirects disabled, limits exports to the same approved text/JSON/CSV/Markdown MIME types and 5 MB
+boundary used by the document runtime, and never returns R2 credentials to the browser.
+
+Cloudflare recommends creating credentials with Object Read & Write access and scoping them to the
+specific bucket TerraSatch should use. R2 jurisdiction-specific endpoints are supported because they
+remain under the same Cloudflare R2 S3 hostname suffix.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -181,7 +198,7 @@ Connected or TerraSatch-managed providers currently expose these server-side cap
 keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, and generic signed HTTPS webhooks.
-- `document.create`: Google Drive and Microsoft OneDrive.
+- `document.create`: Google Drive, Microsoft OneDrive, and Cloudflare R2 object storage.
 - `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
