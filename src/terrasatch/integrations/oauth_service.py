@@ -29,6 +29,7 @@ from .models import (
 )
 from .operations import (
     probe_nws_api,
+    query_nws_alerts,
     query_geojson_features,
     query_ogc_features,
     query_public_arcgis_features,
@@ -368,6 +369,27 @@ async def probe_connection(
             result = await probe_nws_api()
             label = "National Weather Service"
             account_id = result.external_id
+        elif connection.provider == "nws_alerts":
+            configuration = dict(connection.configuration or {})
+            areas = configuration.get("areas", [])
+            zones = configuration.get("zones", [])
+            allow_point_queries = configuration.get("allow_point_queries", False)
+            if not isinstance(areas, list) or not isinstance(zones, list):
+                raise ProviderUnavailable("NWS alerts configuration is invalid")
+            if areas and isinstance(areas[0], str):
+                await query_nws_alerts(area=areas[0], max_alerts=1)
+            elif zones and isinstance(zones[0], str):
+                await query_nws_alerts(zone=zones[0], max_alerts=1)
+            elif allow_point_queries is True:
+                await query_nws_alerts(
+                    latitude=39.7456,
+                    longitude=-97.0892,
+                    max_alerts=1,
+                )
+            else:
+                raise ProviderUnavailable("NWS alerts configuration is invalid")
+            label = "National Weather Service Alerts"
+            account_id = "api.weather.gov"
         elif connection.provider == "uac_forecast":
             configuration = dict(connection.configuration or {})
             regions = configuration.get("regions")
