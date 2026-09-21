@@ -51,6 +51,49 @@ The authorization request uses a random single-use `state`, requests offline acc
 
 Drive exports use multipart `files.create` requests and set `supportsAllDrives=true`. That keeps the same export path compatible with My Drive and Shared Drive destinations when the authenticated user and the narrow `drive.file` grant can access the selected parent folder. If no parent folder is configured, Google places the export in the user's My Drive root.
 
+## Google Calendar
+
+Google Calendar is a separate OAuth connection from Google Drive. It requests only the
+`calendar.events` scope so calendar workflows do not expand the permissions of existing Drive
+connections. The provider exposes `calendar.event.create`.
+
+Personal connections may use the primary calendar. Team and organization connections must configure
+an explicit `calendar_id`, preventing a shared workflow from silently writing into the authorizing
+member's personal primary calendar. Runtime events use a provider-neutral title, offset-aware ISO
+start/end timestamps, optional description, and optional location.
+
+## Outlook Calendar
+
+Outlook Calendar is separate from Microsoft 365 file/SharePoint authorization. It requests delegated
+`Calendars.ReadWrite.Shared`, `User.Read`, and `offline_access`, allowing TerraSatch to create
+events only in calendars the signed-in member already has permission to edit. The provider exposes
+`calendar.event.create`.
+
+Personal connections may use the primary calendar. Team and organization connections must configure
+an explicit `calendar_id`. TerraSatch converts offset-aware timestamps to UTC before sending the
+event to Microsoft Graph.
+
+## Jira
+
+Jira uses Atlassian Cloud OAuth 2.0 (3LO) with `offline_access` and the recommended
+`write:jira-work` scope. Each connection fixes one Atlassian `cloud_id`, one Jira project key, and
+one issue type in administrator-controlled configuration. The provider exposes `task.create`.
+
+Runtime callers supply only a title and optional description. TerraSatch builds a basic Jira issue
+using Atlassian Document Format for the description; callers cannot override the cloud site, project,
+issue type, REST path, transition, JQL, or attachments.
+
+## Confluence
+
+Confluence uses a separate Atlassian Cloud OAuth 2.0 (3LO) connection with `offline_access` and
+`write:page:confluence`. Each connection fixes one Atlassian `cloud_id`, one Confluence
+`space_id`, and optionally one parent page ID.
+
+Confluence intentionally reuses TerraSatch's `document.create` capability so approved reports and
+handoffs can be delivered to a knowledge base without a second report abstraction. Text and Markdown
+content is escaped before being placed in Confluence's storage representation. Runtime callers
+cannot select another site, space, parent page, or arbitrary Confluence endpoint.
+
 ## Slack
 
 The initial Slack adapter deliberately requests only the `incoming-webhook` scope so the installing workspace chooses the destination explicitly and TerraSatch does not receive broad message-history access.
@@ -349,7 +392,9 @@ Connected or TerraSatch-managed providers currently expose these server-side cap
 keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
-- `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
+- `document.create`: Google Drive, Microsoft OneDrive/SharePoint, Confluence, Cloudflare R2, and Amazon S3.
+- `calendar.event.create`: Google Calendar and Outlook/shared Microsoft calendars.
+- `task.create`: Jira issues in one administrator-approved project and issue type.
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
