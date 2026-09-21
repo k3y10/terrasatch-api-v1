@@ -115,3 +115,10 @@ class MobileObservationRequest(BaseModel):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be supplied together")
         return self
+
+
+class MobileObservationResponse(BaseModel):
+    transmission_id: UUID
+    transcript_id: UUID
+    event_ids: list[UUID]
+    duplicate: bool
