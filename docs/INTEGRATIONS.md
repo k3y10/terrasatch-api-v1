@@ -341,6 +341,26 @@ NWS endpoints remain outside this first provider.
 The provider uses no customer credential record. Normal team/organization audience grants plus the
 `agent:satchy` grant still control forecast access.
 
+## Utah Avalanche Center
+
+The Utah Avalanche Center integration is a read-only `avalanche.forecast.read` provider backed by
+UAC's documented daily forecast JSON endpoints. It requires no customer API key. TerraSatch sends a
+dedicated User-Agent and uses only the fixed `utahavalanchecenter.org` host.
+
+A team or organization administrator approves one or more documented UAC forecast regions:
+`logan`, `ogden`, `uintas`, `salt-lake`, `provo`, `skyline`, `moab`, `abajos`, and
+`southwest`. Runtime callers may select only one of those approved regions. If a connection has
+exactly one approved region, TerraSatch can select it automatically.
+
+Forecast reads call only `/forecast/<region>/json`, do not accept arbitrary URLs or query
+parameters, keep redirects disabled, and stream the response through a 2 MB hard ceiling.
+TerraSatch preserves the returned UAC JSON as source forecast data instead of rewriting the danger
+rose or forecast fields at the integration boundary. Satchy can interpret that source later while
+the original provider response remains distinguishable from AI interpretation.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant control forecast access.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -404,6 +424,7 @@ keeping customer credentials out of browser state:
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
+- `avalanche.forecast.read`: official Utah Avalanche Center daily forecasts for approved Utah regions.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.
