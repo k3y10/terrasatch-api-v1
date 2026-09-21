@@ -93,6 +93,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "microsoft_365",
     "microsoft_teams",
     "webhook",
+    "cloudflare_r2",
     "snowflake",
     "caltopo",
 }
@@ -162,6 +163,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["notification.send"],
         "description": (
             "Signed outbound notifications to an organization-controlled HTTPS endpoint."
+        ),
+    },
+    "cloudflare_r2": {
+        "key": "cloudflare_r2",
+        "name": "Cloudflare R2",
+        "category": "storage",
+        "auth": "service_account",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["document.create"],
+        "description": (
+            "Create approved reports and files in an organization-controlled R2 bucket."
         ),
     },
     "snowflake": {
