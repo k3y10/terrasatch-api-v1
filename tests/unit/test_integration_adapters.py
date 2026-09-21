@@ -336,6 +336,26 @@ def test_nws_forecast_configuration_bounds_period_count() -> None:
         _validate_configuration("nws_forecast", {"max_periods": 15})
 
 
+def test_microsoft_365_configuration_supports_sharepoint_targets() -> None:
+    configuration: dict[str, object] = {
+        "site_id": "contoso.sharepoint.com,site-collection,site-id",
+        "drive_id": "b!approved-drive",
+        "folder_path": "Operations / Reports",
+    }
+    _validate_configuration("microsoft_365", configuration)
+    assert configuration == {
+        "site_id": "contoso.sharepoint.com,site-collection,site-id",
+        "drive_id": "b!approved-drive",
+        "folder_path": "Operations/Reports",
+    }
+
+    with pytest.raises(InvalidConfiguration, match="site_id"):
+        _validate_configuration(
+            "microsoft_365",
+            {"site_id": "https://contoso.sharepoint.com/sites/ops"},
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
