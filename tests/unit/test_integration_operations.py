@@ -19,6 +19,7 @@ from terrasatch.integrations.operations import (
     query_caltopo_map,
     query_geojson_features,
     query_ogc_features,
+    query_stac_items,
     query_snowflake,
     read_mapbox_style,
     send_resend_notification,
@@ -29,8 +30,10 @@ from terrasatch.integrations.operations import (
     validate_generic_webhook_url,
     validate_geojson_url,
     validate_ogc_api_base_url,
+    validate_stac_api_base_url,
     validate_public_geojson_destination,
     validate_public_ogc_destination,
+    validate_public_stac_destination,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
     validate_teams_workflow_url,
@@ -715,3 +718,98 @@ async def test_mapbox_style_read_uses_fixed_api_host() -> None:
         transport=httpx.MockTransport(responder),
     )
     assert result.metadata["name"] == "Field"
+
+
+@pytest.mark.asyncio
+async def test_stac_item_search_uses_allowlisted_core_parameters() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith("https://stac.example.com/api/search?")
+        assert dict(request.url.params) == {
+            "collections": "sentinel-2",
+            "limit": "20",
+            "bbox": "-112.0,40.0,-111.0,41.0",
+            "datetime": "2026-09-20/2026-09-21",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "numberMatched": 2,
+                "numberReturned": 2,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "stac_version": "1.0.0",
+                        "id": "scene-a",
+                        "geometry": None,
+                        "properties": {"datetime": "2026-09-20T12:00:00Z"},
+                        "assets": {},
+                    },
+                    {
+                        "type": "Feature",
+                        "stac_version": "1.0.0",
+                        "id": "scene-b",
+                        "geometry": None,
+                        "properties": {"datetime": "2026-09-20T13:00:00Z"},
+                        "assets": {},
+                    },
+                ],
+            },
+        )
+
+    result = await query_stac_items(
+        base_url="https://stac.example.com/api",
+        collection_id="sentinel-2",
+        limit=20,
+        bbox=[-112, 40, -111, 41],
+        datetime_value="2026-09-20/2026-09-21",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["collection_id"] == "sentinel-2"
+    assert result.metadata["item_count"] == 2
+    assert result.metadata["number_matched"] == 2
+
+
+def test_stac_api_rejects_unsafe_base_url() -> None:
+    with pytest.raises(InvalidConfiguration, match="without credentials"):
+        validate_stac_api_base_url("https://user:pass@stac.example.com/api")
+
+
+@pytest.mark.asyncio
+async def test_stac_api_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("172.16.0.4", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_stac_destination("https://stac.example.com/api")
+
+
+@pytest.mark.asyncio
+async def test_stac_api_rejects_non_stac_items() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": "missing-version",
+                        "geometry": None,
+                        "properties": {},
+                    }
+                ],
+            },
+        )
+    )
+    with pytest.raises(ProviderUnavailable, match="invalid STAC Item"):
+        await query_stac_items(
+            base_url="https://stac.example.com/api",
+            collection_id="sentinel-2",
+            limit=10,
+            transport=transport,
+        )
