@@ -75,6 +75,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "stac_api": {"base_url", "collection_ids", "max_items"},
     "nws_forecast": {"max_periods"},
     "nws_alerts": {"areas", "zones", "allow_point_queries", "max_alerts"},
+    "nasa_firms": {"bounds", "sources", "max_days", "max_detections"},
     "uac_forecast": {"regions"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
@@ -401,6 +402,73 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         configuration["zones"] = normalized_zones
         configuration["allow_point_queries"] = allow_point_queries
         configuration["max_alerts"] = max_alerts
+
+    if provider_key == "nasa_firms":
+        bounds = configuration.get("bounds")
+        sources = configuration.get("sources")
+        max_days = configuration.get("max_days", 1)
+        max_detections = configuration.get("max_detections", 500)
+        if (
+            not isinstance(bounds, list)
+            or len(bounds) != 4
+            or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in bounds
+            )
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS bounds must be [west, south, east, north]"
+            )
+        west, south, east, north = (float(value) for value in bounds)
+        if (
+            not -180 <= west < east <= 180
+            or not -90 <= south < north <= 90
+        ):
+            raise InvalidConfiguration("NASA FIRMS bounds are invalid")
+        configuration["bounds"] = [
+            round(west, 4),
+            round(south, 4),
+            round(east, 4),
+            round(north, 4),
+        ]
+        allowed_sources = {
+            "LANDSAT_NRT",
+            "MODIS_NRT",
+            "VIIRS_NOAA20_NRT",
+            "VIIRS_NOAA21_NRT",
+        }
+        if (
+            not isinstance(sources, list)
+            or not 1 <= len(sources) <= 4
+            or not all(isinstance(item, str) for item in sources)
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS sources must contain between 1 and 4 source IDs"
+            )
+        normalized_sources = [item.strip().upper() for item in sources]
+        if any(item not in allowed_sources for item in normalized_sources):
+            raise InvalidConfiguration("NASA FIRMS source is not supported")
+        if len(set(normalized_sources)) != len(normalized_sources):
+            raise InvalidConfiguration("NASA FIRMS sources cannot contain duplicates")
+        if (
+            not isinstance(max_days, int)
+            or isinstance(max_days, bool)
+            or not 1 <= max_days <= 5
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS max_days must be an integer between 1 and 5"
+            )
+        if (
+            not isinstance(max_detections, int)
+            or isinstance(max_detections, bool)
+            or not 1 <= max_detections <= 2000
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS max_detections must be an integer between 1 and 2000"
+            )
+        configuration["sources"] = normalized_sources
+        configuration["max_days"] = max_days
+        configuration["max_detections"] = max_detections
 
     if provider_key == "uac_forecast":
         regions = configuration.get("regions")
