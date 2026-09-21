@@ -98,6 +98,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "email",
     "geojson",
     "ogc_api_features",
+    "stac_api",
     "snowflake",
     "caltopo",
 }
@@ -227,6 +228,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["map.features.query"],
         "description": (
             "Read approved collections through the OGC API Features Core interface."
+        ),
+    },
+    "stac_api": {
+        "key": "stac_api",
+        "name": "STAC API",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Search approved STAC collections for bounded geospatial items."
         ),
     },
     "snowflake": {
