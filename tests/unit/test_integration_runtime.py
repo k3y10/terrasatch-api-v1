@@ -1204,3 +1204,119 @@ async def test_operational_email_connection_and_runtime_use_platform_resend(
         }
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_geojson_runtime_uses_fixed_public_endpoint_without_credentials(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="GeoJSON runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="GeoJSON runtime org",
+            slug=f"geojson-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="GeoJSON Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://data.example.com/observations.geojson"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_geojson_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="geojson",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="Field observations",
+            configuration={
+                "endpoint_url": "https://data.example.com/observations.geojson",
+                "max_features": 250,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "data.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public GeoJSON must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "endpoint_url": "https://data.example.com/observations.geojson",
+                "max_features": 250,
+            }
+            return ProviderQueryResult(
+                data={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": None,
+                            "properties": {"name": "Observation"},
+                        }
+                    ],
+                },
+                metadata={
+                    "source_host": "data.example.com",
+                    "feature_count": 1,
+                    "source_feature_count": 1,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_geojson_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "geojson"
+        assert result["metadata"]["feature_count"] == 1
+
+        with pytest.raises(InvalidConfiguration, match="does not accept runtime"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"endpoint_url": "https://other.example.com/feed.geojson"},
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
