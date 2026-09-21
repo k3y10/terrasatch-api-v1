@@ -29,8 +29,8 @@ from .models import (
 )
 from .operations import (
     probe_nws_api,
-    query_nws_alerts,
     query_geojson_features,
+    query_nws_alerts,
     query_ogc_features,
     query_public_arcgis_features,
     query_stac_items,
