@@ -870,6 +870,86 @@ async def query_ogc_features(
     )
 
 
+async def query_stac_items(
+    *,
+    base_url: str,
+    collection_id: str,
+    limit: int,
+    bbox: object = None,
+    datetime_value: object = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise InvalidConfiguration("STAC limit must be an integer between 1 and 1000")
+    base = validate_stac_api_base_url(base_url)
+    collection = validate_stac_collection_id(collection_id)
+    if transport is None:
+        await validate_public_stac_destination(base)
+
+    params: dict[str, str] = {
+        "collections": collection,
+        "limit": str(limit),
+    }
+    safe_bbox = _validate_ogc_bbox(bbox)
+    if safe_bbox is not None:
+        params["bbox"] = safe_bbox
+    safe_datetime = _validate_ogc_datetime(datetime_value)
+    if safe_datetime is not None:
+        params["datetime"] = safe_datetime
+
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{base}/search",
+        max_bytes=5_000_000,
+        headers={"Accept": "application/geo+json, application/json"},
+        params=params,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"STAC API item search failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("STAC API returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable("STAC API search must return a FeatureCollection")
+    raw_items = payload.get("features")
+    if not isinstance(raw_items, list):
+        raise ProviderUnavailable("STAC API search response has invalid features")
+
+    for item in raw_items:
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "Feature"
+            or not isinstance(item.get("id"), str)
+            or not isinstance(item.get("stac_version"), str)
+        ):
+            raise ProviderUnavailable("STAC API returned an invalid STAC Item")
+    items = raw_items[:limit]
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": items,
+    }
+    bbox_value = payload.get("bbox")
+    if isinstance(bbox_value, list):
+        data["bbox"] = bbox_value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": urlsplit(base).hostname,
+            "collection_id": collection,
+            "item_count": len(items),
+            "source_item_count": len(raw_items),
+            "truncated": len(raw_items) > len(items),
+            "number_matched": payload.get("numberMatched"),
+            "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
 async def query_geojson_features(
     *,
     endpoint_url: str,
