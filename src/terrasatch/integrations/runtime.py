@@ -29,6 +29,7 @@ from .operations import (
     query_caltopo_map,
     query_caltopo_team,
     query_geojson_features,
+    query_ogc_features,
     query_snowflake,
     read_mapbox_style,
     send_resend_notification,
@@ -461,7 +462,7 @@ async def query(
 
     try:
         credentials: dict[str, object] = {}
-        if connection.provider != "geojson":
+        if connection.provider not in {"geojson", "ogc_api_features"}:
             credentials, _ = await active_credentials(
                 session,
                 settings,
@@ -483,6 +484,56 @@ async def query(
             result = await query_geojson_features(
                 endpoint_url=endpoint_url,
                 max_features=max_features,
+            )
+
+        elif (
+            capability == "map.features.query"
+            and connection.provider == "ogc_api_features"
+        ):
+            configuration = dict(connection.configuration or {})
+            base_url = configuration.get("base_url")
+            allowed_collections = configuration.get("collection_ids")
+            max_features = configuration.get("max_features", 250)
+            collection_id = payload.get("collection_id")
+            if (
+                not isinstance(base_url, str)
+                or not isinstance(allowed_collections, list)
+                or not all(isinstance(item, str) for item in allowed_collections)
+                or not isinstance(max_features, int)
+            ):
+                raise InvalidConfiguration(
+                    "Stored OGC API Features configuration is invalid"
+                )
+            if collection_id is None and len(allowed_collections) == 1:
+                collection_id = allowed_collections[0]
+            if not isinstance(collection_id, str):
+                raise InvalidConfiguration(
+                    "OGC API Features requires collection_id when multiple collections are approved"
+                )
+            if collection_id not in allowed_collections:
+                raise InvalidConfiguration(
+                    "OGC collection is not approved for this connection"
+                )
+            requested_limit = payload.get("limit", max_features)
+            if (
+                not isinstance(requested_limit, int)
+                or isinstance(requested_limit, bool)
+                or not 1 <= requested_limit <= max_features
+            ):
+                raise InvalidConfiguration(
+                    "OGC limit must be between 1 and the configured max_features"
+                )
+            allowed_keys = {"collection_id", "bbox", "datetime", "limit"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "OGC API Features received unsupported query parameters"
+                )
+            result = await query_ogc_features(
+                base_url=base_url,
+                collection_id=collection_id,
+                limit=requested_limit,
+                bbox=payload.get("bbox"),
+                datetime_value=payload.get("datetime"),
             )
 
         elif capability == "map.features.query" and connection.provider == "esri_arcgis":
