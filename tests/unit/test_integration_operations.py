@@ -18,6 +18,7 @@ from terrasatch.integrations.operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_geojson_features,
+    query_ogc_features,
     query_snowflake,
     read_mapbox_style,
     send_resend_notification,
@@ -27,7 +28,9 @@ from terrasatch.integrations.operations import (
     validate_aws_region,
     validate_generic_webhook_url,
     validate_geojson_url,
+    validate_ogc_api_base_url,
     validate_public_geojson_destination,
+    validate_public_ogc_destination,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
     validate_teams_workflow_url,
@@ -304,6 +307,93 @@ async def test_geojson_streaming_limit_rejects_large_response() -> None:
             endpoint_url="https://data.example.com/feed.geojson",
             max_features=100,
             transport=httpx.MockTransport(responder),
+        )
+
+
+@pytest.mark.asyncio
+async def test_ogc_features_query_uses_only_core_parameters() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith(
+            "https://maps.example.com/ogc/collections/observations/items?"
+        )
+        params = dict(request.url.params)
+        assert params == {
+            "limit": "25",
+            "bbox": "-112.0,40.0,-111.0,41.0",
+            "datetime": "2026-09-20T00:00:00Z/2026-09-21T00:00:00Z",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "numberMatched": 40,
+                "numberReturned": 1,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.8, 40.6]},
+                        "properties": {"name": "Observation"},
+                    }
+                ],
+            },
+        )
+
+    result = await query_ogc_features(
+        base_url="https://maps.example.com/ogc",
+        collection_id="observations",
+        limit=25,
+        bbox=[-112, 40, -111, 41],
+        datetime_value="2026-09-20T00:00:00Z/2026-09-21T00:00:00Z",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["collection_id"] == "observations"
+    assert result.metadata["feature_count"] == 1
+    assert result.metadata["number_matched"] == 40
+
+
+def test_ogc_api_rejects_unsafe_base_url_and_bbox() -> None:
+    with pytest.raises(InvalidConfiguration, match="without credentials"):
+        validate_ogc_api_base_url("https://user:pass@maps.example.com/ogc")
+    with pytest.raises(InvalidConfiguration, match="WGS84"):
+        _ = pytest.run if False else None
+
+
+@pytest.mark.asyncio
+async def test_ogc_api_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("192.168.1.8", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_ogc_destination("https://maps.example.com/ogc")
+
+
+@pytest.mark.asyncio
+async def test_ogc_api_rejects_invalid_bbox_and_datetime() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"type": "FeatureCollection", "features": []},
+        )
+    )
+    with pytest.raises(InvalidConfiguration, match="WGS84"):
+        await query_ogc_features(
+            base_url="https://maps.example.com/ogc",
+            collection_id="observations",
+            limit=10,
+            bbox=[-200, 40, -111, 41],
+            transport=transport,
+        )
+    with pytest.raises(InvalidConfiguration, match="datetime"):
+        await query_ogc_features(
+            base_url="https://maps.example.com/ogc",
+            collection_id="observations",
+            limit=10,
+            datetime_value="not-a-date",
+            transport=transport,
         )
 
 
