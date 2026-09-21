@@ -127,6 +127,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["nws_forecast"]["connect_status"] == "available"
     assert with_store["nws_forecast"]["runtime_ready"] is True
     assert with_store["nws_forecast"]["can_connect"] is True
+    assert with_store["uac_forecast"]["connect_status"] == "available"
+    assert with_store["uac_forecast"]["runtime_ready"] is True
+    assert with_store["uac_forecast"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -360,6 +363,27 @@ def test_microsoft_365_configuration_supports_sharepoint_targets() -> None:
         )
 
 
+def test_uac_configuration_normalizes_and_allowlists_regions() -> None:
+    configuration: dict[str, object] = {
+        "regions": ["Salt-Lake", "uintas", "moab"],
+    }
+    _validate_configuration("uac_forecast", configuration)
+    assert configuration == {
+        "regions": ["salt-lake", "uintas", "moab"],
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "uac_forecast",
+            {"regions": ["salt-lake", "Salt-Lake"]},
+        )
+    with pytest.raises(InvalidConfiguration, match="not supported"):
+        _validate_configuration(
+            "uac_forecast",
+            {"regions": ["colorado"]},
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -441,6 +465,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["nws_forecast"]["capability_details"]
     }
     assert nws_labels["weather.forecast.read"] == "Read weather forecasts"
+    uac_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["uac_forecast"]["capability_details"]
+    }
+    assert uac_labels["avalanche.forecast.read"] == "Read avalanche forecasts"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
