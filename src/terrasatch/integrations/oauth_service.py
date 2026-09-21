@@ -27,6 +27,7 @@ from .models import (
     IntegrationOAuthState,
     IntegrationStatus,
 )
+from .operations import query_geojson_features
 from .service import get_connection_for_management, revoke_connection
 
 
@@ -280,6 +281,18 @@ async def probe_connection(
                     "Operational email delivery is not configured"
                 )
             label, account_id = "TerraSatch Resend", "resend"
+        elif connection.provider == "geojson":
+            configuration = dict(connection.configuration or {})
+            endpoint_url = configuration.get("endpoint_url")
+            if not isinstance(endpoint_url, str):
+                raise ProviderUnavailable("GeoJSON endpoint is not configured")
+            result = await query_geojson_features(
+                endpoint_url=endpoint_url,
+                max_features=1,
+            )
+            source_host = result.metadata.get("source_host")
+            label = f"GeoJSON · {source_host}" if source_host else "GeoJSON"
+            account_id = str(source_host) if source_host else None
         else:
             credentials, _ = await active_credentials(
                 session,
