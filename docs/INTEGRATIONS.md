@@ -215,6 +215,29 @@ limit.
 The provider uses no customer credential record. Normal team/organization audience grants plus the
 `agent:satchy` grant still control access.
 
+## STAC API
+
+STAC API is a read-only `map.features.query` integration for public SpatioTemporal Asset Catalog
+services. A team or organization administrator configures one public HTTPS STAC API base URL,
+between one and 25 approved collection IDs, and a maximum item count between 1 and 1000.
+
+The first TerraSatch adapter uses the STAC Item Search `/search` endpoint with a deliberately
+small query surface: one approved collection, an optional four-value WGS84 `bbox`, optional
+STAC/OGC `datetime`, and a bounded `limit`. TerraSatch does not expose free-text search, CQL2
+or filter extensions, arbitrary STAC query extensions, asset downloads, writes, or automatic
+pagination in this first version.
+
+The base URL must be public HTTPS without embedded credentials, query parameters, or fragments.
+TerraSatch rejects local/IP/internal destinations, checks public DNS during connection setup and
+again before a live search, disables redirects, and streams responses through a hard 5 MB ceiling.
+Search responses must be GeoJSON FeatureCollections whose features contain STAC Item identifiers
+and `stac_version`. TerraSatch also caps the returned item list even if a noncompliant service
+returns more than the requested limit.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control access. Asset metadata can be returned as part of a STAC Item,
+but TerraSatch does not fetch or download those assets through this adapter.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -273,7 +296,7 @@ keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
-- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, fixed public GeoJSON feeds, and approved OGC API Features collections.
+- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
