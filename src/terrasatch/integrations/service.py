@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -30,6 +31,8 @@ from .models import (
 from .operations import (
     validate_arcgis_feature_layer_url,
     validate_aws_region,
+    validate_geojson_url,
+    validate_public_geojson_destination,
     validate_r2_endpoint_url,
     validate_s3_bucket_name,
 )
@@ -54,6 +57,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
+    "geojson": {"endpoint_url", "max_features"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
@@ -156,6 +160,22 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             raise InvalidConfiguration("Email subject must be a single-line string")
         configuration["recipients"] = normalized_recipients
         configuration["subject"] = " ".join(subject.split())
+
+    if provider_key == "geojson":
+        endpoint_url = configuration.get("endpoint_url")
+        max_features = configuration.get("max_features", 500)
+        if not isinstance(endpoint_url, str):
+            raise InvalidConfiguration("GeoJSON endpoint_url is required")
+        configuration["endpoint_url"] = validate_geojson_url(endpoint_url)
+        if (
+            not isinstance(max_features, int)
+            or isinstance(max_features, bool)
+            or not 1 <= max_features <= 1000
+        ):
+            raise InvalidConfiguration(
+                "GeoJSON max_features must be an integer between 1 and 1000"
+            )
+        configuration["max_features"] = max_features
 
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
@@ -313,6 +333,10 @@ async def create_connection_request(
 
     _validate_configuration(provider_key, configuration)
     _assert_non_secret_configuration(configuration)
+    if provider_key == "geojson":
+        endpoint_url = configuration.get("endpoint_url")
+        assert isinstance(endpoint_url, str)
+        await validate_public_geojson_destination(endpoint_url)
 
     owner_user_id = user_id if scope == IntegrationScope.USER else None
     duplicate_query = select(IntegrationConnection).where(
@@ -347,7 +371,7 @@ async def create_connection_request(
         display_name=normalized_display_name[:255],
         status=(
             IntegrationStatus.CONNECTED.value
-            if provider["auth"] == "platform"
+            if provider["auth"] in {"platform", "public_https"}
             else IntegrationStatus.REQUESTED.value
         ),
         configuration=dict(configuration),
@@ -355,9 +379,21 @@ async def create_connection_request(
         provider_account_label=(
             "TerraSatch Resend"
             if provider_key == "email"
-            else None
+            else (
+                f"GeoJSON · {urlsplit(str(configuration['endpoint_url'])).hostname}"
+                if provider_key == "geojson"
+                else None
+            )
         ),
-        provider_account_id=("resend" if provider_key == "email" else None),
+        provider_account_id=(
+            "resend"
+            if provider_key == "email"
+            else (
+                urlsplit(str(configuration["endpoint_url"])).hostname
+                if provider_key == "geojson"
+                else None
+            )
+        ),
     )
     session.add(connection)
     await session.flush()
