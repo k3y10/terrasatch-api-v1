@@ -21,7 +21,9 @@ from .models import (
 )
 from .oauth_service import active_credentials
 from .operations import (
+    create_google_calendar_event,
     create_google_drive_file,
+    create_microsoft_calendar_event,
     create_microsoft_drive_file,
     put_aws_s3_object,
     put_cloudflare_r2_object,
@@ -238,6 +240,29 @@ async def execute(
         if not isinstance(mime_type, str):
             raise InvalidConfiguration("document.create mime_type must be a string")
         metadata = _content_metadata(content, name=name, mime_type=mime_type)
+    elif capability == "calendar.event.create":
+        title = payload.get("title")
+        start = payload.get("start")
+        end = payload.get("end")
+        description = payload.get("description", "")
+        location = payload.get("location", "")
+        if not isinstance(title, str) or not isinstance(start, str) or not isinstance(end, str):
+            raise InvalidConfiguration(
+                "calendar.event.create requires title, start, and end"
+            )
+        if not isinstance(description, str) or not isinstance(location, str):
+            raise InvalidConfiguration(
+                "calendar.event.create description and location must be strings"
+            )
+        if len(description) > 5000 or len(location) > 500:
+            raise InvalidConfiguration("Calendar event metadata exceeds the allowed size")
+        metadata = _content_metadata(
+            description,
+            title=" ".join(title.split())[:200],
+            start=start,
+            end=end,
+            location=" ".join(location.split())[:500],
+        )
     else:
         raise InvalidConfiguration(f"Unsupported integration capability: {capability}")
 
@@ -306,6 +331,38 @@ async def execute(
                     credentials,
                     text=text,
                     request_id=request_id,
+                )
+            elif (
+                capability == "calendar.event.create"
+                and connection.provider == "google_calendar"
+            ):
+                calendar_id = dict(connection.configuration or {}).get("calendar_id")
+                if calendar_id is not None and not isinstance(calendar_id, str):
+                    raise InvalidConfiguration("Stored Google calendar_id is invalid")
+                result = await create_google_calendar_event(
+                    credentials,
+                    calendar_id=calendar_id,
+                    title=title,
+                    start=start,
+                    end=end,
+                    description=description,
+                    location=location,
+                )
+            elif (
+                capability == "calendar.event.create"
+                and connection.provider == "microsoft_calendar"
+            ):
+                calendar_id = dict(connection.configuration or {}).get("calendar_id")
+                if calendar_id is not None and not isinstance(calendar_id, str):
+                    raise InvalidConfiguration("Stored Microsoft calendar_id is invalid")
+                result = await create_microsoft_calendar_event(
+                    credentials,
+                    calendar_id=calendar_id,
+                    title=title,
+                    start=start,
+                    end=end,
+                    description=description,
+                    location=location,
                 )
             elif capability == "document.create" and connection.provider == "google_drive":
                 folder_id = dict(connection.configuration or {}).get("folder_id")
