@@ -29,6 +29,21 @@ _R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
 _S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _NWS_ROOT = "https://api.weather.gov"
 _NWS_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_UAC_ROOT = "https://utahavalanchecenter.org"
+_UAC_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_UAC_REGIONS = frozenset(
+    {
+        "logan",
+        "ogden",
+        "uintas",
+        "salt-lake",
+        "provo",
+        "skyline",
+        "moab",
+        "abajos",
+        "southwest",
+    }
+)
 _NWS_FORECAST_PATH = re.compile(
     r"^/gridpoints/[A-Z]{3}/[0-9]+,[0-9]+/forecast/?$"
 )
@@ -1003,6 +1018,52 @@ async def query_stac_items(
             "truncated": len(raw_items) > len(items),
             "number_matched": payload.get("numberMatched"),
             "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
+def validate_uac_region(value: str) -> str:
+    normalized = value.strip().casefold()
+    if normalized not in _UAC_REGIONS:
+        raise InvalidConfiguration("Utah Avalanche Center region is not supported")
+    return normalized
+
+
+async def query_uac_forecast(
+    *,
+    region: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    normalized_region = validate_uac_region(region)
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{_UAC_ROOT}/forecast/{normalized_region}/json",
+        max_bytes=2_000_000,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": _UAC_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Utah Avalanche Center forecast failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Utah Avalanche Center forecast returned invalid JSON"
+        ) from error
+    if not isinstance(payload, (dict, list)):
+        raise ProviderUnavailable(
+            "Utah Avalanche Center forecast returned an invalid response"
+        )
+    return ProviderQueryResult(
+        data={"forecast": payload},
+        metadata={
+            "source_host": "utahavalanchecenter.org",
+            "region": normalized_region,
         },
     )
 
