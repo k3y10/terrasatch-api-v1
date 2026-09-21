@@ -29,6 +29,7 @@ from .operations import (
     query_caltopo_map,
     query_caltopo_team,
     query_geojson_features,
+    query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
     query_snowflake,
@@ -470,6 +471,7 @@ async def query(
             "ogc_api_features",
             "stac_api",
             "arcgis_enterprise_public",
+            "nws_forecast",
         }:
             credentials, _ = await active_credentials(
                 session,
@@ -664,6 +666,38 @@ async def query(
                 return_geometry=return_geometry,
                 result_record_count=result_record_count,
                 result_offset=result_offset,
+            )
+
+        elif (
+            capability == "weather.forecast.read"
+            and connection.provider == "nws_forecast"
+        ):
+            configuration = dict(connection.configuration or {})
+            configured_max = configuration.get("max_periods", 14)
+            if not isinstance(configured_max, int):
+                raise InvalidConfiguration(
+                    "Stored NWS forecast configuration is invalid"
+                )
+            allowed_keys = {"latitude", "longitude", "periods"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "NWS forecast received unsupported query parameters"
+                )
+            latitude = payload.get("latitude")
+            longitude = payload.get("longitude")
+            requested_periods = payload.get("periods", configured_max)
+            if (
+                not isinstance(requested_periods, int)
+                or isinstance(requested_periods, bool)
+                or not 1 <= requested_periods <= configured_max
+            ):
+                raise InvalidConfiguration(
+                    "NWS forecast periods must be between 1 and the configured maximum"
+                )
+            result = await query_nws_forecast(
+                latitude=latitude,
+                longitude=longitude,
+                max_periods=requested_periods,
             )
 
         elif capability == "map.features.query" and connection.provider == "esri_arcgis":
