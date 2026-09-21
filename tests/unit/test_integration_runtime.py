@@ -1913,3 +1913,127 @@ async def test_shared_microsoft_connection_requires_sharepoint_site() -> None:
         assert connection.status == IntegrationStatus.REQUESTED.value
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_calendar_runtime_requires_explicit_shared_target_and_routes_event(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Calendar runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Calendar runtime org",
+            slug=f"calendar-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Calendar Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        with pytest.raises(InvalidConfiguration, match="explicit calendar_id"):
+            await create_connection_request(
+                session,
+                organization_id=organization.id,
+                user_id=admin.id,
+                role=MembershipRole.ADMIN,
+                provider_key="google_calendar",
+                scope=IntegrationScope.ORGANIZATION,
+                team_id=None,
+                display_name="Operations calendar",
+                configuration={},
+            )
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="google_calendar",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="Operations calendar",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={"calendar_id": "ops@group.calendar.google.com"},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["calendar.event.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["calendar.event.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "calendar-access"}, object()
+
+        async def fake_create(*args, **kwargs):
+            assert kwargs == {
+                "calendar_id": "ops@group.calendar.google.com",
+                "title": "Shift briefing",
+                "start": "2026-09-22T08:00:00-06:00",
+                "end": "2026-09-22T09:00:00-06:00",
+                "description": "Morning brief",
+                "location": "Operations room",
+            }
+            return ProviderOperationResult(
+                external_id="event-1",
+                metadata={"calendar_id": "ops@group.calendar.google.com"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.create_google_calendar_event",
+            fake_create,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="calendar.event.create",
+            request_id=uuid4(),
+            payload={
+                "title": "Shift briefing",
+                "start": "2026-09-22T08:00:00-06:00",
+                "end": "2026-09-22T09:00:00-06:00",
+                "description": "Morning brief",
+                "location": "Operations room",
+            },
+            connection_id=connection.id,
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "event-1"
+        assert delivery.request_metadata["title"] == "Shift briefing"
+
+    await engine.dispose()
