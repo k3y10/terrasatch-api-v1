@@ -5,6 +5,7 @@ from __future__ import annotations
 from base64 import urlsafe_b64decode
 from binascii import Error as BinasciiError
 from email.utils import parseaddr
+from email.utils import parseaddr
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
@@ -323,6 +324,14 @@ class Settings(BaseSettings):
             if secret.startswith(("sk_test_", "rk_test_")):
                 return True
         return self.staging_payment_links_are_configured
+
+    @staticmethod
+    def _sender_uses_terrasatch_domain(value: str) -> bool:
+        _display_name, address = parseaddr(value)
+        if not address or "@" not in address:
+            return False
+        _local_part, domain = address.rsplit("@", 1)
+        return domain.casefold() == "terrasatch.com"
 
     @staticmethod
     def _sender_uses_terrasatch_domain(value: str) -> bool:
