@@ -28,6 +28,7 @@ from .operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_caltopo_team,
+    query_geojson_features,
     query_snowflake,
     read_mapbox_style,
     send_resend_notification,
@@ -459,13 +460,32 @@ async def query(
     )
 
     try:
-        credentials, _ = await active_credentials(
-            session,
-            settings,
-            connection=connection,
-        )
+        credentials: dict[str, object] = {}
+        if connection.provider != "geojson":
+            credentials, _ = await active_credentials(
+                session,
+                settings,
+                connection=connection,
+            )
 
-        if capability == "map.features.query" and connection.provider == "esri_arcgis":
+        if capability == "map.features.query" and connection.provider == "geojson":
+            if payload:
+                raise InvalidConfiguration(
+                    "GeoJSON map.features.query does not accept runtime URL or filter parameters"
+                )
+            configuration = dict(connection.configuration or {})
+            endpoint_url = configuration.get("endpoint_url")
+            max_features = configuration.get("max_features", 500)
+            if not isinstance(endpoint_url, str) or not isinstance(max_features, int):
+                raise InvalidConfiguration(
+                    "Stored GeoJSON connection configuration is invalid"
+                )
+            result = await query_geojson_features(
+                endpoint_url=endpoint_url,
+                max_features=max_features,
+            )
+
+        elif capability == "map.features.query" and connection.provider == "esri_arcgis":
             configured_layers = dict(connection.configuration or {}).get(
                 "feature_layer_urls"
             )
