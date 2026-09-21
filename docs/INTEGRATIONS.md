@@ -176,6 +176,23 @@ The adapter keeps the same approved text/JSON/CSV/Markdown MIME types and 5 MB b
 document runtime. For long-lived credentials, use a dedicated least-privilege IAM principal scoped to
 the intended bucket/prefix. Temporary STS-style credentials are supported through `session_token`.
 
+## GeoJSON / REST
+
+GeoJSON / REST is a read-only `map.features.query` source for public HTTPS FeatureCollection
+endpoints. A team or organization administrator approves exactly one endpoint URL and a maximum
+feature count when creating the connection. The URL cannot contain embedded credentials, query
+parameters, fragments, IP literals, localhost-style names, or non-HTTPS schemes.
+
+TerraSatch resolves the configured hostname and rejects non-public DNS results at connection setup.
+The destination is checked again immediately before a live query, redirects remain disabled, and
+the response is streamed with a hard 5 MB ceiling. Returned JSON must be a GeoJSON
+`FeatureCollection`; the configured feature limit is between 1 and 1000. If the source contains
+more features, TerraSatch returns the configured prefix and marks the response metadata as truncated.
+
+Satchy cannot provide a different URL or runtime filter payload for this provider. The endpoint is
+fixed by the administrator, the provider uses no customer credential record, and the normal
+organization/team plus `agent:satchy` read grants still apply.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -234,7 +251,7 @@ keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
-- `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
+- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, and fixed public GeoJSON feeds.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
