@@ -717,6 +717,107 @@ async def put_cloudflare_r2_object(
     )
 
 
+def _validate_ogc_bbox(value: object) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value)
+    ):
+        raise InvalidConfiguration("OGC bbox must contain four numeric WGS84 values")
+    min_x, min_y, max_x, max_y = (float(item) for item in value)
+    if (
+        not -180 <= min_x <= 180
+        or not -180 <= max_x <= 180
+        or not -90 <= min_y <= 90
+        or not -90 <= max_y <= 90
+        or min_x > max_x
+        or min_y > max_y
+    ):
+        raise InvalidConfiguration("OGC bbox is outside the WGS84 bounds")
+    return ",".join(str(item) for item in (min_x, min_y, max_x, max_y))
+
+
+def _validate_ogc_datetime(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 128 or not _OGC_DATETIME.fullmatch(value):
+        raise InvalidConfiguration("OGC datetime is invalid")
+    return value
+
+
+async def query_ogc_features(
+    *,
+    base_url: str,
+    collection_id: str,
+    limit: int,
+    bbox: object = None,
+    datetime_value: object = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise InvalidConfiguration("OGC limit must be an integer between 1 and 1000")
+    base = validate_ogc_api_base_url(base_url)
+    collection = validate_ogc_collection_id(collection_id)
+    if transport is None:
+        await validate_public_ogc_destination(base)
+
+    params: dict[str, str] = {"limit": str(limit)}
+    safe_bbox = _validate_ogc_bbox(bbox)
+    if safe_bbox is not None:
+        params["bbox"] = safe_bbox
+    safe_datetime = _validate_ogc_datetime(datetime_value)
+    if safe_datetime is not None:
+        params["datetime"] = safe_datetime
+
+    endpoint = (
+        f"{base}/collections/{quote(collection, safe='-._~')}/items"
+    )
+    response = await _request_limited(
+        transport,
+        "GET",
+        endpoint,
+        max_bytes=5_000_000,
+        headers={"Accept": "application/geo+json, application/json"},
+        params=params,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"OGC API Features query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("OGC API Features returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable("OGC API Features must return a FeatureCollection")
+    features = payload.get("features")
+    if not isinstance(features, list):
+        raise ProviderUnavailable("OGC API Features response has invalid features")
+    for feature in features:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            raise ProviderUnavailable("OGC API Features returned an invalid feature")
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    bbox_value = payload.get("bbox")
+    if isinstance(bbox_value, list):
+        data["bbox"] = bbox_value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": urlsplit(base).hostname,
+            "collection_id": collection,
+            "feature_count": len(features),
+            "number_matched": payload.get("numberMatched"),
+            "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
 async def query_geojson_features(
     *,
     endpoint_url: str,
