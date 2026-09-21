@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from terrasatch.config import Settings
 from terrasatch.errors import (
     InvalidConfiguration,
+    ProviderUnavailable,
     ResourceConflict,
     ResourceNotFound,
     TenantAccessDenied,
@@ -40,11 +43,17 @@ _SENSITIVE_KEY_PARTS = (
     "apikey",
     "private_key",
 )
+_EMAIL_ADDRESS = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
+    r"[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
     "microsoft_365": {"folder_path"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
+    "email": {"recipients", "subject"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
@@ -118,6 +127,35 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         if ".." in clean_prefix.split("/"):
             raise InvalidConfiguration("Amazon S3 prefix cannot contain '..'")
         configuration["prefix"] = clean_prefix
+
+    if provider_key == "email":
+        recipients = configuration.get("recipients")
+        subject = configuration.get("subject", "TerraSatch operational notification")
+        if not isinstance(recipients, list) or not 1 <= len(recipients) <= 10:
+            raise InvalidConfiguration(
+                "Email recipients must be a list containing between 1 and 10 addresses"
+            )
+        normalized_recipients: list[str] = []
+        for recipient in recipients:
+            if (
+                not isinstance(recipient, str)
+                or len(recipient.strip()) > 320
+                or not _EMAIL_ADDRESS.fullmatch(recipient.strip())
+            ):
+                raise InvalidConfiguration("Email recipients contains an invalid address")
+            normalized_recipients.append(recipient.strip().casefold())
+        if len(set(normalized_recipients)) != len(normalized_recipients):
+            raise InvalidConfiguration("Email recipients cannot contain duplicates")
+        if (
+            not isinstance(subject, str)
+            or not subject.strip()
+            or len(subject.strip()) > 160
+            or "\n" in subject
+            or "\r" in subject
+        ):
+            raise InvalidConfiguration("Email subject must be a single-line string")
+        configuration["recipients"] = normalized_recipients
+        configuration["subject"] = " ".join(subject.split())
 
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
@@ -223,6 +261,7 @@ def can_manage_scope(*, role: MembershipRole, scope: IntegrationScope) -> bool:
 async def create_connection_request(
     session: AsyncSession,
     *,
+    settings: Settings | None = None,
     organization_id: UUID,
     user_id: UUID,
     role: MembershipRole,
@@ -247,6 +286,16 @@ async def create_connection_request(
         raise InvalidConfiguration(
             f"{provider['name']} is {label} and cannot be connected yet"
         )
+    if provider["auth"] == "platform":
+        if (
+            provider_key != "email"
+            or settings is None
+            or not settings.integration_email_is_configured
+        ):
+            raise ProviderUnavailable(
+                f"{provider['name']} platform delivery is not configured"
+            )
+
     if not can_manage_scope(role=role, scope=scope):
         raise TenantAccessDenied(
             "Administrator access is required for team or organization integrations"
@@ -296,9 +345,19 @@ async def create_connection_request(
         owner_user_id=owner_user_id,
         created_by_user_id=user_id,
         display_name=normalized_display_name[:255],
-        status=IntegrationStatus.REQUESTED.value,
+        status=(
+            IntegrationStatus.CONNECTED.value
+            if provider["auth"] == "platform"
+            else IntegrationStatus.REQUESTED.value
+        ),
         configuration=dict(configuration),
         enabled=True,
+        provider_account_label=(
+            "TerraSatch Resend"
+            if provider_key == "email"
+            else None
+        ),
+        provider_account_id=("resend" if provider_key == "email" else None),
     )
     session.add(connection)
     await session.flush()
