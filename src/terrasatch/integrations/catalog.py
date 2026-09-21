@@ -90,6 +90,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "google_drive",
     "slack",
     "esri_arcgis",
+    "arcgis_enterprise_public",
     "microsoft_365",
     "microsoft_teams",
     "webhook",
@@ -261,6 +262,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "scopes": ["user", "team", "organization"],
         "capabilities": ["map.features.query"],
         "description": "Read approved ArcGIS Online feature layers through Satchy.",
+    },
+    "arcgis_enterprise_public": {
+        "key": "arcgis_enterprise_public",
+        "name": "ArcGIS Enterprise (Public)",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read administrator-approved public ArcGIS Enterprise FeatureServer layers."
+        ),
     },
     "mapbox": {
         "key": "mapbox",
