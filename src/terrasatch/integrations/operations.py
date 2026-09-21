@@ -121,17 +121,7 @@ def _validate_https_webhook_url(
     return normalized
 
 
-async def validate_public_webhook_destination(
-    value: str,
-    *,
-    label: str,
-    allowed_host_suffixes: tuple[str, ...] | None = None,
-) -> str:
-    normalized = _validate_https_webhook_url(
-        value,
-        label=label,
-        allowed_host_suffixes=allowed_host_suffixes,
-    )
+async def _validate_public_hostname(normalized: str, *, label: str) -> str:
     hostname = urlsplit(normalized).hostname
     assert hostname is not None
     try:
@@ -163,6 +153,61 @@ async def validate_public_webhook_destination(
                 f"{label} webhook destination resolves to a non-public address"
             )
     return normalized
+
+
+async def validate_public_webhook_destination(
+    value: str,
+    *,
+    label: str,
+    allowed_host_suffixes: tuple[str, ...] | None = None,
+) -> str:
+    normalized = _validate_https_webhook_url(
+        value,
+        label=label,
+        allowed_host_suffixes=allowed_host_suffixes,
+    )
+    return await _validate_public_hostname(normalized, label=f"{label} webhook")
+
+
+def validate_geojson_url(value: str) -> str:
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("GeoJSON endpoint has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "GeoJSON endpoint must be an HTTPS URL without credentials, query, or fragment"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration("GeoJSON endpoint must use a DNS hostname")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration("GeoJSON endpoint destination is not allowed")
+    return normalized
+
+
+async def validate_public_geojson_destination(value: str) -> str:
+    normalized = validate_geojson_url(value)
+    return await _validate_public_hostname(normalized, label="GeoJSON endpoint")
 
 
 def validate_generic_webhook_url(value: str) -> str:
