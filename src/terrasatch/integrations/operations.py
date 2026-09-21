@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import csv
 import hashlib
 import hmac
 import ipaddress
+import io
 import json
 import re
 import secrets
@@ -1018,6 +1020,151 @@ async def query_stac_items(
             "truncated": len(raw_items) > len(items),
             "number_matched": payload.get("numberMatched"),
             "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
+_FIRMS_ROOT = "https://firms.modaps.eosdis.nasa.gov"
+_FIRMS_SOURCES = frozenset(
+    {
+        "LANDSAT_NRT",
+        "MODIS_NRT",
+        "VIIRS_NOAA20_NRT",
+        "VIIRS_NOAA21_NRT",
+    }
+)
+
+
+def validate_firms_bounds(value: object) -> tuple[float, float, float, float]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or not all(
+            isinstance(item, (int, float)) and not isinstance(item, bool)
+            for item in value
+        )
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS bounds must be [west, south, east, north]"
+        )
+    west, south, east, north = (round(float(item), 4) for item in value)
+    if (
+        not -180 <= west < east <= 180
+        or not -90 <= south < north <= 90
+    ):
+        raise InvalidConfiguration("NASA FIRMS bounds are invalid")
+    return west, south, east, north
+
+
+def _firms_bounds_within(
+    requested: tuple[float, float, float, float],
+    approved: tuple[float, float, float, float],
+) -> bool:
+    west, south, east, north = requested
+    approved_west, approved_south, approved_east, approved_north = approved
+    return (
+        approved_west <= west
+        and approved_south <= south
+        and east <= approved_east
+        and north <= approved_north
+    )
+
+
+async def query_firms_detections(
+    credentials: dict[str, object],
+    *,
+    bounds: object,
+    source: str,
+    days: int,
+    max_detections: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    map_key = credentials.get("map_key")
+    if not isinstance(map_key, str) or not map_key.strip() or len(map_key) > 512:
+        raise ProviderUnavailable("NASA FIRMS MAP_KEY is unavailable")
+    if any(character.isspace() for character in map_key):
+        raise InvalidConfiguration("NASA FIRMS MAP_KEY is invalid")
+    normalized_source = source.strip().upper()
+    if normalized_source not in _FIRMS_SOURCES:
+        raise InvalidConfiguration("NASA FIRMS source is not supported")
+    if (
+        not isinstance(days, int)
+        or isinstance(days, bool)
+        or not 1 <= days <= 5
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS days must be an integer between 1 and 5"
+        )
+    if (
+        not isinstance(max_detections, int)
+        or isinstance(max_detections, bool)
+        or not 1 <= max_detections <= 2000
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS max_detections must be between 1 and 2000"
+        )
+    west, south, east, north = validate_firms_bounds(bounds)
+    area = f"{west:g},{south:g},{east:g},{north:g}"
+    response = await _request_limited(
+        transport,
+        "GET",
+        (
+            f"{_FIRMS_ROOT}/api/area/csv/"
+            f"{quote(map_key.strip(), safe='')}/"
+            f"{normalized_source}/{area}/{days}"
+        ),
+        max_bytes=8_000_000,
+        headers={"User-Agent": "TerraSatch/0.3 (+https://terrasatch.com)"},
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NASA FIRMS area query failed with HTTP {response.status_code}"
+        )
+
+    reader = csv.DictReader(io.StringIO(response.text))
+    fieldnames = reader.fieldnames or []
+    if "latitude" not in fieldnames or "longitude" not in fieldnames:
+        raise ProviderUnavailable("NASA FIRMS returned an invalid CSV response")
+
+    raw_rows = list(reader)
+    features: list[dict[str, object]] = []
+    for row in raw_rows[:max_detections]:
+        try:
+            latitude = float(row["latitude"])
+            longitude = float(row["longitude"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ProviderUnavailable(
+                "NASA FIRMS returned an invalid detection coordinate"
+            ) from error
+        properties = {
+            key: value
+            for key, value in row.items()
+            if key not in {"latitude", "longitude"} and value not in {None, ""}
+        }
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [longitude, latitude],
+                },
+                "properties": properties,
+            }
+        )
+
+    return ProviderQueryResult(
+        data={
+            "type": "FeatureCollection",
+            "features": features,
+        },
+        metadata={
+            "source_host": "firms.modaps.eosdis.nasa.gov",
+            "source": normalized_source,
+            "bounds": [west, south, east, north],
+            "day_range": days,
+            "detection_count": len(features),
+            "source_detection_count": len(raw_rows),
+            "truncated": len(raw_rows) > len(features),
         },
     )
 
