@@ -103,6 +103,8 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["microsoft_teams"]["can_connect"] is True
     assert with_store["webhook"]["connect_status"] == "external_setup_required"
     assert with_store["webhook"]["can_connect"] is True
+    assert with_store["cloudflare_r2"]["connect_status"] == "external_setup_required"
+    assert with_store["cloudflare_r2"]["can_connect"] is True
 
 
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
@@ -146,6 +148,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["webhook"]["capability_details"]
     }
     assert webhook_labels["notification.send"] == "Send notifications"
+    r2_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["cloudflare_r2"]["capability_details"]
+    }
+    assert r2_labels["document.create"] == "Create reports and files"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
