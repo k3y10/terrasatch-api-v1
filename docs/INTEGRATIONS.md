@@ -79,8 +79,9 @@ token in the HTTP Authorization header, cap a response at 200 features and 2 MB,
 non-`*.arcgis.com` destinations. This prevents the layer URL from becoming a general-purpose
 server-side request primitive.
 
-ArcGIS Enterprise and feature-editing capabilities remain planned; this adapter does not claim those
-capabilities yet.
+This OAuth adapter remains limited to ArcGIS Online. Public ArcGIS Enterprise FeatureServer reads
+are handled by the separate ArcGIS Enterprise (Public) provider below; authenticated Enterprise
+portals and feature-editing capabilities remain outside this adapter.
 
 1. Create ArcGIS OAuth credentials for a server-side application.
 2. Register the callback:
