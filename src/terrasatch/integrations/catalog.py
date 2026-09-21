@@ -139,9 +139,11 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "category": "productivity",
         "auth": "oauth2",
         "setup_status": "planned",
-        "scopes": ["user"],
+        "scopes": ["user", "team", "organization"],
         "capabilities": ["document.create"],
-        "description": "Create approved files in the connected member's OneDrive.",
+        "description": (
+            "Create approved files in OneDrive or an approved SharePoint document library."
+        ),
     },
     "slack": {
         "key": "slack",
