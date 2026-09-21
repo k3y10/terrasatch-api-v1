@@ -172,6 +172,7 @@ class IntegrationExecuteRequest(BaseModel):
         "document.create",
         "notification.send",
         "calendar.event.create",
+        "task.create",
     ]
     connection_id: UUID | None = None
     workflow_key: str | None = Field(
