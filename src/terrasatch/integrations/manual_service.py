@@ -16,9 +16,9 @@ from terrasatch.identity.models import MembershipRole
 from .crypto import encrypt_payload
 from .models import IntegrationConnection, IntegrationCredential, IntegrationStatus
 from .operations import (
+    probe_cloudflare_r2_bucket,
     query_caltopo_map,
     query_caltopo_team,
-    probe_cloudflare_r2_bucket,
     query_snowflake,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
