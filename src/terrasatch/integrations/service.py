@@ -61,7 +61,9 @@ _EMAIL_ADDRESS = re.compile(
 
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
+    "google_calendar": {"calendar_id"},
     "microsoft_365": {"site_id", "drive_id", "folder_path"},
+    "microsoft_calendar": {"calendar_id"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
@@ -87,6 +89,18 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         folder_id = configuration["folder_id"]
         if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
+
+    if provider_key in {"google_calendar", "microsoft_calendar"}:
+        calendar_id = configuration.get("calendar_id")
+        if calendar_id is not None:
+            if (
+                not isinstance(calendar_id, str)
+                or not calendar_id.strip()
+                or len(calendar_id) > 512
+                or "/" in calendar_id
+            ):
+                raise InvalidConfiguration("Calendar calendar_id is invalid")
+            configuration["calendar_id"] = calendar_id.strip()
 
     if provider_key == "microsoft_365":
         site_id = configuration.get("site_id")
@@ -468,6 +482,14 @@ async def create_connection_request(
     ):
         raise InvalidConfiguration(
             "Team or organization Microsoft 365 connections require a SharePoint site_id"
+        )
+    if (
+        provider_key in {"google_calendar", "microsoft_calendar"}
+        and scope != IntegrationScope.USER
+        and not configuration.get("calendar_id")
+    ):
+        raise InvalidConfiguration(
+            "Team or organization calendar connections require an explicit calendar_id"
         )
     if provider_key == "geojson":
         endpoint_url = configuration.get("endpoint_url")
