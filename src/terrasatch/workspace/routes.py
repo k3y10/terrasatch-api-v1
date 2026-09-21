@@ -168,7 +168,11 @@ class IntegrationRequest(BaseModel):
 
 class IntegrationExecuteRequest(BaseModel):
     request_id: UUID
-    capability: Literal["document.create", "notification.send"]
+    capability: Literal[
+        "document.create",
+        "notification.send",
+        "calendar.event.create",
+    ]
     connection_id: UUID | None = None
     workflow_key: str | None = Field(
         default=None,
