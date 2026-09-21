@@ -880,3 +880,111 @@ async def test_notification_runtime_routes_manual_webhook_providers(
         assert delivery.external_id == f"{provider}-1"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_r2_document_create_uses_generic_runtime(monkeypatch) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="R2 runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="R2 runtime org",
+            slug=f"r2-runtime-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="R2 User",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="cloudflare_r2",
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name="R2 reports",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "endpoint_url": "https://abc123.r2.cloudflarestorage.com",
+                "bucket": "field-reports",
+                "prefix": "exports",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["document.create"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["document.create"],
+                    created_by_user_id=user.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {
+                "access_key_id": "r2-access",
+                "secret_access_key": "r2-secret",
+            }, object()
+
+        async def fake_put(*args, **kwargs):
+            assert kwargs["endpoint_url"] == "https://abc123.r2.cloudflarestorage.com"
+            assert kwargs["bucket"] == "field-reports"
+            assert kwargs["prefix"] == "exports"
+            assert kwargs["name"] == "handoff.md"
+            assert kwargs["content"] == "Shift handoff"
+            return ProviderOperationResult(
+                external_id="exports/handoff.md",
+                metadata={"bucket": "field-reports"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.put_cloudflare_r2_object",
+            fake_put,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=user.id,
+            capability="document.create",
+            request_id=uuid4(),
+            payload={
+                "name": "handoff.md",
+                "content": "Shift handoff",
+                "mime_type": "text/markdown",
+            },
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "exports/handoff.md"
+
+    await engine.dispose()
