@@ -111,9 +111,11 @@ class MobileObservationRequest(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
-    def coordinates_are_paired(self) -> Self:
+    def validate_mobile_observation(self) -> Self:
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("latitude and longitude must be supplied together")
+        if self.captured_at is not None and self.captured_at.utcoffset() is None:
+            raise ValueError("captured_at must include a timezone offset")
         return self
 
 
