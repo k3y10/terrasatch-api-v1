@@ -20,6 +20,7 @@ from .operations import (
     probe_cloudflare_r2_bucket,
     query_caltopo_map,
     query_caltopo_team,
+    query_firms_detections,
     query_snowflake,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
@@ -32,6 +33,7 @@ MANUAL_CREDENTIAL_PROVIDERS = {
     "caltopo",
     "cloudflare_r2",
     "microsoft_teams",
+    "nasa_firms",
     "snowflake",
     "webhook",
 }
@@ -128,6 +130,25 @@ async def probe_manual_credentials(
         await validate_public_webhook_destination(url, label="Generic")
         host = urlsplit(url).hostname
         return f"Webhook · {host}", host
+
+    if provider == "nasa_firms":
+        bounds = configuration.get("bounds")
+        sources = configuration.get("sources")
+        if (
+            not isinstance(bounds, list)
+            or not isinstance(sources, list)
+            or not sources
+            or not isinstance(sources[0], str)
+        ):
+            raise InvalidConfiguration("NASA FIRMS configuration is missing")
+        await query_firms_detections(
+            credentials,
+            bounds=bounds,
+            source=sources[0],
+            days=1,
+            max_detections=1,
+        )
+        return "NASA FIRMS", "firms.modaps.eosdis.nasa.gov"
 
     if provider == "snowflake":
         host = configuration.get("account_host")
@@ -246,6 +267,13 @@ async def bind_manual_credentials(
                 "session_token",
                 max_length=8192,
             )
+    elif connection.provider == "nasa_firms":
+        expected = {"map_key"}
+        if set(values) != expected:
+            raise InvalidConfiguration("NASA FIRMS credentials require map_key")
+        credential_payload = {
+            "map_key": _required_string(values, "map_key", max_length=512)
+        }
     elif connection.provider == "cloudflare_r2":
         expected = {"access_key_id", "secret_access_key"}
         if set(values) != expected:
