@@ -367,6 +367,34 @@ every 30 seconds; this adapter performs on-demand reads and does not create its 
 The provider uses no customer credential record. Normal team/organization audience grants plus the
 `agent:satchy` grant control alert access.
 
+## NASA FIRMS
+
+NASA FIRMS is a read-only `wildfire.detections.read` provider for near-real-time satellite
+active-fire detections. It uses the official FIRMS Area API and an organization-owned NASA MAP_KEY.
+The MAP_KEY is stored only in TerraSatch's encrypted integration credential record and is never
+stored in connection configuration. NASA currently applies MAP_KEY transaction limits, so keeping
+the key organization-owned also isolates provider quota between TerraSatch customers.
+
+Administrators configure one approved geographic envelope, one or more supported near-real-time
+sources, a maximum 1-5 day range, and a maximum 1-2000 detections returned per request. Runtime
+callers may query the full approved envelope or a smaller bounding box entirely inside it. Runtime
+callers cannot expand beyond the approved envelope, select an unapproved sensor product, request
+historical dates, or provide an arbitrary FIRMS URL.
+
+The initial source allowlist is `VIIRS_NOAA20_NRT`, `VIIRS_NOAA21_NRT`, `LANDSAT_NRT`, and
+`MODIS_NRT`. Suomi-NPP is intentionally not included in the initial allowlist because NASA has
+announced cessation of that data product on November 1, 2026.
+
+FIRMS CSV detections are converted to GeoJSON point features while preserving the returned sensor
+attributes. Responses are streamed through an 8 MB ceiling and then capped to the configured
+detection limit. Network exceptions are re-raised without the underlying request URL so the
+path-embedded MAP_KEY cannot leak through an HTTP exception chain.
+
+A FIRMS detection is a satellite observation, not an authoritative fire incident or fire perimeter.
+TerraSatch keeps FIRMS separate from managed incident/perimeter providers such as WFIGS/NIFC so
+Satchy can reason about source type and provenance instead of treating hotspot detections as
+confirmed incident geometry.
+
 ## Utah Avalanche Center
 
 The Utah Avalanche Center integration is a read-only `avalanche.forecast.read` provider backed by
@@ -451,6 +479,7 @@ keeping customer credentials out of browser state:
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
 - `weather.alerts.read`: official active NWS watches, warnings, advisories, and alerts.
+- `wildfire.detections.read`: bounded NASA FIRMS near-real-time satellite fire detections.
 - `avalanche.forecast.read`: official Utah Avalanche Center daily forecasts for approved Utah regions.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
