@@ -30,6 +30,7 @@ from .operations import (
     query_caltopo_team,
     query_geojson_features,
     query_ogc_features,
+    query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
     read_mapbox_style,
@@ -38,6 +39,7 @@ from .operations import (
     send_teams_message,
     send_webhook_notification,
     validate_arcgis_feature_layer_url,
+    validate_public_arcgis_feature_layer_url,
 )
 from .provider_config import resolve_provider_secret_fields
 
@@ -463,7 +465,12 @@ async def query(
 
     try:
         credentials: dict[str, object] = {}
-        if connection.provider not in {"geojson", "ogc_api_features", "stac_api"}:
+        if connection.provider not in {
+            "geojson",
+            "ogc_api_features",
+            "stac_api",
+            "arcgis_enterprise_public",
+        }:
             credentials, _ = await active_credentials(
                 session,
                 settings,
@@ -578,6 +585,85 @@ async def query(
                 limit=requested_limit,
                 bbox=payload.get("bbox"),
                 datetime_value=payload.get("datetime"),
+            )
+
+        elif (
+            capability == "map.features.query"
+            and connection.provider == "arcgis_enterprise_public"
+        ):
+            configured_layers = dict(connection.configuration or {}).get(
+                "feature_layer_urls"
+            )
+            if not isinstance(configured_layers, list) or not configured_layers:
+                raise InvalidConfiguration(
+                    "Public ArcGIS Enterprise connection has no approved feature layers"
+                )
+            approved_layers = {
+                validate_public_arcgis_feature_layer_url(item)
+                for item in configured_layers
+                if isinstance(item, str)
+            }
+            requested_layer = payload.get("layer_url")
+            if requested_layer is None and len(approved_layers) == 1:
+                layer_url = next(iter(approved_layers))
+            elif isinstance(requested_layer, str):
+                layer_url = validate_public_arcgis_feature_layer_url(
+                    requested_layer
+                )
+            else:
+                raise InvalidConfiguration(
+                    "map.features.query requires layer_url when multiple public "
+                    "ArcGIS Enterprise layers are approved"
+                )
+            if layer_url not in approved_layers:
+                raise InvalidConfiguration(
+                    "Public ArcGIS Enterprise feature layer is not approved"
+                )
+            allowed_keys = {
+                "layer_url",
+                "where",
+                "out_fields",
+                "return_geometry",
+                "result_record_count",
+                "result_offset",
+            }
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "Public ArcGIS Enterprise received unsupported query parameters"
+                )
+            where = payload.get("where", "1=1")
+            out_fields = payload.get("out_fields", ["*"])
+            return_geometry = payload.get("return_geometry", True)
+            result_record_count = payload.get("result_record_count", 100)
+            result_offset = payload.get("result_offset", 0)
+            if not isinstance(where, str):
+                raise InvalidConfiguration("ArcGIS where must be a string")
+            if not isinstance(out_fields, list) or not all(
+                isinstance(field, str) for field in out_fields
+            ):
+                raise InvalidConfiguration(
+                    "ArcGIS out_fields must be a list of field names"
+                )
+            if not isinstance(return_geometry, bool):
+                raise InvalidConfiguration("ArcGIS return_geometry must be boolean")
+            if not isinstance(result_record_count, int) or isinstance(
+                result_record_count,
+                bool,
+            ):
+                raise InvalidConfiguration(
+                    "ArcGIS result_record_count must be an integer"
+                )
+            if not isinstance(result_offset, int) or isinstance(result_offset, bool):
+                raise InvalidConfiguration(
+                    "ArcGIS result_offset must be an integer"
+                )
+            result = await query_public_arcgis_features(
+                layer_url=layer_url,
+                where=where,
+                out_fields=out_fields,
+                return_geometry=return_geometry,
+                result_record_count=result_record_count,
+                result_offset=result_offset,
             )
 
         elif capability == "map.features.query" and connection.provider == "esri_arcgis":
