@@ -2374,3 +2374,131 @@ async def test_uac_forecast_runtime_is_credential_free_and_region_bounded(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nws_alert_runtime_is_credential_free_and_selector_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="NWS alerts runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="NWS alerts runtime org",
+            slug=f"nws-alerts-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="NWS Alerts Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="nws_alerts",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="NWS active alerts",
+            configuration={
+                "areas": ["UT"],
+                "zones": ["UTC035"],
+                "allow_point_queries": True,
+                "max_alerts": 20,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_label == "National Weather Service Alerts"
+        assert connection.provider_account_id == "api.weather.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("NWS alerts must not load customer credentials")
+
+        async def fake_alerts(**kwargs):
+            assert kwargs == {
+                "area": "UT",
+                "zone": None,
+                "latitude": None,
+                "longitude": None,
+                "max_alerts": 5,
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "api.weather.gov",
+                    "selector_type": "area",
+                    "selector_value": "UT",
+                    "alert_count": 0,
+                    "source_alert_count": 0,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_nws_alerts",
+            fake_alerts,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="weather.alerts.read",
+            payload={"area": "ut", "limit": 5},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nws_alerts"
+        assert result["metadata"]["selector_value"] == "UT"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "CO"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "UT", "url": "https://example.com/alerts"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="exactly one"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "UT", "zone": "UTC035"},
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
