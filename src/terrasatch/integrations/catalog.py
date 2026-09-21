@@ -69,6 +69,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Send notifications",
         "access": "write",
     },
+    "calendar.event.create": {
+        "key": "calendar.event.create",
+        "label": "Create calendar events",
+        "access": "write",
+    },
     "map.features.query": {
         "key": "map.features.query",
         "label": "Read map features",
@@ -93,10 +98,12 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
 
 _SUPPORTED_PROVIDER_KEYS = {
     "google_drive",
+    "google_calendar",
     "slack",
     "esri_arcgis",
     "arcgis_enterprise_public",
     "microsoft_365",
+    "microsoft_calendar",
     "microsoft_teams",
     "webhook",
     "cloudflare_r2",
@@ -133,6 +140,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["document.create"],
         "description": "Per-file Drive access for approved exports and operational files.",
     },
+    "google_calendar": {
+        "key": "google_calendar",
+        "name": "Google Calendar",
+        "category": "productivity",
+        "auth": "oauth2",
+        "setup_status": "planned",
+        "scopes": ["user", "team", "organization"],
+        "capabilities": ["calendar.event.create"],
+        "description": (
+            "Create approved events in one configured Google Calendar."
+        ),
+    },
     "microsoft_365": {
         "key": "microsoft_365",
         "name": "Microsoft 365",
@@ -143,6 +162,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["document.create"],
         "description": (
             "Create approved files in OneDrive or an approved SharePoint document library."
+        ),
+    },
+    "microsoft_calendar": {
+        "key": "microsoft_calendar",
+        "name": "Outlook Calendar",
+        "category": "productivity",
+        "auth": "oauth2",
+        "setup_status": "planned",
+        "scopes": ["user", "team", "organization"],
+        "capabilities": ["calendar.event.create"],
+        "description": (
+            "Create approved events in a configured Outlook or shared Microsoft calendar."
         ),
     },
     "slack": {
