@@ -11,8 +11,12 @@ from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.adapters import (
     ArcGISOAuthAdapter,
+    ConfluenceOAuthAdapter,
+    GoogleCalendarOAuthAdapter,
     GoogleDriveOAuthAdapter,
+    JiraOAuthAdapter,
     Microsoft365OAuthAdapter,
+    MicrosoftCalendarOAuthAdapter,
     SlackOAuthAdapter,
 )
 from terrasatch.integrations.catalog import provider_catalog
@@ -336,6 +340,26 @@ def test_nws_forecast_configuration_bounds_period_count() -> None:
         _validate_configuration("nws_forecast", {"max_periods": 15})
 
 
+def test_microsoft_365_configuration_supports_sharepoint_targets() -> None:
+    configuration: dict[str, object] = {
+        "site_id": "contoso.sharepoint.com,site-collection,site-id",
+        "drive_id": "b!approved-drive",
+        "folder_path": "Operations / Reports",
+    }
+    _validate_configuration("microsoft_365", configuration)
+    assert configuration == {
+        "site_id": "contoso.sharepoint.com,site-collection,site-id",
+        "drive_id": "b!approved-drive",
+        "folder_path": "Operations/Reports",
+    }
+
+    with pytest.raises(InvalidConfiguration, match="site_id"):
+        _validate_configuration(
+            "microsoft_365",
+            {"site_id": "https://contoso.sharepoint.com/sites/ops"},
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -486,6 +510,46 @@ async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identi
     assert result.account_label == "field@example.com"
     assert result.account_id == "permission-123"
     assert result.credentials["refresh_token"] == "google-refresh"
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_oauth_uses_event_scope_and_separate_token() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"google_calendar":{"client_id":"google-client","client_secret":"google-secret",'
+            '"redirect_uri":"https://api.example.com/google-calendar/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GoogleCalendarOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "calendar-access",
+                    "refresh_token": "calendar-refresh",
+                    "expires_in": 3600,
+                    "scope": "https://www.googleapis.com/auth/calendar.events",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url).startswith(GoogleCalendarOAuthAdapter.events_endpoint):
+            assert request.headers["Authorization"] == "Bearer calendar-access"
+            return httpx.Response(200, json={"items": []})
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = GoogleCalendarOAuthAdapter(
+        resolve_provider_app_config(settings, "google_calendar", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="calendar-state"))
+    params = parse_qs(authorization.query)
+    assert params["scope"] == ["https://www.googleapis.com/auth/calendar.events"]
+    result = await adapter.exchange_code(code="calendar-code")
+    assert result.account_id == "primary"
+    assert result.credentials["provider"] == "google_calendar"
+    assert result.credentials["refresh_token"] == "calendar-refresh"
 
 
 @pytest.mark.asyncio
@@ -719,6 +783,170 @@ async def test_microsoft_oauth_requests_one_drive_scopes_and_probes_identity() -
     assert result.account_id == "user-123"
     assert result.credentials["refresh_token"] == "ms-refresh"
 
+
+
+@pytest.mark.asyncio
+async def test_microsoft_calendar_oauth_uses_shared_calendar_scope() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"microsoft_calendar":{"client_id":"ms-client","client_secret":"ms-secret",'
+            '"redirect_uri":"https://api.example.com/microsoft-calendar/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == MicrosoftCalendarOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ms-calendar-access",
+                    "refresh_token": "ms-calendar-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access User.Read Calendars.ReadWrite.Shared",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url).startswith(MicrosoftCalendarOAuthAdapter.profile_endpoint):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "user-123",
+                    "displayName": "Field User",
+                    "userPrincipalName": "field@example.com",
+                },
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = MicrosoftCalendarOAuthAdapter(
+        resolve_provider_app_config(settings, "microsoft_calendar", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="ms-calendar-state"))
+    params = parse_qs(authorization.query)
+    assert "Calendars.ReadWrite.Shared" in params["scope"][0]
+    assert "Files.ReadWrite" not in params["scope"][0]
+    result = await adapter.exchange_code(code="ms-calendar-code")
+    assert result.account_id == "user-123"
+    assert result.credentials["provider"] == "microsoft_calendar"
+
+
+@pytest.mark.asyncio
+async def test_jira_oauth_uses_write_scope_and_discovers_cloud_site() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"jira":{"client_id":"jira-client","client_secret":"jira-secret",'
+            '"redirect_uri":"https://api.example.com/jira/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == JiraOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "jira-access",
+                    "refresh_token": "jira-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access write:jira-work",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url) == JiraOAuthAdapter.resources_endpoint:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                        "name": "Field Ops",
+                        "url": "https://fieldops.atlassian.net",
+                        "scopes": ["write:jira-work"],
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = JiraOAuthAdapter(
+        resolve_provider_app_config(settings, "jira", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="jira-state"))
+    params = parse_qs(authorization.query)
+    assert params["audience"] == ["api.atlassian.com"]
+    assert "write:jira-work" in params["scope"][0]
+    result = await adapter.exchange_code(code="jira-code")
+    assert result.account_label == "Field Ops"
+    assert result.account_id == "1324a887-45db-1bf4-1e99-ef0ff456d421"
+    assert result.credentials["provider"] == "jira"
+
+
+@pytest.mark.asyncio
+async def test_confluence_oauth_uses_page_write_scope() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"confluence":{"client_id":"conf-client","client_secret":"conf-secret",'
+            '"redirect_uri":"https://api.example.com/confluence/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == ConfluenceOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "conf-access",
+                    "refresh_token": "conf-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access write:page:confluence",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url) == ConfluenceOAuthAdapter.resources_endpoint:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                        "name": "Field Ops",
+                        "url": "https://fieldops.atlassian.net",
+                        "scopes": ["write:page:confluence"],
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = ConfluenceOAuthAdapter(
+        resolve_provider_app_config(settings, "confluence", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="conf-state"))
+    params = parse_qs(authorization.query)
+    assert "write:page:confluence" in params["scope"][0]
+    result = await adapter.exchange_code(code="conf-code")
+    assert result.account_id == "1324a887-45db-1bf4-1e99-ef0ff456d421"
+    assert result.credentials["provider"] == "confluence"
+
+
+def test_atlassian_configuration_fixes_project_and_space_targets() -> None:
+    jira: dict[str, object] = {
+        "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+        "project_key": "ops",
+        "issue_type": " Task ",
+    }
+    _validate_configuration("jira", jira)
+    assert jira["project_key"] == "OPS"
+    assert jira["issue_type"] == "Task"
+
+    confluence: dict[str, object] = {
+        "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+        "space_id": "123456",
+        "parent_page_id": "654321",
+    }
+    _validate_configuration("confluence", confluence)
+    assert confluence["space_id"] == "123456"
+    assert confluence["parent_page_id"] == "654321"
 
 
 def test_mapbox_managed_service_requires_fixed_style_allowlist() -> None:

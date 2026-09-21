@@ -51,6 +51,55 @@ The authorization request uses a random single-use `state`, requests offline acc
 
 Drive exports use multipart `files.create` requests and set `supportsAllDrives=true`. That keeps the same export path compatible with My Drive and Shared Drive destinations when the authenticated user and the narrow `drive.file` grant can access the selected parent folder. If no parent folder is configured, Google places the export in the user's My Drive root.
 
+## Google Calendar
+
+Google Calendar is a separate OAuth connection from Google Drive. It requests only the
+`calendar.events` scope so calendar workflows do not expand the permissions of existing Drive
+connections. The provider exposes `calendar.event.create`.
+
+Personal connections may use the primary calendar. Team and organization connections must configure
+an explicit `calendar_id`, preventing a shared workflow from silently writing into the authorizing
+member's personal primary calendar. Runtime events use a provider-neutral title, offset-aware ISO
+start/end timestamps, optional description, and optional location. Configure provider key
+`google_calendar` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/google_calendar/callback`.
+
+## Outlook Calendar
+
+Outlook Calendar is separate from Microsoft 365 file/SharePoint authorization. It requests delegated
+`Calendars.ReadWrite.Shared`, `User.Read`, and `offline_access`, allowing TerraSatch to create
+events only in calendars the signed-in member already has permission to edit. The provider exposes
+`calendar.event.create`.
+
+Personal connections may use the primary calendar. Team and organization connections must configure
+an explicit `calendar_id`. TerraSatch converts offset-aware timestamps to UTC before sending the
+event to Microsoft Graph. Configure provider key `microsoft_calendar` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/microsoft_calendar/callback`.
+
+## Jira
+
+Jira uses Atlassian Cloud OAuth 2.0 (3LO) with `offline_access` and the recommended
+`write:jira-work` scope. Each connection fixes one Atlassian `cloud_id`, one Jira project key, and
+one issue type in administrator-controlled configuration. The provider exposes `task.create`.
+
+Runtime callers supply only a title and optional description. TerraSatch builds a basic Jira issue
+using Atlassian Document Format for the description; callers cannot override the cloud site, project,
+issue type, REST path, transition, JQL, or attachments. Configure provider key `jira` with the
+callback `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/jira/callback`.
+
+## Confluence
+
+Confluence uses a separate Atlassian Cloud OAuth 2.0 (3LO) connection with `offline_access` and
+`write:page:confluence`. Each connection fixes one Atlassian `cloud_id`, one Confluence
+`space_id`, and optionally one parent page ID.
+
+Confluence intentionally reuses TerraSatch's `document.create` capability so approved reports and
+handoffs can be delivered to a knowledge base without a second report abstraction. Text and Markdown
+content is escaped before being placed in Confluence's storage representation. Runtime callers
+cannot select another site, space, parent page, or arbitrary Confluence endpoint. Configure
+provider key `confluence` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/confluence/callback`.
+
 ## Slack
 
 The initial Slack adapter deliberately requests only the `incoming-webhook` scope so the installing workspace chooses the destination explicitly and TerraSatch does not receive broad message-history access.
@@ -93,9 +142,20 @@ portals and feature-editing capabilities remain outside this adapter.
 ## Microsoft 365
 
 Microsoft 365 uses delegated Microsoft identity-platform OAuth with `offline_access`, `User.Read`,
-and `Files.ReadWrite`. The first supported capability is `document.create`, implemented as a small
-file upload to the connected user's OneDrive. Team and organization OneDrive/SharePoint routing is
-not advertised yet; the initial connection scope is intentionally personal.
+and `Files.ReadWrite`. The supported `document.create` capability can target either the connected
+member's OneDrive or an administrator-approved SharePoint document library through Microsoft Graph.
+
+Personal connections default to the member's `/me/drive` and may optionally configure a folder
+path. Team and organization connections must configure a SharePoint `site_id` so a shared
+connection cannot silently write into the authorizing administrator's personal OneDrive. An optional
+`drive_id` selects a specific document library; otherwise TerraSatch uses the site's default drive.
+Folder paths remain fixed in connection configuration rather than supplied by Satchy at execution
+time.
+
+The delegated `Files.ReadWrite` permission is intentionally retained rather than requesting broad
+tenant-wide SharePoint write scopes. The signed-in Microsoft user must already have access to the
+configured site or drive. TerraSatch stores the delegated access/refresh tokens only in the encrypted
+connection credential record.
 
 ## Microsoft Teams
 
@@ -338,7 +398,9 @@ Connected or TerraSatch-managed providers currently expose these server-side cap
 keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
-- `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
+- `document.create`: Google Drive, Microsoft OneDrive/SharePoint, Confluence, Cloudflare R2, and Amazon S3.
+- `calendar.event.create`: Google Calendar and Outlook/shared Microsoft calendars.
+- `task.create`: Jira issues in one administrator-approved project and issue type.
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.

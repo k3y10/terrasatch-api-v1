@@ -21,7 +21,11 @@ from .models import (
 )
 from .oauth_service import active_credentials
 from .operations import (
+    create_confluence_page,
+    create_google_calendar_event,
     create_google_drive_file,
+    create_jira_issue,
+    create_microsoft_calendar_event,
     create_microsoft_drive_file,
     put_aws_s3_object,
     put_cloudflare_r2_object,
@@ -238,6 +242,42 @@ async def execute(
         if not isinstance(mime_type, str):
             raise InvalidConfiguration("document.create mime_type must be a string")
         metadata = _content_metadata(content, name=name, mime_type=mime_type)
+    elif capability == "calendar.event.create":
+        title = payload.get("title")
+        start = payload.get("start")
+        end = payload.get("end")
+        description = payload.get("description", "")
+        location = payload.get("location", "")
+        if not isinstance(title, str) or not isinstance(start, str) or not isinstance(end, str):
+            raise InvalidConfiguration(
+                "calendar.event.create requires title, start, and end"
+            )
+        if not isinstance(description, str) or not isinstance(location, str):
+            raise InvalidConfiguration(
+                "calendar.event.create description and location must be strings"
+            )
+        if len(description) > 5000 or len(location) > 500:
+            raise InvalidConfiguration("Calendar event metadata exceeds the allowed size")
+        metadata = _content_metadata(
+            description,
+            title=" ".join(title.split())[:200],
+            start=start,
+            end=end,
+            location=" ".join(location.split())[:500],
+        )
+    elif capability == "task.create":
+        title = payload.get("title")
+        description = payload.get("description", "")
+        if not isinstance(title, str) or not title.strip():
+            raise InvalidConfiguration("task.create requires title")
+        if not isinstance(description, str):
+            raise InvalidConfiguration("task.create description must be a string")
+        if len(title) > 255 or len(description) > 10000:
+            raise InvalidConfiguration("Task content exceeds the allowed size")
+        metadata = _content_metadata(
+            description,
+            title=" ".join(title.split()),
+        )
     else:
         raise InvalidConfiguration(f"Unsupported integration capability: {capability}")
 
@@ -307,6 +347,80 @@ async def execute(
                     text=text,
                     request_id=request_id,
                 )
+            elif (
+                capability == "calendar.event.create"
+                and connection.provider == "google_calendar"
+            ):
+                calendar_id = dict(connection.configuration or {}).get("calendar_id")
+                if calendar_id is not None and not isinstance(calendar_id, str):
+                    raise InvalidConfiguration("Stored Google calendar_id is invalid")
+                result = await create_google_calendar_event(
+                    credentials,
+                    calendar_id=calendar_id,
+                    title=title,
+                    start=start,
+                    end=end,
+                    description=description,
+                    location=location,
+                )
+            elif (
+                capability == "calendar.event.create"
+                and connection.provider == "microsoft_calendar"
+            ):
+                calendar_id = dict(connection.configuration or {}).get("calendar_id")
+                if calendar_id is not None and not isinstance(calendar_id, str):
+                    raise InvalidConfiguration("Stored Microsoft calendar_id is invalid")
+                result = await create_microsoft_calendar_event(
+                    credentials,
+                    calendar_id=calendar_id,
+                    title=title,
+                    start=start,
+                    end=end,
+                    description=description,
+                    location=location,
+                )
+            elif capability == "task.create" and connection.provider == "jira":
+                configuration = dict(connection.configuration or {})
+                cloud_id = configuration.get("cloud_id")
+                project_key = configuration.get("project_key")
+                issue_type = configuration.get("issue_type")
+                if (
+                    not isinstance(cloud_id, str)
+                    or not isinstance(project_key, str)
+                    or not isinstance(issue_type, str)
+                ):
+                    raise InvalidConfiguration("Stored Jira configuration is invalid")
+                result = await create_jira_issue(
+                    credentials,
+                    cloud_id=cloud_id,
+                    project_key=project_key,
+                    issue_type=issue_type,
+                    title=title,
+                    description=description,
+                )
+            elif capability == "document.create" and connection.provider == "confluence":
+                configuration = dict(connection.configuration or {})
+                cloud_id = configuration.get("cloud_id")
+                space_id = configuration.get("space_id")
+                parent_page_id = configuration.get("parent_page_id")
+                if not isinstance(cloud_id, str) or not isinstance(space_id, str):
+                    raise InvalidConfiguration("Stored Confluence configuration is invalid")
+                if parent_page_id is not None and not isinstance(parent_page_id, str):
+                    raise InvalidConfiguration(
+                        "Stored Confluence parent_page_id is invalid"
+                    )
+                if mime_type not in {"text/plain", "text/markdown"}:
+                    raise InvalidConfiguration(
+                        "Confluence document.create accepts text or Markdown content"
+                    )
+                result = await create_confluence_page(
+                    credentials,
+                    cloud_id=cloud_id,
+                    space_id=space_id,
+                    parent_page_id=parent_page_id,
+                    title=name,
+                    content=content,
+                )
             elif capability == "document.create" and connection.provider == "google_drive":
                 folder_id = dict(connection.configuration or {}).get("folder_id")
                 if folder_id is not None and not isinstance(folder_id, str):
@@ -371,17 +485,26 @@ async def execute(
                 capability == "document.create"
                 and connection.provider == "microsoft_365"
             ):
-                folder_path = dict(connection.configuration or {}).get("folder_path")
+                configuration = dict(connection.configuration or {})
+                folder_path = configuration.get("folder_path")
+                site_id = configuration.get("site_id")
+                drive_id = configuration.get("drive_id")
                 if folder_path is not None and not isinstance(folder_path, str):
                     raise InvalidConfiguration(
                         "Stored Microsoft folder_path is invalid"
                     )
+                if site_id is not None and not isinstance(site_id, str):
+                    raise InvalidConfiguration("Stored Microsoft site_id is invalid")
+                if drive_id is not None and not isinstance(drive_id, str):
+                    raise InvalidConfiguration("Stored Microsoft drive_id is invalid")
                 result = await create_microsoft_drive_file(
                     credentials,
                     name=name,
                     content=content,
                     mime_type=mime_type,
                     folder_path=folder_path,
+                    site_id=site_id,
+                    drive_id=drive_id,
                 )
             else:
                 raise InvalidConfiguration(

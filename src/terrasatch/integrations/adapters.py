@@ -1,4 +1,4 @@
-"""OAuth provider adapters for Google Drive, Microsoft 365, Slack, and ArcGIS Online."""
+"""OAuth provider adapters for supported TerraSatch workspace services."""
 
 from __future__ import annotations
 
@@ -254,6 +254,30 @@ class GoogleDriveOAuthAdapter:
             raise ProviderUnavailable("Google credential revocation could not be confirmed")
 
 
+class GoogleCalendarOAuthAdapter(GoogleDriveOAuthAdapter):
+    """Google Calendar OAuth adapter kept separate from Drive authorization."""
+
+    provider_key = "google_calendar"
+    scopes = ("https://www.googleapis.com/auth/calendar.events",)
+    events_endpoint = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+
+    async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
+        access_token = credentials.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Google Calendar access token is unavailable")
+        response = await _request(
+            self.transport,
+            "GET",
+            self.events_endpoint,
+            params={"maxResults": "1"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Google Calendar connection check failed")
+        _json_payload(response, provider="Google Calendar")
+        return "Google Calendar", "primary"
+
+
 class Microsoft365OAuthAdapter:
     """Microsoft Graph delegated OAuth adapter for personal OneDrive output."""
 
@@ -400,6 +424,17 @@ class Microsoft365OAuthAdapter:
         # Microsoft does not expose a delegated refresh-token revocation endpoint
         # suitable for this flow. Disconnect deletes TerraSatch's encrypted copy.
         return None
+
+
+class MicrosoftCalendarOAuthAdapter(Microsoft365OAuthAdapter):
+    """Microsoft delegated OAuth adapter for user and shared calendars."""
+
+    provider_key = "microsoft_calendar"
+    scopes = (
+        "offline_access",
+        "User.Read",
+        "Calendars.ReadWrite.Shared",
+    )
 
 
 class SlackOAuthAdapter:
@@ -551,6 +586,180 @@ class SlackOAuthAdapter:
             "not_authed",
         }:
             raise ProviderUnavailable("Slack credential revocation could not be confirmed")
+
+
+class AtlassianOAuthAdapter:
+    """Shared Atlassian Cloud OAuth 2.0 (3LO) adapter."""
+
+    provider_key = ""
+    scopes: tuple[str, ...] = ()
+    resource_scope_markers: frozenset[str] = frozenset()
+    authorization_endpoint = "https://auth.atlassian.com/authorize"
+    token_endpoint = "https://auth.atlassian.com/oauth/token"
+    resources_endpoint = "https://api.atlassian.com/oauth/token/accessible-resources"
+
+    def __init__(
+        self,
+        app_config: ProviderAppConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.client_id = app_config.client_id
+        self.client_secret = app_config.client_secret
+        self.redirect_uri = app_config.redirect_uri
+        self.transport = transport
+
+    def authorization_url(self, *, state: str) -> str:
+        params = {
+            "audience": "api.atlassian.com",
+            "client_id": self.client_id,
+            "scope": " ".join(self.scopes),
+            "redirect_uri": self.redirect_uri,
+            "state": state,
+            "response_type": "code",
+            "prompt": "consent",
+        }
+        return f"{self.authorization_endpoint}?{urlencode(params)}"
+
+    async def exchange_code(self, *, code: str) -> OAuthExchangeResult:
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            json={
+                "grant_type": "authorization_code",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "code": code,
+                "redirect_uri": self.redirect_uri,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Atlassian authorization code exchange failed")
+        payload = _json_payload(response, provider="Atlassian")
+        access_token = payload.get("access_token")
+        refresh_token = payload.get("refresh_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Atlassian did not return an access token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable(
+                "Atlassian did not return a refresh token; reconnect the integration"
+            )
+        scope_text = str(payload.get("scope") or " ".join(self.scopes))
+        credentials: dict[str, object] = {
+            "provider": self.provider_key,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": str(payload.get("token_type") or "Bearer"),
+            "scope": scope_text.split(),
+        }
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            credentials["expires_at"] = expires_at
+        label, account_id = await self.probe(credentials)
+        return OAuthExchangeResult(
+            credentials,
+            label,
+            account_id,
+            scope_text.split(),
+        )
+
+    async def refresh(self, credentials: dict[str, object]) -> dict[str, object]:
+        refresh_token = credentials.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ProviderUnavailable(
+                "Atlassian refresh token is unavailable; reconnect the integration"
+            )
+        response = await _request(
+            self.transport,
+            "POST",
+            self.token_endpoint,
+            json={
+                "grant_type": "refresh_token",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": refresh_token,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Atlassian access-token refresh failed")
+        payload = _json_payload(response, provider="Atlassian")
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Atlassian did not return a refreshed access token")
+        next_credentials = dict(credentials)
+        next_credentials["access_token"] = access_token
+        next_refresh = payload.get("refresh_token")
+        if isinstance(next_refresh, str) and next_refresh:
+            next_credentials["refresh_token"] = next_refresh
+        expires_at = _expiry(payload.get("expires_in"))
+        if expires_at:
+            next_credentials["expires_at"] = expires_at
+        if payload.get("scope"):
+            next_credentials["scope"] = str(payload["scope"]).split()
+        return next_credentials
+
+    async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
+        access_token = credentials.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Atlassian access token is unavailable")
+        response = await _request(
+            self.transport,
+            "GET",
+            self.resources_endpoint,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+            },
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Atlassian site access check failed")
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise ProviderUnavailable(
+                "Atlassian returned an invalid site-access response"
+            ) from error
+        if not isinstance(payload, list):
+            raise ProviderUnavailable("Atlassian returned an invalid site-access response")
+        resources = [item for item in payload if isinstance(item, dict)]
+        for resource in resources:
+            scopes = resource.get("scopes")
+            if not isinstance(scopes, list):
+                continue
+            if self.resource_scope_markers and not (
+                self.resource_scope_markers & {str(item) for item in scopes}
+            ):
+                continue
+            resource_id = resource.get("id")
+            label = resource.get("name") or resource.get("url")
+            if isinstance(resource_id, str) and resource_id:
+                return (
+                    str(label)[:255] if label else "Atlassian Cloud",
+                    resource_id[:255],
+                )
+        raise ProviderUnavailable(
+            "Atlassian did not return an authorized site for this integration"
+        )
+
+    async def revoke(self, credentials: dict[str, object]) -> None:
+        # Atlassian 3LO does not expose a provider token-revocation endpoint for
+        # this server-side flow. Disconnect deletes TerraSatch's encrypted copy.
+        return None
+
+
+class JiraOAuthAdapter(AtlassianOAuthAdapter):
+    provider_key = "jira"
+    scopes = ("offline_access", "write:jira-work")
+    resource_scope_markers = frozenset({"write:jira-work"})
+
+
+class ConfluenceOAuthAdapter(AtlassianOAuthAdapter):
+    provider_key = "confluence"
+    scopes = ("offline_access", "write:page:confluence")
+    resource_scope_markers = frozenset({"write:page:confluence"})
 
 
 class ArcGISOAuthAdapter:
@@ -737,8 +946,16 @@ def get_adapter(
     assert app_config is not None
     if provider_key == "google_drive":
         return GoogleDriveOAuthAdapter(app_config, transport=transport)
+    if provider_key == "google_calendar":
+        return GoogleCalendarOAuthAdapter(app_config, transport=transport)
     if provider_key == "microsoft_365":
         return Microsoft365OAuthAdapter(app_config, transport=transport)
+    if provider_key == "microsoft_calendar":
+        return MicrosoftCalendarOAuthAdapter(app_config, transport=transport)
+    if provider_key == "jira":
+        return JiraOAuthAdapter(app_config, transport=transport)
+    if provider_key == "confluence":
+        return ConfluenceOAuthAdapter(app_config, transport=transport)
     if provider_key == "slack":
         return SlackOAuthAdapter(app_config, transport=transport)
     if provider_key == "esri_arcgis":

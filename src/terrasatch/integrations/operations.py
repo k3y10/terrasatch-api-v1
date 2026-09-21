@@ -14,7 +14,8 @@ import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from html import escape
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
@@ -1622,6 +1623,390 @@ async def create_google_drive_file(
     )
 
 
+def _calendar_id(value: str | None) -> str:
+    if value is None:
+        return "primary"
+    normalized = value.strip()
+    if not normalized or len(normalized) > 512 or "/" in normalized:
+        raise InvalidConfiguration("Calendar ID is invalid")
+    return normalized
+
+
+def _calendar_event_values(
+    *,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+) -> tuple[str, datetime, datetime, str, str]:
+    clean_title = " ".join(title.split())
+    if not clean_title or len(clean_title) > 200:
+        raise InvalidConfiguration(
+            "Calendar event title must be between 1 and 200 characters"
+        )
+    if len(description) > 5000:
+        raise InvalidConfiguration("Calendar event description is limited to 5000 characters")
+    clean_location = " ".join(location.split())
+    if len(clean_location) > 500:
+        raise InvalidConfiguration("Calendar event location is limited to 500 characters")
+
+    try:
+        start_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        end_at = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise InvalidConfiguration(
+            "Calendar event start and end must be ISO 8601 timestamps"
+        ) from error
+    if start_at.tzinfo is None or end_at.tzinfo is None:
+        raise InvalidConfiguration(
+            "Calendar event start and end must include a UTC offset"
+        )
+    if end_at <= start_at:
+        raise InvalidConfiguration("Calendar event end must be after start")
+    if end_at - start_at > timedelta(days=7):
+        raise InvalidConfiguration("Calendar events are limited to 7 days")
+    return clean_title, start_at, end_at, description, clean_location
+
+
+async def create_google_calendar_event(
+    credentials: dict[str, object],
+    *,
+    calendar_id: str | None,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Google Calendar access token is unavailable")
+    (
+        clean_title,
+        start_at,
+        end_at,
+        clean_description,
+        clean_location,
+    ) = _calendar_event_values(
+        title=title,
+        start=start,
+        end=end,
+        description=description,
+        location=location,
+    )
+    target_calendar = _calendar_id(calendar_id)
+    payload: dict[str, object] = {
+        "summary": clean_title,
+        "start": {"dateTime": start_at.isoformat()},
+        "end": {"dateTime": end_at.isoformat()},
+    }
+    if clean_description:
+        payload["description"] = clean_description
+    if clean_location:
+        payload["location"] = clean_location
+
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://www.googleapis.com/calendar/v3/calendars/"
+            f"{quote(target_calendar, safe='')}/events"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    if response.status_code not in {200, 201}:
+        raise ProviderUnavailable(
+            f"Google Calendar event creation failed with HTTP {response.status_code}"
+        )
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Google Calendar returned an invalid event response"
+        ) from error
+    if not isinstance(result, dict) or not result.get("id"):
+        raise ProviderUnavailable("Google Calendar did not return an event ID")
+    return ProviderOperationResult(
+        external_id=str(result["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "calendar_id": target_calendar,
+                "event_id": result.get("id"),
+                "html_link": result.get("htmlLink"),
+                "status": result.get("status"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
+async def create_microsoft_calendar_event(
+    credentials: dict[str, object],
+    *,
+    calendar_id: str | None,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Microsoft Calendar access token is unavailable")
+    (
+        clean_title,
+        start_at,
+        end_at,
+        clean_description,
+        clean_location,
+    ) = _calendar_event_values(
+        title=title,
+        start=start,
+        end=end,
+        description=description,
+        location=location,
+    )
+    target_calendar = _calendar_id(calendar_id)
+    if target_calendar == "primary":
+        url = f"{_MICROSOFT_GRAPH_ROOT}/me/calendar/events"
+    else:
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/me/calendars/"
+            f"{quote(target_calendar, safe='')}/events"
+        )
+    start_utc = start_at.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    end_utc = end_at.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    payload: dict[str, object] = {
+        "subject": clean_title,
+        "start": {"dateTime": start_utc, "timeZone": "UTC"},
+        "end": {"dateTime": end_utc, "timeZone": "UTC"},
+    }
+    if clean_description:
+        payload["body"] = {"contentType": "text", "content": clean_description}
+    if clean_location:
+        payload["location"] = {"displayName": clean_location}
+
+    response = await _request(
+        transport,
+        "POST",
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    if response.status_code != 201:
+        raise ProviderUnavailable(
+            f"Microsoft Calendar event creation failed with HTTP {response.status_code}"
+        )
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Microsoft Calendar returned an invalid event response"
+        ) from error
+    if not isinstance(result, dict) or not result.get("id"):
+        raise ProviderUnavailable("Microsoft Calendar did not return an event ID")
+    return ProviderOperationResult(
+        external_id=str(result["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "calendar_id": target_calendar,
+                "event_id": result.get("id"),
+                "web_link": result.get("webLink"),
+                "is_cancelled": result.get("isCancelled"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
+def _atlassian_cloud_id(value: str) -> str:
+    normalized = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,128}", normalized):
+        raise InvalidConfiguration("Atlassian cloud_id is invalid")
+    return normalized
+
+
+def _jira_project_key(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", normalized):
+        raise InvalidConfiguration("Jira project_key is invalid")
+    return normalized
+
+
+async def create_jira_issue(
+    credentials: dict[str, object],
+    *,
+    cloud_id: str,
+    project_key: str,
+    issue_type: str,
+    title: str,
+    description: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Jira access token is unavailable")
+    safe_cloud = _atlassian_cloud_id(cloud_id)
+    safe_project = _jira_project_key(project_key)
+    clean_issue_type = " ".join(issue_type.split())
+    clean_title = " ".join(title.split())
+    if not clean_issue_type or len(clean_issue_type) > 100:
+        raise InvalidConfiguration("Jira issue_type is invalid")
+    if not clean_title or len(clean_title) > 255:
+        raise InvalidConfiguration("Jira issue title must be between 1 and 255 characters")
+    if len(description) > 10000:
+        raise InvalidConfiguration("Jira issue description is limited to 10000 characters")
+
+    fields: dict[str, object] = {
+        "project": {"key": safe_project},
+        "summary": clean_title,
+        "issuetype": {"name": clean_issue_type},
+    }
+    if description:
+        fields["description"] = {
+            "version": 1,
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": description}],
+                }
+            ],
+        }
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://api.atlassian.com/ex/jira/"
+            f"{quote(safe_cloud, safe='')}/rest/api/3/issue"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json={"fields": fields},
+    )
+    if response.status_code != 201:
+        raise ProviderUnavailable(
+            f"Jira issue creation failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("Jira returned an invalid issue response") from error
+    if not isinstance(payload, dict) or not payload.get("id"):
+        raise ProviderUnavailable("Jira did not return an issue ID")
+    return ProviderOperationResult(
+        external_id=str(payload["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "issue_id": payload.get("id"),
+                "issue_key": payload.get("key"),
+                "project_key": safe_project,
+                "issue_type": clean_issue_type,
+            }.items()
+            if value is not None
+        },
+    )
+
+
+async def create_confluence_page(
+    credentials: dict[str, object],
+    *,
+    cloud_id: str,
+    space_id: str,
+    parent_page_id: str | None,
+    title: str,
+    content: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Confluence access token is unavailable")
+    safe_cloud = _atlassian_cloud_id(cloud_id)
+    if not space_id.isdigit() or len(space_id) > 30:
+        raise InvalidConfiguration("Confluence space_id is invalid")
+    if parent_page_id is not None and (
+        not parent_page_id.isdigit() or len(parent_page_id) > 30
+    ):
+        raise InvalidConfiguration("Confluence parent_page_id is invalid")
+    clean_title = " ".join(title.split())
+    if not clean_title or len(clean_title) > 255:
+        raise InvalidConfiguration(
+            "Confluence page title must be between 1 and 255 characters"
+        )
+    if len(content.encode("utf-8")) > 500_000:
+        raise InvalidConfiguration("Confluence page content is limited to 500 KB")
+
+    escaped_content = escape(content).replace("\n", "<br />")
+    body: dict[str, object] = {
+        "spaceId": space_id,
+        "status": "current",
+        "title": clean_title,
+        "body": {
+            "representation": "storage",
+            "value": f"<p>{escaped_content}</p>",
+        },
+    }
+    if parent_page_id is not None:
+        body["parentId"] = parent_page_id
+
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://api.atlassian.com/ex/confluence/"
+            f"{quote(safe_cloud, safe='')}/wiki/api/v2/pages"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json=body,
+    )
+    if response.status_code not in {200, 201}:
+        raise ProviderUnavailable(
+            f"Confluence page creation failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Confluence returned an invalid page response"
+        ) from error
+    if not isinstance(payload, dict) or not payload.get("id"):
+        raise ProviderUnavailable("Confluence did not return a page ID")
+    links = payload.get("_links") if isinstance(payload.get("_links"), dict) else {}
+    return ProviderOperationResult(
+        external_id=str(payload["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "page_id": payload.get("id"),
+                "space_id": space_id,
+                "parent_page_id": parent_page_id,
+                "web_path": links.get("webui"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
 async def query_public_arcgis_features(
     *,
     layer_url: str,
@@ -1819,6 +2204,8 @@ async def create_microsoft_drive_file(
     content: str,
     mime_type: str,
     folder_path: str | None = None,
+    site_id: str | None = None,
+    drive_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ProviderOperationResult:
     access_token = credentials.get("access_token")
@@ -1843,7 +2230,29 @@ async def create_microsoft_drive_file(
         raise InvalidConfiguration("Microsoft folder path is invalid")
     path_parts.append(clean_name)
     encoded_path = "/".join(quote(part, safe="") for part in path_parts)
-    url = f"{_MICROSOFT_GRAPH_ROOT}/me/drive/root:/{encoded_path}:/content"
+    if drive_id:
+        clean_drive_id = drive_id.strip()
+        if not clean_drive_id or len(clean_drive_id) > 512 or "/" in clean_drive_id:
+            raise InvalidConfiguration("Microsoft drive_id is invalid")
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/drives/"
+            f"{quote(clean_drive_id, safe='')}/root:/{encoded_path}:/content"
+        )
+    elif site_id:
+        clean_site_id = site_id.strip()
+        if (
+            not clean_site_id
+            or len(clean_site_id) > 512
+            or "/" in clean_site_id
+            or "://" in clean_site_id
+        ):
+            raise InvalidConfiguration("Microsoft site_id is invalid")
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/sites/"
+            f"{quote(clean_site_id, safe=',')}/drive/root:/{encoded_path}:/content"
+        )
+    else:
+        url = f"{_MICROSOFT_GRAPH_ROOT}/me/drive/root:/{encoded_path}:/content"
     response = await _request(
         transport,
         "PUT",
@@ -1869,6 +2278,13 @@ async def create_microsoft_drive_file(
         "name": payload.get("name"),
         "size": payload.get("size"),
         "web_url": payload.get("webUrl"),
+        "target": (
+            "sharepoint_drive"
+            if drive_id
+            else "sharepoint_site"
+            if site_id
+            else "onedrive"
+        ),
     }
     return ProviderOperationResult(
         external_id=str(payload["id"]),

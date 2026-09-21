@@ -9,7 +9,11 @@ import pytest
 
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.operations import (
+    create_confluence_page,
+    create_google_calendar_event,
     create_google_drive_file,
+    create_jira_issue,
+    create_microsoft_calendar_event,
     create_microsoft_drive_file,
     probe_aws_s3_bucket,
     probe_cloudflare_r2_bucket,
@@ -648,6 +652,191 @@ async def test_microsoft_file_export_uses_graph_and_bearer_token() -> None:
         transport=httpx.MockTransport(responder),
     )
     assert result.external_id == "drive-item-1"
+
+
+@pytest.mark.asyncio
+async def test_microsoft_sharepoint_export_targets_approved_site_drive() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.host == "graph.microsoft.com"
+        assert request.url.path == (
+            "/v1.0/sites/contoso.sharepoint.com,site-collection,site-id/"
+            "drive/root:/Operations/handoff.md:/content"
+        )
+        assert request.headers["Authorization"] == "Bearer ms-access"
+        return httpx.Response(
+            201,
+            json={
+                "id": "sharepoint-item-1",
+                "name": "handoff.md",
+                "size": 12,
+                "webUrl": "https://contoso.sharepoint.com/file",
+            },
+        )
+
+    result = await create_microsoft_drive_file(
+        {"access_token": "ms-access"},
+        name="handoff.md",
+        content="Shift report",
+        mime_type="text/markdown",
+        folder_path="Operations",
+        site_id="contoso.sharepoint.com,site-collection,site-id",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "sharepoint-item-1"
+    assert result.metadata["target"] == "sharepoint_site"
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_event_uses_configured_calendar() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert (
+            "/calendar/v3/calendars/ops%40group.calendar.google.com/events"
+            in str(request.url)
+        )
+        payload = json.loads(request.content)
+        assert payload["summary"] == "Shift briefing"
+        assert payload["start"]["dateTime"] == "2026-09-22T08:00:00-06:00"
+        return httpx.Response(
+            201,
+            json={
+                "id": "google-event-1",
+                "htmlLink": "https://calendar.google.com/event?eid=1",
+                "status": "confirmed",
+            },
+        )
+
+    result = await create_google_calendar_event(
+        {"access_token": "google-calendar-access"},
+        calendar_id="ops@group.calendar.google.com",
+        title="Shift briefing",
+        start="2026-09-22T08:00:00-06:00",
+        end="2026-09-22T09:00:00-06:00",
+        description="Morning operational briefing",
+        location="Operations room",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "google-event-1"
+    assert result.metadata["calendar_id"] == "ops@group.calendar.google.com"
+
+
+@pytest.mark.asyncio
+async def test_microsoft_calendar_event_normalizes_to_utc() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1.0/me/calendars/shared-calendar/events"
+        payload = json.loads(request.content)
+        assert payload["subject"] == "Shift briefing"
+        assert payload["start"] == {
+            "dateTime": "2026-09-22T14:00:00",
+            "timeZone": "UTC",
+        }
+        assert payload["end"] == {
+            "dateTime": "2026-09-22T15:00:00",
+            "timeZone": "UTC",
+        }
+        return httpx.Response(
+            201,
+            json={
+                "id": "ms-event-1",
+                "webLink": "https://outlook.office.com/calendar/item/1",
+                "isCancelled": False,
+            },
+        )
+
+    result = await create_microsoft_calendar_event(
+        {"access_token": "ms-calendar-access"},
+        calendar_id="shared-calendar",
+        title="Shift briefing",
+        start="2026-09-22T08:00:00-06:00",
+        end="2026-09-22T09:00:00-06:00",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "ms-event-1"
+    assert result.metadata["calendar_id"] == "shared-calendar"
+
+
+@pytest.mark.asyncio
+async def test_calendar_events_require_offset_and_positive_duration() -> None:
+    with pytest.raises(InvalidConfiguration, match="UTC offset"):
+        await create_google_calendar_event(
+            {"access_token": "calendar-access"},
+            calendar_id=None,
+            title="Bad event",
+            start="2026-09-22T08:00:00",
+            end="2026-09-22T09:00:00",
+        )
+    with pytest.raises(InvalidConfiguration, match="after start"):
+        await create_microsoft_calendar_event(
+            {"access_token": "calendar-access"},
+            calendar_id=None,
+            title="Bad event",
+            start="2026-09-22T10:00:00-06:00",
+            end="2026-09-22T09:00:00-06:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_jira_issue_creation_is_fixed_to_project_and_type() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == (
+            "/ex/jira/1324a887-45db-1bf4-1e99-ef0ff456d421/rest/api/3/issue"
+        )
+        payload = json.loads(request.content)
+        assert payload["fields"]["project"] == {"key": "OPS"}
+        assert payload["fields"]["issuetype"] == {"name": "Task"}
+        assert payload["fields"]["summary"] == "Inspect repeater"
+        assert payload["fields"]["description"]["type"] == "doc"
+        return httpx.Response(
+            201,
+            json={"id": "10001", "key": "OPS-42", "self": "https://example"},
+        )
+
+    result = await create_jira_issue(
+        {"access_token": "jira-access"},
+        cloud_id="1324a887-45db-1bf4-1e99-ef0ff456d421",
+        project_key="OPS",
+        issue_type="Task",
+        title="Inspect repeater",
+        description="Check the west ridge repeater after shift.",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "10001"
+    assert result.metadata["issue_key"] == "OPS-42"
+
+
+@pytest.mark.asyncio
+async def test_confluence_page_creation_escapes_content_and_uses_fixed_space() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == (
+            "/ex/confluence/1324a887-45db-1bf4-1e99-ef0ff456d421/"
+            "wiki/api/v2/pages"
+        )
+        payload = json.loads(request.content)
+        assert payload["spaceId"] == "123456"
+        assert payload["parentId"] == "654321"
+        assert payload["title"] == "Shift handoff"
+        assert "&lt;script&gt;" in payload["body"]["value"]
+        return httpx.Response(
+            201,
+            json={
+                "id": "998877",
+                "_links": {"webui": "/spaces/OPS/pages/998877"},
+            },
+        )
+
+    result = await create_confluence_page(
+        {"access_token": "conf-access"},
+        cloud_id="1324a887-45db-1bf4-1e99-ef0ff456d421",
+        space_id="123456",
+        parent_page_id="654321",
+        title="Shift handoff",
+        content="Field notes\n<script>alert(1)</script>",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "998877"
+    assert result.metadata["space_id"] == "123456"
 
 
 @pytest.mark.asyncio

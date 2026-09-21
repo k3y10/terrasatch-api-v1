@@ -61,7 +61,11 @@ _EMAIL_ADDRESS = re.compile(
 
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
-    "microsoft_365": {"folder_path"},
+    "google_calendar": {"calendar_id"},
+    "microsoft_365": {"site_id", "drive_id", "folder_path"},
+    "microsoft_calendar": {"calendar_id"},
+    "jira": {"cloud_id", "project_key", "issue_type"},
+    "confluence": {"cloud_id", "space_id", "parent_page_id"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
@@ -88,7 +92,87 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
 
+    if provider_key in {"google_calendar", "microsoft_calendar"}:
+        calendar_id = configuration.get("calendar_id")
+        if calendar_id is not None:
+            if (
+                not isinstance(calendar_id, str)
+                or not calendar_id.strip()
+                or len(calendar_id) > 512
+                or "/" in calendar_id
+            ):
+                raise InvalidConfiguration("Calendar calendar_id is invalid")
+            configuration["calendar_id"] = calendar_id.strip()
+
+    if provider_key in {"jira", "confluence"}:
+        cloud_id = configuration.get("cloud_id")
+        if (
+            not isinstance(cloud_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9-]{8,128}", cloud_id.strip())
+        ):
+            raise InvalidConfiguration("Atlassian cloud_id is invalid")
+        configuration["cloud_id"] = cloud_id.strip()
+
+    if provider_key == "jira":
+        project_key = configuration.get("project_key")
+        issue_type = configuration.get("issue_type")
+        if (
+            not isinstance(project_key, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", project_key.strip().upper())
+        ):
+            raise InvalidConfiguration("Jira project_key is invalid")
+        if (
+            not isinstance(issue_type, str)
+            or not issue_type.strip()
+            or len(issue_type.strip()) > 100
+            or "\n" in issue_type
+            or "\r" in issue_type
+        ):
+            raise InvalidConfiguration("Jira issue_type is invalid")
+        configuration["project_key"] = project_key.strip().upper()
+        configuration["issue_type"] = " ".join(issue_type.split())
+
+    if provider_key == "confluence":
+        space_id = configuration.get("space_id")
+        parent_page_id = configuration.get("parent_page_id")
+        if (
+            not isinstance(space_id, str)
+            or not space_id.isdigit()
+            or len(space_id) > 30
+        ):
+            raise InvalidConfiguration("Confluence space_id is invalid")
+        configuration["space_id"] = space_id
+        if parent_page_id is not None:
+            if (
+                not isinstance(parent_page_id, str)
+                or not parent_page_id.isdigit()
+                or len(parent_page_id) > 30
+            ):
+                raise InvalidConfiguration("Confluence parent_page_id is invalid")
+            configuration["parent_page_id"] = parent_page_id
+
     if provider_key == "microsoft_365":
+        site_id = configuration.get("site_id")
+        drive_id = configuration.get("drive_id")
+        if site_id is not None:
+            if (
+                not isinstance(site_id, str)
+                or not site_id.strip()
+                or len(site_id) > 512
+                or "/" in site_id
+                or "://" in site_id
+            ):
+                raise InvalidConfiguration("Microsoft site_id is invalid")
+            configuration["site_id"] = site_id.strip()
+        if drive_id is not None:
+            if (
+                not isinstance(drive_id, str)
+                or not drive_id.strip()
+                or len(drive_id) > 512
+                or "/" in drive_id
+            ):
+                raise InvalidConfiguration("Microsoft drive_id is invalid")
+            configuration["drive_id"] = drive_id.strip()
         folder_path = configuration.get("folder_path")
         if folder_path is not None:
             if not isinstance(folder_path, str) or len(folder_path) > 512:
@@ -440,6 +524,22 @@ async def create_connection_request(
 
     _validate_configuration(provider_key, configuration)
     _assert_non_secret_configuration(configuration)
+    if (
+        provider_key == "microsoft_365"
+        and scope != IntegrationScope.USER
+        and not configuration.get("site_id")
+    ):
+        raise InvalidConfiguration(
+            "Team or organization Microsoft 365 connections require a SharePoint site_id"
+        )
+    if (
+        provider_key in {"google_calendar", "microsoft_calendar"}
+        and scope != IntegrationScope.USER
+        and not configuration.get("calendar_id")
+    ):
+        raise InvalidConfiguration(
+            "Team or organization calendar connections require an explicit calendar_id"
+        )
     if provider_key == "geojson":
         endpoint_url = configuration.get("endpoint_url")
         assert isinstance(endpoint_url, str)

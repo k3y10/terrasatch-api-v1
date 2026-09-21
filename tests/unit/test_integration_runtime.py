@@ -1853,3 +1853,419 @@ async def test_nws_forecast_runtime_is_credential_free_and_bounded(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_shared_microsoft_connection_requires_sharepoint_site() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Microsoft shared account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Microsoft shared org",
+            slug=f"microsoft-shared-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Microsoft Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        with pytest.raises(InvalidConfiguration, match="SharePoint site_id"):
+            await create_connection_request(
+                session,
+                organization_id=organization.id,
+                user_id=admin.id,
+                role=MembershipRole.ADMIN,
+                provider_key="microsoft_365",
+                scope=IntegrationScope.ORGANIZATION,
+                team_id=None,
+                display_name="Microsoft workspace",
+                configuration={"folder_path": "Operations"},
+            )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="microsoft_365",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="SharePoint operations",
+            configuration={
+                "site_id": "contoso.sharepoint.com,site-collection,site-id",
+                "folder_path": "Operations",
+            },
+        )
+        assert connection.scope_type == IntegrationScope.ORGANIZATION.value
+        assert connection.configuration["site_id"] == (
+            "contoso.sharepoint.com,site-collection,site-id"
+        )
+        assert connection.status == IntegrationStatus.REQUESTED.value
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_calendar_runtime_requires_explicit_shared_target_and_routes_event(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Calendar runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Calendar runtime org",
+            slug=f"calendar-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Calendar Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        with pytest.raises(InvalidConfiguration, match="explicit calendar_id"):
+            await create_connection_request(
+                session,
+                organization_id=organization.id,
+                user_id=admin.id,
+                role=MembershipRole.ADMIN,
+                provider_key="google_calendar",
+                scope=IntegrationScope.ORGANIZATION,
+                team_id=None,
+                display_name="Operations calendar",
+                configuration={},
+            )
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="google_calendar",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="Operations calendar",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={"calendar_id": "ops@group.calendar.google.com"},
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["calendar.event.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["calendar.event.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "calendar-access"}, object()
+
+        async def fake_create(*args, **kwargs):
+            assert kwargs == {
+                "calendar_id": "ops@group.calendar.google.com",
+                "title": "Shift briefing",
+                "start": "2026-09-22T08:00:00-06:00",
+                "end": "2026-09-22T09:00:00-06:00",
+                "description": "Morning brief",
+                "location": "Operations room",
+            }
+            return ProviderOperationResult(
+                external_id="event-1",
+                metadata={"calendar_id": "ops@group.calendar.google.com"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.create_google_calendar_event",
+            fake_create,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="calendar.event.create",
+            request_id=uuid4(),
+            payload={
+                "title": "Shift briefing",
+                "start": "2026-09-22T08:00:00-06:00",
+                "end": "2026-09-22T09:00:00-06:00",
+                "description": "Morning brief",
+                "location": "Operations room",
+            },
+            connection_id=connection.id,
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "event-1"
+        assert delivery.request_metadata["title"] == "Shift briefing"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_jira_runtime_uses_fixed_project_and_task_capability(monkeypatch) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Jira runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Jira runtime org",
+            slug=f"jira-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Jira Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="jira",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="Operations Jira",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                "project_key": "OPS",
+                "issue_type": "Task",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["task.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["task.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "jira-access"}, object()
+
+        async def fake_create(*args, **kwargs):
+            assert kwargs == {
+                "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                "project_key": "OPS",
+                "issue_type": "Task",
+                "title": "Inspect repeater",
+                "description": "Check the west ridge repeater.",
+            }
+            return ProviderOperationResult(
+                external_id="10001",
+                metadata={"issue_key": "OPS-42"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.create_jira_issue",
+            fake_create,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="task.create",
+            request_id=uuid4(),
+            payload={
+                "title": "Inspect repeater",
+                "description": "Check the west ridge repeater.",
+            },
+            connection_id=connection.id,
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "10001"
+        assert delivery.response_metadata["issue_key"] == "OPS-42"
+
+        with pytest.raises(InvalidConfiguration, match="title"):
+            await execute(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="task.create",
+                request_id=uuid4(),
+                payload={"project_key": "OTHER"},
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_confluence_runtime_uses_document_capability_and_fixed_space(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Confluence runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Confluence runtime org",
+            slug=f"confluence-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Confluence Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="confluence",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="Operations knowledge base",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                "space_id": "123456",
+                "parent_page_id": "654321",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["document.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["document.create"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"access_token": "conf-access"}, object()
+
+        async def fake_create(*args, **kwargs):
+            assert kwargs == {
+                "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                "space_id": "123456",
+                "parent_page_id": "654321",
+                "title": "Shift handoff",
+                "content": "Field notes",
+            }
+            return ProviderOperationResult(
+                external_id="998877",
+                metadata={"space_id": "123456"},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.create_confluence_page",
+            fake_create,
+        )
+
+        delivery = await execute(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="document.create",
+            request_id=uuid4(),
+            payload={
+                "name": "Shift handoff",
+                "content": "Field notes",
+                "mime_type": "text/markdown",
+            },
+            connection_id=connection.id,
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "998877"
+
+    await engine.dispose()
