@@ -1853,3 +1853,63 @@ async def test_nws_forecast_runtime_is_credential_free_and_bounded(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_shared_microsoft_connection_requires_sharepoint_site() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Microsoft shared account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Microsoft shared org",
+            slug=f"microsoft-shared-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Microsoft Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        with pytest.raises(InvalidConfiguration, match="SharePoint site_id"):
+            await create_connection_request(
+                session,
+                organization_id=organization.id,
+                user_id=admin.id,
+                role=MembershipRole.ADMIN,
+                provider_key="microsoft_365",
+                scope=IntegrationScope.ORGANIZATION,
+                team_id=None,
+                display_name="Microsoft workspace",
+                configuration={"folder_path": "Operations"},
+            )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="microsoft_365",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="SharePoint operations",
+            configuration={
+                "site_id": "contoso.sharepoint.com,site-collection,site-id",
+                "folder_path": "Operations",
+            },
+        )
+        assert connection.scope_type == IntegrationScope.ORGANIZATION.value
+        assert connection.configuration["site_id"] == (
+            "contoso.sharepoint.com,site-collection,site-id"
+        )
+        assert connection.status == IntegrationStatus.REQUESTED.value
+
+    await engine.dispose()
