@@ -190,6 +190,7 @@ class IntegrationQueryRequest(BaseModel):
         "map.style.read",
         "data.query",
         "weather.forecast.read",
+        "weather.alerts.read",
         "avalanche.forecast.read",
     ]
     connection_id: UUID | None = None
