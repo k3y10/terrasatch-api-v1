@@ -651,6 +651,39 @@ async def test_microsoft_file_export_uses_graph_and_bearer_token() -> None:
 
 
 @pytest.mark.asyncio
+async def test_microsoft_sharepoint_export_targets_approved_site_drive() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.host == "graph.microsoft.com"
+        assert request.url.path == (
+            "/v1.0/sites/contoso.sharepoint.com,site-collection,site-id/"
+            "drive/root:/Operations/handoff.md:/content"
+        )
+        assert request.headers["Authorization"] == "Bearer ms-access"
+        return httpx.Response(
+            201,
+            json={
+                "id": "sharepoint-item-1",
+                "name": "handoff.md",
+                "size": 12,
+                "webUrl": "https://contoso.sharepoint.com/file",
+            },
+        )
+
+    result = await create_microsoft_drive_file(
+        {"access_token": "ms-access"},
+        name="handoff.md",
+        content="Shift report",
+        mime_type="text/markdown",
+        folder_path="Operations",
+        site_id="contoso.sharepoint.com,site-collection,site-id",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "sharepoint-item-1"
+    assert result.metadata["target"] == "sharepoint_site"
+
+
+@pytest.mark.asyncio
 async def test_caltopo_map_query_signs_request_and_never_sends_secret() -> None:
     secret = base64.b64encode(b"cal-secret").decode("ascii")
 
