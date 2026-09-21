@@ -679,18 +679,17 @@ async def query_geojson_features(
     if transport is None:
         await validate_public_geojson_destination(endpoint)
 
-    response = await _request(
+    response = await _request_limited(
         transport,
         "GET",
         endpoint,
+        max_bytes=5_000_000,
         headers={"Accept": "application/geo+json, application/json"},
     )
     if response.status_code < 200 or response.status_code >= 300:
         raise ProviderUnavailable(
             f"GeoJSON endpoint query failed with HTTP {response.status_code}"
         )
-    if len(response.content) > 5_000_000:
-        raise ProviderUnavailable("GeoJSON endpoint response exceeds the 5 MB limit")
 
     try:
         payload = response.json()
@@ -728,6 +727,40 @@ async def query_geojson_features(
             "truncated": len(raw_features) > len(features),
         },
     )
+
+
+async def _request_limited(
+    transport: httpx.AsyncBaseTransport | None,
+    method: str,
+    url: str,
+    *,
+    max_bytes: int,
+    **kwargs,
+) -> httpx.Response:
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            async with client.stream(method, url, **kwargs) as response:
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > max_bytes:
+                        raise ProviderUnavailable(
+                            "Provider response exceeds the configured size limit"
+                        )
+                    content.extend(chunk)
+                return httpx.Response(
+                    response.status_code,
+                    headers=response.headers,
+                    content=bytes(content),
+                    request=response.request,
+                )
+    except ProviderUnavailable:
+        raise
+    except httpx.HTTPError as error:
+        raise ProviderUnavailable("Provider delivery request failed") from error
 
 
 async def _request(
