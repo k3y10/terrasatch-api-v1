@@ -1727,3 +1727,129 @@ async def test_public_arcgis_enterprise_runtime_enforces_exact_layer_allowlist(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nws_forecast_runtime_is_credential_free_and_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="NWS runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="NWS runtime org",
+            slug=f"nws-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="NWS Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="nws_forecast",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="NWS forecasts",
+            configuration={"max_periods": 8},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "api.weather.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("NWS forecast must not load customer credentials")
+
+        async def fake_forecast(**kwargs):
+            assert kwargs == {
+                "latitude": 40.6,
+                "longitude": -111.7,
+                "max_periods": 4,
+            }
+            return ProviderQueryResult(
+                data={
+                    "periods": [
+                        {"number": 1, "name": "Today"},
+                        {"number": 2, "name": "Tonight"},
+                    ]
+                },
+                metadata={
+                    "source_host": "api.weather.gov",
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "period_count": 2,
+                    "source_period_count": 2,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_nws_forecast",
+            fake_forecast,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="weather.forecast.read",
+            payload={
+                "latitude": 40.6,
+                "longitude": -111.7,
+                "periods": 4,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nws_forecast"
+        assert result["metadata"]["source_host"] == "api.weather.gov"
+
+        with pytest.raises(InvalidConfiguration, match="configured maximum"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.forecast.read",
+                payload={
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "periods": 9,
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.forecast.read",
+                payload={
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "url": "https://example.com/forecast",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
