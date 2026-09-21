@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -9,6 +10,7 @@ import ipaddress
 import json
 import re
 import secrets
+import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
@@ -116,6 +118,50 @@ def _validate_https_webhook_url(
     return normalized
 
 
+async def validate_public_webhook_destination(
+    value: str,
+    *,
+    label: str,
+    allowed_host_suffixes: tuple[str, ...] | None = None,
+) -> str:
+    normalized = _validate_https_webhook_url(
+        value,
+        label=label,
+        allowed_host_suffixes=allowed_host_suffixes,
+    )
+    hostname = urlsplit(normalized).hostname
+    assert hostname is not None
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo,
+            hostname,
+            443,
+            0,
+            socket.SOCK_STREAM,
+        )
+    except OSError as error:
+        raise ProviderUnavailable(
+            f"{label} webhook destination could not be resolved"
+        ) from error
+
+    addresses = {item[4][0].split("%", 1)[0] for item in infos if item[4]}
+    if not addresses:
+        raise ProviderUnavailable(f"{label} webhook destination could not be resolved")
+
+    for address in addresses:
+        try:
+            resolved = ipaddress.ip_address(address)
+        except ValueError as error:
+            raise ProviderUnavailable(
+                f"{label} webhook destination returned an invalid address"
+            ) from error
+        if not resolved.is_global:
+            raise InvalidConfiguration(
+                f"{label} webhook destination resolves to a non-public address"
+            )
+    return normalized
+
+
 def validate_generic_webhook_url(value: str) -> str:
     return _validate_https_webhook_url(value, label="Generic")
 
@@ -212,6 +258,12 @@ async def send_teams_message(
     if not isinstance(raw_url, str) or not raw_url:
         raise ProviderUnavailable("Microsoft Teams Workflows webhook is unavailable")
     url = validate_teams_workflow_url(raw_url)
+    if transport is None:
+        await validate_public_webhook_destination(
+            url,
+            label="Microsoft Teams",
+            allowed_host_suffixes=_TEAMS_WEBHOOK_HOST_SUFFIXES,
+        )
 
     payload = {
         "type": "message",
@@ -271,6 +323,8 @@ async def send_webhook_notification(
     if not isinstance(raw_url, str) or not raw_url:
         raise ProviderUnavailable("Webhook URL is unavailable")
     url = validate_generic_webhook_url(raw_url)
+    if transport is None:
+        await validate_public_webhook_destination(url, label="Generic")
 
     payload = {
         "type": "terrasatch.notification",
