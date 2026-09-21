@@ -1,5 +1,6 @@
 """Provider output primitive tests with no live external traffic."""
 
+import asyncio
 import base64
 import json
 from uuid import uuid4
@@ -13,11 +14,13 @@ from terrasatch.integrations.operations import (
     create_microsoft_drive_file,
     probe_aws_s3_bucket,
     probe_cloudflare_r2_bucket,
+    probe_nws_api,
     put_aws_s3_object,
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
     query_geojson_features,
+    query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
     query_snowflake,
@@ -39,6 +42,7 @@ from terrasatch.integrations.operations import (
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
     validate_stac_api_base_url,
+    validate_nws_forecast_url,
     validate_teams_workflow_url,
 )
 
@@ -891,3 +895,108 @@ async def test_public_arcgis_enterprise_rejects_private_dns(monkeypatch) -> None
         await validate_public_arcgis_feature_layer_destination(
             "https://gis.example.gov/server/rest/services/A/FeatureServer/0"
         )
+
+
+@pytest.mark.asyncio
+async def test_nws_forecast_discovers_grid_and_uses_required_user_agent() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.headers["User-Agent"] == "TerraSatch/0.3 (+https://terrasatch.com)"
+        if request.url.path == "/points/40.6000,-111.7000":
+            return httpx.Response(
+                200,
+                json={
+                    "properties": {
+                        "forecast": (
+                            "https://api.weather.gov/gridpoints/SLC/100,200/forecast"
+                        ),
+                        "gridId": "SLC",
+                        "gridX": 100,
+                        "gridY": 200,
+                    }
+                },
+            )
+        assert request.url.path == "/gridpoints/SLC/100,200/forecast"
+        return httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "updated": "2026-09-21T12:00:00+00:00",
+                    "generatedAt": "2026-09-21T12:00:00+00:00",
+                    "units": "us",
+                    "periods": [
+                        {"number": 1, "name": "Today", "temperature": 60},
+                        {"number": 2, "name": "Tonight", "temperature": 38},
+                        {"number": 3, "name": "Monday", "temperature": 58},
+                    ],
+                }
+            },
+        )
+
+    result = await query_nws_forecast(
+        latitude=40.6,
+        longitude=-111.7,
+        max_periods=2,
+        transport=httpx.MockTransport(responder),
+    )
+    assert len(result.data["periods"]) == 2
+    assert result.metadata == {
+        "source_host": "api.weather.gov",
+        "latitude": 40.6,
+        "longitude": -111.7,
+        "office": "SLC",
+        "grid_x": 100,
+        "grid_y": 200,
+        "period_count": 2,
+        "source_period_count": 3,
+        "truncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_nws_rejects_forecast_link_to_other_host() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecast": "https://example.com/gridpoints/SLC/1,2/forecast"
+                }
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable, match="invalid forecast URL"):
+        await query_nws_forecast(
+            latitude=40.6,
+            longitude=-111.7,
+            max_periods=2,
+            transport=httpx.MockTransport(responder),
+        )
+
+
+def test_nws_rejects_invalid_coordinates_and_forecast_ports() -> None:
+    with pytest.raises(InvalidConfiguration, match="coordinates"):
+        _ = asyncio.run(
+            query_nws_forecast(
+                latitude=100,
+                longitude=-111.7,
+                max_periods=2,
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(500)
+                ),
+            )
+        )
+    with pytest.raises(ProviderUnavailable, match="invalid forecast URL"):
+        validate_nws_forecast_url(
+            "https://api.weather.gov:bad/gridpoints/SLC/1,2/forecast"
+        )
+
+
+@pytest.mark.asyncio
+async def test_nws_probe_uses_fixed_service_root() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.weather.gov"
+        assert request.headers["User-Agent"].startswith("TerraSatch/")
+        return httpx.Response(200, json={"status": "ok"})
+
+    result = await probe_nws_api(transport=httpx.MockTransport(responder))
+    assert result.external_id == "api.weather.gov"
