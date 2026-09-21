@@ -1819,6 +1819,8 @@ async def create_microsoft_drive_file(
     content: str,
     mime_type: str,
     folder_path: str | None = None,
+    site_id: str | None = None,
+    drive_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ProviderOperationResult:
     access_token = credentials.get("access_token")
@@ -1843,7 +1845,29 @@ async def create_microsoft_drive_file(
         raise InvalidConfiguration("Microsoft folder path is invalid")
     path_parts.append(clean_name)
     encoded_path = "/".join(quote(part, safe="") for part in path_parts)
-    url = f"{_MICROSOFT_GRAPH_ROOT}/me/drive/root:/{encoded_path}:/content"
+    if drive_id:
+        clean_drive_id = drive_id.strip()
+        if not clean_drive_id or len(clean_drive_id) > 512 or "/" in clean_drive_id:
+            raise InvalidConfiguration("Microsoft drive_id is invalid")
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/drives/"
+            f"{quote(clean_drive_id, safe='')}/root:/{encoded_path}:/content"
+        )
+    elif site_id:
+        clean_site_id = site_id.strip()
+        if (
+            not clean_site_id
+            or len(clean_site_id) > 512
+            or "/" in clean_site_id
+            or "://" in clean_site_id
+        ):
+            raise InvalidConfiguration("Microsoft site_id is invalid")
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/sites/"
+            f"{quote(clean_site_id, safe=',')}/drive/root:/{encoded_path}:/content"
+        )
+    else:
+        url = f"{_MICROSOFT_GRAPH_ROOT}/me/drive/root:/{encoded_path}:/content"
     response = await _request(
         transport,
         "PUT",
@@ -1869,6 +1893,13 @@ async def create_microsoft_drive_file(
         "name": payload.get("name"),
         "size": payload.get("size"),
         "web_url": payload.get("webUrl"),
+        "target": (
+            "sharepoint_drive"
+            if drive_id
+            else "sharepoint_site"
+            if site_id
+            else "onedrive"
+        ),
     }
     return ProviderOperationResult(
         external_id=str(payload["id"]),
