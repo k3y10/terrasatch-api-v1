@@ -259,6 +259,27 @@ and the public adapter does not send an Authorization header or load a customer 
 The initial public adapter does not browse services, mint ArcGIS tokens, call administrative
 endpoints, edit features, or accept arbitrary REST parameters.
 
+## National Weather Service
+
+The National Weather Service integration is a read-only `weather.forecast.read` provider backed
+by the official `api.weather.gov` service. It requires no customer API key. TerraSatch identifies
+itself with a dedicated User-Agent as required by NWS and uses only the fixed NWS API host.
+
+A team or organization administrator configures a maximum of 1-14 standard forecast periods.
+Runtime callers provide only latitude, longitude, and an optional period count no larger than that
+configured maximum. TerraSatch first calls the NWS `/points/{latitude},{longitude}` endpoint,
+then follows only the returned forecast URL when it still resolves to the fixed
+`api.weather.gov/gridpoints/<office>/<x>,<y>/forecast` path. No arbitrary URL is accepted from
+the caller or from linked response data.
+
+Point lookups are capped at 1 MB and forecast responses at 2 MB, redirects remain disabled, and
+coordinates are normalized to four decimal places. The initial adapter exposes the standard
+12-hour-period forecast only; hourly forecasts, alerts, observations, radar, grid data, and other
+NWS endpoints remain outside this first provider.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control forecast access.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -319,6 +340,7 @@ keeping customer credentials out of browser state:
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
+- `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.
