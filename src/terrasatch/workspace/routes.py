@@ -595,6 +595,7 @@ async def request_integration(
         await writable(session, membership)
         connection = await create_connection_request(
             session,
+            settings=request.app.state.settings,
             organization_id=organization_id,
             user_id=user.id,
             role=membership.role,
