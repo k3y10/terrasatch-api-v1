@@ -1454,6 +1454,106 @@ async def create_google_drive_file(
     )
 
 
+async def query_public_arcgis_features(
+    *,
+    layer_url: str,
+    where: str = "1=1",
+    out_fields: list[str] | None = None,
+    return_geometry: bool = True,
+    result_record_count: int = 100,
+    result_offset: int = 0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    normalized_layer = validate_public_arcgis_feature_layer_url(layer_url)
+    if transport is None:
+        await validate_public_arcgis_feature_layer_destination(normalized_layer)
+
+    normalized_where = " ".join(where.split()).strip()
+    if not normalized_where or len(normalized_where) > 2000:
+        raise InvalidConfiguration(
+            "ArcGIS where clause must be between 1 and 2000 characters"
+        )
+
+    fields = out_fields or ["*"]
+    if not fields or len(fields) > 50:
+        raise InvalidConfiguration(
+            "ArcGIS out_fields must contain between 1 and 50 fields"
+        )
+    normalized_fields: list[str] = []
+    for field in fields:
+        candidate = field.strip()
+        if candidate != "*" and not _ARCGIS_FIELD.fullmatch(candidate):
+            raise InvalidConfiguration(
+                "ArcGIS out_fields contains an invalid field name"
+            )
+        normalized_fields.append(candidate)
+
+    if not 1 <= result_record_count <= 200:
+        raise InvalidConfiguration(
+            "ArcGIS queries are limited to 200 features per request"
+        )
+    if not 0 <= result_offset <= 1_000_000:
+        raise InvalidConfiguration(
+            "ArcGIS result offset is outside the allowed range"
+        )
+
+    response = await _request_limited(
+        transport,
+        "POST",
+        f"{normalized_layer}/query",
+        max_bytes=2_000_000,
+        data={
+            "f": "json",
+            "where": normalized_where,
+            "outFields": ",".join(normalized_fields),
+            "returnGeometry": "true" if return_geometry else "false",
+            "resultRecordCount": str(result_record_count),
+            "resultOffset": str(result_offset),
+        },
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"Public ArcGIS Enterprise query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature response"
+        ) from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature response"
+        )
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        code = error_payload.get("code")
+        message = error_payload.get("message") or "query_failed"
+        raise ProviderUnavailable(
+            f"Public ArcGIS Enterprise query failed ({code}: {message})"
+        )
+
+    features = payload.get("features")
+    if features is not None and not isinstance(features, list):
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature collection"
+        )
+    feature_count = len(features or [])
+    metadata: dict[str, object] = {
+        "feature_count": feature_count,
+        "layer_url": normalized_layer,
+        "return_geometry": return_geometry,
+        "source_host": urlsplit(normalized_layer).hostname,
+    }
+    if payload.get("geometryType"):
+        metadata["geometry_type"] = payload["geometryType"]
+    if payload.get("exceededTransferLimit") is not None:
+        metadata["exceeded_transfer_limit"] = bool(
+            payload["exceededTransferLimit"]
+        )
+    return ProviderQueryResult(data=payload, metadata=metadata)
+
+
 async def query_arcgis_features(
     credentials: dict[str, object],
     *,
