@@ -26,6 +26,11 @@ _SLACK_WEBHOOK_HOST = "hooks.slack.com"
 _TEAMS_WEBHOOK_HOST_SUFFIXES = (".logic.azure.com", ".api.powerplatform.com")
 _R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
 _S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
+_NWS_ROOT = "https://api.weather.gov"
+_NWS_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_NWS_FORECAST_PATH = re.compile(
+    r"^/gridpoints/[A-Z]{3}/[0-9]+,[0-9]+/forecast/?$"
+)
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _ALLOWED_DRIVE_MIME_TYPES = {
     "application/json",
@@ -998,6 +1003,165 @@ async def query_stac_items(
             "number_matched": payload.get("numberMatched"),
             "number_returned": payload.get("numberReturned"),
         },
+    )
+
+
+def validate_nws_forecast_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").casefold() != "api.weather.gov"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.port not in {None, 443}
+        or not _NWS_FORECAST_PATH.fullmatch(parsed.path)
+    ):
+        raise ProviderUnavailable("NWS returned an invalid forecast URL")
+    return normalized
+
+
+def _validate_weather_coordinates(latitude: object, longitude: object) -> tuple[float, float]:
+    if (
+        not isinstance(latitude, (int, float))
+        or isinstance(latitude, bool)
+        or not isinstance(longitude, (int, float))
+        or isinstance(longitude, bool)
+    ):
+        raise InvalidConfiguration(
+            "NWS forecast latitude and longitude must be numeric"
+        )
+    lat = round(float(latitude), 4)
+    lon = round(float(longitude), 4)
+    if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+        raise InvalidConfiguration(
+            "NWS forecast coordinates are outside valid latitude/longitude bounds"
+        )
+    return lat, lon
+
+
+async def query_nws_forecast(
+    *,
+    latitude: object,
+    longitude: object,
+    max_periods: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if (
+        not isinstance(max_periods, int)
+        or isinstance(max_periods, bool)
+        or not 1 <= max_periods <= 14
+    ):
+        raise InvalidConfiguration(
+            "NWS forecast max_periods must be an integer between 1 and 14"
+        )
+    lat, lon = _validate_weather_coordinates(latitude, longitude)
+    headers = {
+        "Accept": "application/geo+json",
+        "User-Agent": _NWS_USER_AGENT,
+    }
+
+    point_response = await _request_limited(
+        transport,
+        "GET",
+        f"{_NWS_ROOT}/points/{lat:.4f},{lon:.4f}",
+        max_bytes=1_000_000,
+        headers=headers,
+    )
+    if point_response.status_code < 200 or point_response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS point lookup failed with HTTP {point_response.status_code}"
+        )
+    try:
+        point_payload = point_response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS point lookup returned invalid JSON") from error
+    if not isinstance(point_payload, dict):
+        raise ProviderUnavailable("NWS point lookup returned an invalid response")
+    properties = point_payload.get("properties")
+    if not isinstance(properties, dict):
+        raise ProviderUnavailable("NWS point lookup is missing properties")
+    forecast_url = properties.get("forecast")
+    if not isinstance(forecast_url, str):
+        raise ProviderUnavailable("NWS point lookup is missing forecast URL")
+    forecast_url = validate_nws_forecast_url(forecast_url)
+
+    forecast_response = await _request_limited(
+        transport,
+        "GET",
+        forecast_url,
+        max_bytes=2_000_000,
+        headers=headers,
+    )
+    if forecast_response.status_code < 200 or forecast_response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS forecast query failed with HTTP {forecast_response.status_code}"
+        )
+    try:
+        forecast_payload = forecast_response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS forecast returned invalid JSON") from error
+    if not isinstance(forecast_payload, dict):
+        raise ProviderUnavailable("NWS forecast returned an invalid response")
+    forecast_properties = forecast_payload.get("properties")
+    if not isinstance(forecast_properties, dict):
+        raise ProviderUnavailable("NWS forecast is missing properties")
+    raw_periods = forecast_properties.get("periods")
+    if not isinstance(raw_periods, list):
+        raise ProviderUnavailable("NWS forecast periods are invalid")
+    periods: list[dict[str, object]] = []
+    for period in raw_periods[:max_periods]:
+        if not isinstance(period, dict):
+            raise ProviderUnavailable("NWS forecast returned an invalid period")
+        periods.append(period)
+
+    data: dict[str, object] = {
+        "periods": periods,
+    }
+    for key in ("updated", "units", "generatedAt"):
+        value = forecast_properties.get(key)
+        if value is not None:
+            data[key] = value
+
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": "api.weather.gov",
+            "latitude": lat,
+            "longitude": lon,
+            "office": properties.get("gridId"),
+            "grid_x": properties.get("gridX"),
+            "grid_y": properties.get("gridY"),
+            "period_count": len(periods),
+            "source_period_count": len(raw_periods),
+            "truncated": len(raw_periods) > len(periods),
+        },
+    )
+
+
+async def probe_nws_api(
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _request_limited(
+        transport,
+        "GET",
+        _NWS_ROOT,
+        max_bytes=250_000,
+        headers={
+            "Accept": "application/geo+json",
+            "User-Agent": _NWS_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS API probe failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id="api.weather.gov",
+        metadata={"source_host": "api.weather.gov"},
     )
 
 
