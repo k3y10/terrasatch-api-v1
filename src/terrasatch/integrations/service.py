@@ -43,6 +43,7 @@ from .operations import (
     validate_s3_bucket_name,
     validate_stac_api_base_url,
     validate_stac_collection_id,
+    validate_uac_region,
 )
 
 _SENSITIVE_KEY_PARTS = (
@@ -73,6 +74,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "ogc_api_features": {"base_url", "collection_ids", "max_features"},
     "stac_api": {"base_url", "collection_ids", "max_items"},
     "nws_forecast": {"max_periods"},
+    "uac_forecast": {"regions"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "arcgis_enterprise_public": {"feature_layer_urls"},
@@ -347,6 +349,21 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             )
         configuration["max_periods"] = max_periods
 
+    if provider_key == "uac_forecast":
+        regions = configuration.get("regions")
+        if (
+            not isinstance(regions, list)
+            or not 1 <= len(regions) <= 9
+            or not all(isinstance(item, str) for item in regions)
+        ):
+            raise InvalidConfiguration(
+                "UAC regions must contain between 1 and 9 supported region IDs"
+            )
+        normalized_regions = [validate_uac_region(item) for item in regions]
+        if len(set(normalized_regions)) != len(normalized_regions):
+            raise InvalidConfiguration("UAC regions cannot contain duplicates")
+        configuration["regions"] = normalized_regions
+
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
         if not isinstance(account_host, str):
@@ -616,7 +633,11 @@ async def create_connection_request(
                             else (
                                 "National Weather Service"
                                 if provider_key == "nws_forecast"
-                                else None
+                                else (
+                                    "Utah Avalanche Center"
+                                    if provider_key == "uac_forecast"
+                                    else None
+                                )
                             )
                         )
                     )
@@ -641,7 +662,11 @@ async def create_connection_request(
                             else (
                                 "api.weather.gov"
                                 if provider_key == "nws_forecast"
-                                else None
+                                else (
+                                    "utahavalanchecenter.org"
+                                    if provider_key == "uac_forecast"
+                                    else None
+                                )
                             )
                         )
                     )
