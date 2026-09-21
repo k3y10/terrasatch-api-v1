@@ -51,12 +51,14 @@ async def test_garmin_event_feeds_canonical_pipeline_and_retries_are_idempotent(
             name="Garmin field org",
             slug=f"garmin-field-{uuid4().hex[:8]}",
         )
+        session.add(organization)
+        await session.flush()
         site = Site(
             organization_id=organization.id,
             name="Wasatch field site",
             slug=f"wasatch-{uuid4().hex[:8]}",
         )
-        session.add_all([organization, site])
+        session.add(site)
         await session.flush()
 
         connection = IntegrationConnection(
@@ -221,12 +223,14 @@ async def test_mobile_observation_feeds_same_pipeline_with_location_and_idempote
             display_name="Field User",
             enabled=True,
         )
+        session.add_all([organization, user])
+        await session.flush()
         site = Site(
             organization_id=organization.id,
             name="Mobile field site",
             slug=f"mobile-site-{uuid4().hex[:8]}",
         )
-        session.add_all([organization, user, site])
+        session.add(site)
         await session.flush()
 
         payload = MobileObservationRequest(
