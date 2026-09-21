@@ -96,6 +96,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "cloudflare_r2",
     "aws_s3",
     "email",
+    "geojson",
     "snowflake",
     "caltopo",
 }
@@ -201,6 +202,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["document.create"],
         "description": (
             "Create approved reports and files in a standard regional Amazon S3 bucket."
+        ),
+    },
+    "geojson": {
+        "key": "geojson",
+        "name": "GeoJSON / REST",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read features from one administrator-approved public HTTPS GeoJSON endpoint."
         ),
     },
     "snowflake": {
@@ -337,6 +350,7 @@ def provider_catalog(
             and settings.integration_secret_store_is_configured
         )
         platform_supported = support_status == "supported" and auth_type == "platform"
+        public_https_ready = support_status == "supported" and auth_type == "public_https"
         platform_ready = bool(
             platform_supported
             and settings is not None
@@ -356,6 +370,10 @@ def provider_catalog(
             connect_status = "coming_soon"
             setup_status = "planned"
             runtime_ready = False
+        elif public_https_ready:
+            connect_status = "available"
+            setup_status = "available"
+            runtime_ready = True
         elif platform_ready:
             connect_status = "available"
             setup_status = "available"
