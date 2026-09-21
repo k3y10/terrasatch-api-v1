@@ -135,6 +135,26 @@ def test_operational_email_requires_platform_sender_and_resend_key() -> None:
     assert available["email"]["can_connect"] is True
 
 
+def test_production_operational_email_requires_exact_terrasatch_sender_domain() -> None:
+    valid = Settings(
+        environment="production",
+        resend_api_key=SecretStr("re_test_ops"),
+        integration_email_from=(
+            "TerraSatch Operations <operations@terrasatch.com>"
+        ),
+    )
+    assert valid.integration_email_is_configured is True
+
+    lookalike = Settings(
+        environment="production",
+        resend_api_key=SecretStr("re_test_ops"),
+        integration_email_from=(
+            "TerraSatch Operations <operations@terrasatch.com.invalid>"
+        ),
+    )
+    assert lookalike.integration_email_is_configured is False
+
+
 def test_operational_email_configuration_is_allowlisted_and_normalized() -> None:
     configuration: dict[str, object] = {
         "recipients": ["OPS@Example.com", "lead@example.com"],
