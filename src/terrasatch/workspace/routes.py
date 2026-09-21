@@ -180,7 +180,12 @@ class IntegrationExecuteRequest(BaseModel):
 
 
 class IntegrationQueryRequest(BaseModel):
-    capability: Literal["map.features.query", "map.style.read", "data.query"]
+    capability: Literal[
+        "map.features.query",
+        "map.style.read",
+        "data.query",
+        "weather.forecast.read",
+    ]
     connection_id: UUID | None = None
     workflow_key: str | None = Field(
         default=None,
