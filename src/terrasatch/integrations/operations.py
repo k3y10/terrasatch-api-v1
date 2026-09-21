@@ -50,6 +50,7 @@ class ProviderQueryResult:
 _ARCGIS_LAYER_PATH = re.compile(r"/FeatureServer/\d+/?$", re.I)
 _ARCGIS_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _OGC_COLLECTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$")
+_STAC_COLLECTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$")
 _OGC_DATETIME = re.compile(
     r"^(?:\.\.|[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9:.+-]+Z?)?)"
     r"(?:/(?:\.\.|[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9:.+-]+Z?)?))?$"
@@ -254,6 +255,54 @@ def validate_ogc_api_base_url(value: str) -> str:
 async def validate_public_ogc_destination(value: str) -> str:
     normalized = validate_ogc_api_base_url(value)
     return await _validate_public_hostname(normalized, label="OGC API")
+
+
+def validate_stac_api_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("STAC API base URL has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "STAC API base URL must be HTTPS without credentials, query, or fragment"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration("STAC API base URL must use a DNS hostname")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration("STAC API destination is not allowed")
+    return normalized
+
+
+async def validate_public_stac_destination(value: str) -> str:
+    normalized = validate_stac_api_base_url(value)
+    return await _validate_public_hostname(normalized, label="STAC API")
+
+
+def validate_stac_collection_id(value: str) -> str:
+    normalized = value.strip()
+    if not _STAC_COLLECTION_ID.fullmatch(normalized):
+        raise InvalidConfiguration("STAC collection ID is invalid")
+    return normalized
 
 
 def validate_ogc_collection_id(value: str) -> str:
