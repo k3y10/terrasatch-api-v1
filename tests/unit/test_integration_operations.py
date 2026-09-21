@@ -1,6 +1,5 @@
 """Provider output primitive tests with no live external traffic."""
 
-import asyncio
 import base64
 import json
 from uuid import uuid4
@@ -973,17 +972,14 @@ async def test_nws_rejects_forecast_link_to_other_host() -> None:
         )
 
 
-def test_nws_rejects_invalid_coordinates_and_forecast_ports() -> None:
+@pytest.mark.asyncio
+async def test_nws_rejects_invalid_coordinates_and_forecast_ports() -> None:
     with pytest.raises(InvalidConfiguration, match="coordinates"):
-        _ = asyncio.run(
-            query_nws_forecast(
-                latitude=100,
-                longitude=-111.7,
-                max_periods=2,
-                transport=httpx.MockTransport(
-                    lambda request: httpx.Response(500)
-                ),
-            )
+        await query_nws_forecast(
+            latitude=100,
+            longitude=-111.7,
+            max_periods=2,
+            transport=httpx.MockTransport(lambda request: httpx.Response(500)),
         )
     with pytest.raises(ProviderUnavailable, match="invalid forecast URL"):
         validate_nws_forecast_url(
@@ -994,7 +990,9 @@ def test_nws_rejects_invalid_coordinates_and_forecast_ports() -> None:
 @pytest.mark.asyncio
 async def test_nws_probe_uses_fixed_service_root() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://api.weather.gov"
+        assert str(request.url) == (
+            "https://api.weather.gov/points/39.7456,-97.0892"
+        )
         assert request.headers["User-Agent"].startswith("TerraSatch/")
         return httpx.Response(200, json={"status": "ok"})
 
