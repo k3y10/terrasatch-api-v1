@@ -341,6 +341,32 @@ NWS endpoints remain outside this first provider.
 The provider uses no customer credential record. Normal team/organization audience grants plus the
 `agent:satchy` grant still control forecast access.
 
+## National Weather Service Active Alerts
+
+The NWS Alerts integration is a read-only `weather.alerts.read` provider backed by the official
+`api.weather.gov/alerts/active` service. It exposes current watches, warnings, advisories, and
+other active CAP-derived NWS products; it does not expose the seven-day alert-history endpoint.
+
+A team or organization administrator may approve up to 25 two-letter NWS area codes and up to 50
+six-character UGC county/forecast-zone codes. Administrators may also explicitly allow point
+queries. Runtime callers select exactly one approved area, one approved zone/county code, or a
+latitude/longitude point when point queries are enabled. No arbitrary URL, historical-query switch,
+or free-form NWS filter is accepted.
+
+NWS documents an important geolocation distinction: querying a forecast-zone UGC does not
+necessarily include county-based products, while querying a county UGC can include county alerts
+and associated zone alerts. Point queries are appropriate when the desired question is which active
+alerts affect one precise location.
+
+Responses are requested as GeoJSON from the fixed `api.weather.gov` host using TerraSatch's NWS
+User-Agent, streamed through a 5 MB ceiling, and capped to an administrator-configured 1-100 alerts.
+TerraSatch preserves the original NWS alert feature objects and CAP-derived properties at the
+integration boundary. NWS recommends alert consumers avoid polling the service more often than once
+every 30 seconds; this adapter performs on-demand reads and does not create its own polling loop.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant control alert access.
+
 ## Utah Avalanche Center
 
 The Utah Avalanche Center integration is a read-only `avalanche.forecast.read` provider backed by
@@ -424,6 +450,7 @@ keeping customer credentials out of browser state:
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
+- `weather.alerts.read`: official active NWS watches, warnings, advisories, and alerts.
 - `avalanche.forecast.read`: official Utah Avalanche Center daily forecasts for approved Utah regions.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
