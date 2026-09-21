@@ -19,8 +19,11 @@ from terrasatch.integrations.oauth_service import active_credentials
 from terrasatch.radio.models import OperationalEvent, Transmission
 from terrasatch.radio.schemas import RfMetadata, TransmissionCreateRequest
 from terrasatch.radio.service import ingest_transmission
-
-from .schemas import GarminEvent, GarminIpcPayload, MobileObservationRequest
+from terrasatch.field_inputs.schemas import (
+    GarminEvent,
+    GarminIpcPayload,
+    MobileObservationRequest,
+)
 
 
 _GARMIN_MESSAGE_LABELS = {
