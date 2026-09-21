@@ -36,7 +36,10 @@ from .operations import (
     validate_ogc_collection_id,
     validate_public_geojson_destination,
     validate_public_ogc_destination,
+    validate_public_stac_destination,
     validate_r2_endpoint_url,
+    validate_stac_api_base_url,
+    validate_stac_collection_id,
     validate_s3_bucket_name,
 )
 
@@ -62,6 +65,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "email": {"recipients", "subject"},
     "geojson": {"endpoint_url", "max_features"},
     "ogc_api_features": {"base_url", "collection_ids", "max_features"},
+    "stac_api": {"base_url", "collection_ids", "max_items"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
@@ -211,6 +215,37 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
                 "OGC API max_features must be an integer between 1 and 1000"
             )
         configuration["max_features"] = max_features
+
+    if provider_key == "stac_api":
+        base_url = configuration.get("base_url")
+        collection_ids = configuration.get("collection_ids")
+        max_items = configuration.get("max_items", 250)
+        if not isinstance(base_url, str):
+            raise InvalidConfiguration("STAC API base_url is required")
+        configuration["base_url"] = validate_stac_api_base_url(base_url)
+        if (
+            not isinstance(collection_ids, list)
+            or not 1 <= len(collection_ids) <= 25
+            or not all(isinstance(item, str) for item in collection_ids)
+        ):
+            raise InvalidConfiguration(
+                "STAC API collection_ids must contain between 1 and 25 IDs"
+            )
+        normalized_collections = [
+            validate_stac_collection_id(item) for item in collection_ids
+        ]
+        if len(set(normalized_collections)) != len(normalized_collections):
+            raise InvalidConfiguration("STAC API collection_ids cannot contain duplicates")
+        configuration["collection_ids"] = normalized_collections
+        if (
+            not isinstance(max_items, int)
+            or isinstance(max_items, bool)
+            or not 1 <= max_items <= 1000
+        ):
+            raise InvalidConfiguration(
+                "STAC API max_items must be an integer between 1 and 1000"
+            )
+        configuration["max_items"] = max_items
 
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
@@ -376,6 +411,10 @@ async def create_connection_request(
         base_url = configuration.get("base_url")
         assert isinstance(base_url, str)
         await validate_public_ogc_destination(base_url)
+    elif provider_key == "stac_api":
+        base_url = configuration.get("base_url")
+        assert isinstance(base_url, str)
+        await validate_public_stac_destination(base_url)
 
     owner_user_id = user_id if scope == IntegrationScope.USER else None
     duplicate_query = select(IntegrationConnection).where(
@@ -424,7 +463,11 @@ async def create_connection_request(
                 else (
                     f"OGC API · {urlsplit(str(configuration['base_url'])).hostname}"
                     if provider_key == "ogc_api_features"
-                    else None
+                    else (
+                        f"STAC API · {urlsplit(str(configuration['base_url'])).hostname}"
+                        if provider_key == "stac_api"
+                        else None
+                    )
                 )
             )
         ),
@@ -437,7 +480,11 @@ async def create_connection_request(
                 else (
                     urlsplit(str(configuration["base_url"])).hostname
                     if provider_key == "ogc_api_features"
-                    else None
+                    else (
+                        urlsplit(str(configuration["base_url"])).hostname
+                        if provider_key == "stac_api"
+                        else None
+                    )
                 )
             )
         ),
