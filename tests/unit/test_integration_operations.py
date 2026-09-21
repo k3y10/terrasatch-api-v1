@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
@@ -17,6 +17,7 @@ from terrasatch.integrations.operations import (
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
+    query_geojson_features,
     query_snowflake,
     read_mapbox_style,
     send_resend_notification,
@@ -25,6 +26,8 @@ from terrasatch.integrations.operations import (
     send_webhook_notification,
     validate_aws_region,
     validate_generic_webhook_url,
+    validate_geojson_url,
+    validate_public_geojson_destination,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
     validate_teams_workflow_url,
@@ -220,6 +223,88 @@ async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> Non
         )
         == "https://hooks.example.com/terrasatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_geojson_query_returns_bounded_feature_collection() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://data.example.com/observations.geojson"
+        assert request.headers["Accept"] == "application/geo+json, application/json"
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "bbox": [-112.0, 40.0, -111.0, 41.0],
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.8, 40.6]},
+                        "properties": {"name": "A"},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.7, 40.7]},
+                        "properties": {"name": "B"},
+                    },
+                ],
+            },
+        )
+
+    result = await query_geojson_features(
+        endpoint_url="https://data.example.com/observations.geojson",
+        max_features=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.data["type"] == "FeatureCollection"
+    assert len(result.data["features"]) == 1
+    assert result.metadata == {
+        "source_host": "data.example.com",
+        "feature_count": 1,
+        "source_feature_count": 2,
+        "truncated": True,
+    }
+
+
+def test_geojson_url_rejects_query_credentials_and_ip_literal() -> None:
+    for url in (
+        "https://data.example.com/feed.geojson?token=secret",
+        "https://user:pass@data.example.com/feed.geojson",
+        "https://127.0.0.1/feed.geojson",
+    ):
+        with pytest.raises(InvalidConfiguration):
+            validate_geojson_url(url)
+
+
+@pytest.mark.asyncio
+async def test_geojson_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("10.0.0.8", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_geojson_destination(
+            "https://data.example.com/feed.geojson"
+        )
+
+
+@pytest.mark.asyncio
+async def test_geojson_streaming_limit_rejects_large_response() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"x" * 5_000_001,
+            headers={"Content-Type": "application/geo+json"},
+        )
+
+    with pytest.raises(ProviderUnavailable, match="size limit"):
+        await query_geojson_features(
+            endpoint_url="https://data.example.com/feed.geojson",
+            max_features=100,
+            transport=httpx.MockTransport(responder),
+        )
 
 
 @pytest.mark.asyncio
