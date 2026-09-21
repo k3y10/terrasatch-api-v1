@@ -1622,6 +1622,214 @@ async def create_google_drive_file(
     )
 
 
+def _calendar_id(value: str | None) -> str:
+    if value is None:
+        return "primary"
+    normalized = value.strip()
+    if not normalized or len(normalized) > 512 or "/" in normalized:
+        raise InvalidConfiguration("Calendar ID is invalid")
+    return normalized
+
+
+def _calendar_event_values(
+    *,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+) -> tuple[str, datetime, datetime, str, str]:
+    clean_title = " ".join(title.split())
+    if not clean_title or len(clean_title) > 200:
+        raise InvalidConfiguration(
+            "Calendar event title must be between 1 and 200 characters"
+        )
+    if len(description) > 5000:
+        raise InvalidConfiguration("Calendar event description is limited to 5000 characters")
+    clean_location = " ".join(location.split())
+    if len(clean_location) > 500:
+        raise InvalidConfiguration("Calendar event location is limited to 500 characters")
+
+    try:
+        start_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        end_at = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise InvalidConfiguration(
+            "Calendar event start and end must be ISO 8601 timestamps"
+        ) from error
+    if start_at.tzinfo is None or end_at.tzinfo is None:
+        raise InvalidConfiguration(
+            "Calendar event start and end must include a UTC offset"
+        )
+    if end_at <= start_at:
+        raise InvalidConfiguration("Calendar event end must be after start")
+    if end_at - start_at > timedelta(days=7):
+        raise InvalidConfiguration("Calendar events are limited to 7 days")
+    return clean_title, start_at, end_at, description, clean_location
+
+
+async def create_google_calendar_event(
+    credentials: dict[str, object],
+    *,
+    calendar_id: str | None,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Google Calendar access token is unavailable")
+    (
+        clean_title,
+        start_at,
+        end_at,
+        clean_description,
+        clean_location,
+    ) = _calendar_event_values(
+        title=title,
+        start=start,
+        end=end,
+        description=description,
+        location=location,
+    )
+    target_calendar = _calendar_id(calendar_id)
+    payload: dict[str, object] = {
+        "summary": clean_title,
+        "start": {"dateTime": start_at.isoformat()},
+        "end": {"dateTime": end_at.isoformat()},
+    }
+    if clean_description:
+        payload["description"] = clean_description
+    if clean_location:
+        payload["location"] = clean_location
+
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://www.googleapis.com/calendar/v3/calendars/"
+            f"{quote(target_calendar, safe='')}/events"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    if response.status_code not in {200, 201}:
+        raise ProviderUnavailable(
+            f"Google Calendar event creation failed with HTTP {response.status_code}"
+        )
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Google Calendar returned an invalid event response"
+        ) from error
+    if not isinstance(result, dict) or not result.get("id"):
+        raise ProviderUnavailable("Google Calendar did not return an event ID")
+    return ProviderOperationResult(
+        external_id=str(result["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "calendar_id": target_calendar,
+                "event_id": result.get("id"),
+                "html_link": result.get("htmlLink"),
+                "status": result.get("status"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
+async def create_microsoft_calendar_event(
+    credentials: dict[str, object],
+    *,
+    calendar_id: str | None,
+    title: str,
+    start: str,
+    end: str,
+    description: str = "",
+    location: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Microsoft Calendar access token is unavailable")
+    (
+        clean_title,
+        start_at,
+        end_at,
+        clean_description,
+        clean_location,
+    ) = _calendar_event_values(
+        title=title,
+        start=start,
+        end=end,
+        description=description,
+        location=location,
+    )
+    target_calendar = _calendar_id(calendar_id)
+    if target_calendar == "primary":
+        url = f"{_MICROSOFT_GRAPH_ROOT}/me/calendar/events"
+    else:
+        url = (
+            f"{_MICROSOFT_GRAPH_ROOT}/me/calendars/"
+            f"{quote(target_calendar, safe='')}/events"
+        )
+    start_utc = start_at.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    end_utc = end_at.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    payload: dict[str, object] = {
+        "subject": clean_title,
+        "start": {"dateTime": start_utc, "timeZone": "UTC"},
+        "end": {"dateTime": end_utc, "timeZone": "UTC"},
+    }
+    if clean_description:
+        payload["body"] = {"contentType": "text", "content": clean_description}
+    if clean_location:
+        payload["location"] = {"displayName": clean_location}
+
+    response = await _request(
+        transport,
+        "POST",
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    if response.status_code != 201:
+        raise ProviderUnavailable(
+            f"Microsoft Calendar event creation failed with HTTP {response.status_code}"
+        )
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Microsoft Calendar returned an invalid event response"
+        ) from error
+    if not isinstance(result, dict) or not result.get("id"):
+        raise ProviderUnavailable("Microsoft Calendar did not return an event ID")
+    return ProviderOperationResult(
+        external_id=str(result["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "calendar_id": target_calendar,
+                "event_id": result.get("id"),
+                "web_link": result.get("webLink"),
+                "is_cancelled": result.get("isCancelled"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
 async def query_public_arcgis_features(
     *,
     layer_url: str,
