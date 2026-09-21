@@ -14,6 +14,7 @@ import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
@@ -23,6 +24,8 @@ from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
 _SLACK_WEBHOOK_HOST = "hooks.slack.com"
 _TEAMS_WEBHOOK_HOST_SUFFIXES = (".logic.azure.com", ".api.powerplatform.com")
+_R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
+_S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _ALLOWED_DRIVE_MIME_TYPES = {
     "application/json",
@@ -176,6 +179,227 @@ def validate_teams_workflow_url(value: str) -> str:
     if "/workflows/" not in parsed.path or "/triggers/" not in parsed.path:
         raise InvalidConfiguration("Microsoft Teams Workflows webhook path is invalid")
     return normalized
+
+
+def validate_r2_endpoint_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("Cloudflare R2 endpoint has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname.endswith(_R2_ENDPOINT_SUFFIX)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "Cloudflare R2 endpoint must be the HTTPS S3 API account endpoint"
+        )
+    return f"https://{hostname}"
+
+
+def validate_s3_bucket_name(value: str) -> str:
+    normalized = value.strip()
+    if not _S3_BUCKET_NAME.fullmatch(normalized):
+        raise InvalidConfiguration(
+            "Object-storage bucket must be 3-63 lowercase letters, numbers, or hyphens"
+        )
+    return normalized
+
+
+def _aws4_sign(key: bytes, value: str) -> bytes:
+    return hmac.new(key, value.encode(), hashlib.sha256).digest()
+
+
+def _r2_authorization_headers(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    host: str,
+    canonical_uri: str,
+    body: bytes,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    access_key_id = credentials.get("access_key_id")
+    secret_access_key = credentials.get("secret_access_key")
+    if not isinstance(access_key_id, str) or not access_key_id:
+        raise ProviderUnavailable("Cloudflare R2 access key is unavailable")
+    if not isinstance(secret_access_key, str) or not secret_access_key:
+        raise ProviderUnavailable("Cloudflare R2 secret access key is unavailable")
+
+    instant = now or datetime.now(UTC)
+    amz_date = instant.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = instant.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    canonical_headers = (
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join(
+        [
+            method,
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/auto/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
+    date_key = _aws4_sign(f"AWS4{secret_access_key}".encode(), date_stamp)
+    region_key = _aws4_sign(date_key, "auto")
+    service_key = _aws4_sign(region_key, "s3")
+    signing_key = _aws4_sign(service_key, "aws4_request")
+    signature = hmac.new(
+        signing_key,
+        string_to_sign.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "Authorization": (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amz_date,
+    }
+
+
+async def _r2_request(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    endpoint_url: str,
+    bucket: str,
+    key: str | None = None,
+    body: bytes = b"",
+    content_type: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.Response:
+    endpoint = validate_r2_endpoint_url(endpoint_url)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    host = urlsplit(endpoint).hostname
+    assert host is not None
+    canonical_uri = f"/{quote(safe_bucket, safe='-_.~')}"
+    if key is not None:
+        canonical_uri += f"/{quote(key, safe='/-_.~')}"
+    headers = _r2_authorization_headers(
+        credentials,
+        method=method,
+        host=host,
+        canonical_uri=canonical_uri,
+        body=body,
+    )
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    return await _request(
+        transport,
+        method,
+        f"{endpoint}{canonical_uri}",
+        headers=headers,
+        content=body,
+    )
+
+
+async def probe_cloudflare_r2_bucket(
+    credentials: dict[str, object],
+    *,
+    endpoint_url: str,
+    bucket: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _r2_request(
+        credentials,
+        method="HEAD",
+        endpoint_url=endpoint_url,
+        bucket=bucket,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Cloudflare R2 bucket probe failed with HTTP {response.status_code}"
+        )
+    endpoint = validate_r2_endpoint_url(endpoint_url)
+    return ProviderOperationResult(
+        external_id=validate_s3_bucket_name(bucket),
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "endpoint_host": urlsplit(endpoint).hostname,
+        },
+    )
+
+
+async def put_cloudflare_r2_object(
+    credentials: dict[str, object],
+    *,
+    endpoint_url: str,
+    bucket: str,
+    name: str,
+    content: str,
+    mime_type: str,
+    prefix: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    if mime_type not in _ALLOWED_DRIVE_MIME_TYPES:
+        raise InvalidConfiguration("R2 export MIME type is not allowed")
+    media = content.encode()
+    if len(media) > 5_000_000:
+        raise InvalidConfiguration("R2 export is limited to 5 MB")
+
+    clean_name = "/".join(
+        segment.strip()
+        for segment in name.replace("\\", "/").split("/")
+        if segment.strip()
+    )
+    if (
+        not clean_name
+        or len(clean_name) > 1024
+        or ".." in clean_name.split("/")
+    ):
+        raise InvalidConfiguration("R2 object name is invalid")
+    clean_prefix = prefix.strip("/")
+    key = f"{clean_prefix}/{clean_name}" if clean_prefix else clean_name
+
+    response = await _r2_request(
+        credentials,
+        method="PUT",
+        endpoint_url=endpoint_url,
+        bucket=bucket,
+        key=key,
+        body=media,
+        content_type=mime_type,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Cloudflare R2 upload failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id=key,
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "key": key,
+            "etag": response.headers.get("etag"),
+        },
+    )
 
 
 async def _request(
