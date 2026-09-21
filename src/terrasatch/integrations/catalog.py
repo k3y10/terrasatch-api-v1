@@ -97,6 +97,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "aws_s3",
     "email",
     "geojson",
+    "ogc_api_features",
     "snowflake",
     "caltopo",
 }
@@ -214,6 +215,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["map.features.query"],
         "description": (
             "Read features from one administrator-approved public HTTPS GeoJSON endpoint."
+        ),
+    },
+    "ogc_api_features": {
+        "key": "ogc_api_features",
+        "name": "OGC API Features",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read approved collections through the OGC API Features Core interface."
         ),
     },
     "snowflake": {
