@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Literal, Self
+from datetime import datetime
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -96,7 +97,7 @@ class MobileObservationRequest(BaseModel):
     channel_id: UUID | None = None
     client_message_id: str = Field(min_length=1, max_length=255)
     text: str = Field(min_length=1, max_length=20_000)
-    captured_at: str | None = Field(default=None, max_length=40)
+    captured_at: datetime | None = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     altitude_m: float | None = None
