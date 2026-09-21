@@ -28,6 +28,7 @@ from .models import (
     IntegrationStatus,
 )
 from .operations import (
+    probe_nws_api,
     query_geojson_features,
     query_ogc_features,
     query_public_arcgis_features,
@@ -362,6 +363,10 @@ async def probe_connection(
                 else "ArcGIS Enterprise"
             )
             account_id = str(source_host) if source_host else None
+        elif connection.provider == "nws_forecast":
+            result = await probe_nws_api()
+            label = "National Weather Service"
+            account_id = result.external_id
         else:
             credentials, _ = await active_credentials(
                 session,
