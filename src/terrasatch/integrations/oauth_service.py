@@ -27,7 +27,12 @@ from .models import (
     IntegrationOAuthState,
     IntegrationStatus,
 )
-from .operations import query_geojson_features, query_ogc_features, query_stac_items
+from .operations import (
+    query_geojson_features,
+    query_ogc_features,
+    query_public_arcgis_features,
+    query_stac_items,
+)
 from .service import get_connection_for_management, revoke_connection
 
 
@@ -330,6 +335,32 @@ async def probe_connection(
             )
             source_host = result.metadata.get("source_host")
             label = f"STAC API · {source_host}" if source_host else "STAC API"
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "arcgis_enterprise_public":
+            configuration = dict(connection.configuration or {})
+            feature_layer_urls = configuration.get("feature_layer_urls")
+            if (
+                not isinstance(feature_layer_urls, list)
+                or not feature_layer_urls
+                or not isinstance(feature_layer_urls[0], str)
+            ):
+                raise ProviderUnavailable(
+                    "Public ArcGIS Enterprise is not configured"
+                )
+            result = await query_public_arcgis_features(
+                layer_url=feature_layer_urls[0],
+                where="1=0",
+                out_fields=["*"],
+                return_geometry=False,
+                result_record_count=1,
+                result_offset=0,
+            )
+            source_host = result.metadata.get("source_host")
+            label = (
+                f"ArcGIS Enterprise · {source_host}"
+                if source_host
+                else "ArcGIS Enterprise"
+            )
             account_id = str(source_host) if source_host else None
         else:
             credentials, _ = await active_credentials(
