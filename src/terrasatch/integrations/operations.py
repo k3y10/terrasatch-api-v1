@@ -1152,8 +1152,8 @@ async def probe_nws_api(
     response = await _request_limited(
         transport,
         "GET",
-        _NWS_ROOT,
-        max_bytes=250_000,
+        f"{_NWS_ROOT}/points/39.7456,-97.0892",
+        max_bytes=1_000_000,
         headers={
             "Accept": "application/geo+json",
             "User-Agent": _NWS_USER_AGENT,
