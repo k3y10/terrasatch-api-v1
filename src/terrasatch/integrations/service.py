@@ -26,6 +26,7 @@ from .models import (
 )
 from .operations import (
     validate_arcgis_feature_layer_url,
+    validate_aws_region,
     validate_r2_endpoint_url,
     validate_s3_bucket_name,
 )
@@ -43,6 +44,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
     "microsoft_365": {"folder_path"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
+    "aws_s3": {"region", "bucket", "prefix"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
@@ -94,6 +96,27 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         )
         if ".." in clean_prefix.split("/"):
             raise InvalidConfiguration("Cloudflare R2 prefix cannot contain '..'")
+        configuration["prefix"] = clean_prefix
+
+    if provider_key == "aws_s3":
+        region = configuration.get("region")
+        bucket = configuration.get("bucket")
+        prefix = configuration.get("prefix", "")
+        if not isinstance(region, str):
+            raise InvalidConfiguration("Amazon S3 region is required")
+        configuration["region"] = validate_aws_region(region)
+        if not isinstance(bucket, str):
+            raise InvalidConfiguration("Amazon S3 bucket is required")
+        configuration["bucket"] = validate_s3_bucket_name(bucket)
+        if not isinstance(prefix, str) or len(prefix) > 512:
+            raise InvalidConfiguration("Amazon S3 prefix must be a string")
+        clean_prefix = "/".join(
+            segment.strip()
+            for segment in prefix.replace("\\", "/").split("/")
+            if segment.strip()
+        )
+        if ".." in clean_prefix.split("/"):
+            raise InvalidConfiguration("Amazon S3 prefix cannot contain '..'")
         configuration["prefix"] = clean_prefix
 
     if provider_key == "snowflake":
