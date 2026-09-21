@@ -23,6 +23,7 @@ from .oauth_service import active_credentials
 from .operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
+    put_aws_s3_object,
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
@@ -277,6 +278,26 @@ async def execute(
                 content=content,
                 mime_type=mime_type,
                 folder_id=folder_id,
+            )
+        elif capability == "document.create" and connection.provider == "aws_s3":
+            configuration = dict(connection.configuration or {})
+            region = configuration.get("region")
+            bucket = configuration.get("bucket")
+            prefix = configuration.get("prefix", "")
+            if (
+                not isinstance(region, str)
+                or not isinstance(bucket, str)
+                or not isinstance(prefix, str)
+            ):
+                raise InvalidConfiguration("Stored Amazon S3 configuration is invalid")
+            result = await put_aws_s3_object(
+                credentials,
+                region=region,
+                bucket=bucket,
+                prefix=prefix,
+                name=name,
+                content=content,
+                mime_type=mime_type,
             )
         elif capability == "document.create" and connection.provider == "cloudflare_r2":
             configuration = dict(connection.configuration or {})
