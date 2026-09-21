@@ -1204,3 +1204,652 @@ async def test_operational_email_connection_and_runtime_use_platform_resend(
         }
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_geojson_runtime_uses_fixed_public_endpoint_without_credentials(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="GeoJSON runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="GeoJSON runtime org",
+            slug=f"geojson-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="GeoJSON Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://data.example.com/observations.geojson"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_geojson_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="geojson",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="Field observations",
+            configuration={
+                "endpoint_url": "https://data.example.com/observations.geojson",
+                "max_features": 250,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "data.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public GeoJSON must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "endpoint_url": "https://data.example.com/observations.geojson",
+                "max_features": 250,
+            }
+            return ProviderQueryResult(
+                data={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": None,
+                            "properties": {"name": "Observation"},
+                        }
+                    ],
+                },
+                metadata={
+                    "source_host": "data.example.com",
+                    "feature_count": 1,
+                    "source_feature_count": 1,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_geojson_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "geojson"
+        assert result["metadata"]["feature_count"] == 1
+
+        with pytest.raises(InvalidConfiguration, match="does not accept runtime"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"endpoint_url": "https://other.example.com/feed.geojson"},
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ogc_runtime_enforces_collection_and_core_query_allowlists(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="OGC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="OGC runtime org",
+            slug=f"ogc-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="OGC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://maps.example.com/ogc"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_ogc_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="ogc_api_features",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="OGC field data",
+            configuration={
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["observations", "incidents"],
+                "max_features": 100,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "maps.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public OGC API must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_id": "observations",
+                "limit": 25,
+                "bbox": [-112, 40, -111, 41],
+                "datetime_value": "2026-09-20/2026-09-21",
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "maps.example.com",
+                    "collection_id": "observations",
+                    "feature_count": 0,
+                    "source_feature_count": 0,
+                    "truncated": False,
+                    "number_matched": 0,
+                    "number_returned": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_ogc_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "collection_id": "observations",
+                "bbox": [-112, 40, -111, 41],
+                "datetime": "2026-09-20/2026-09-21",
+                "limit": 25,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "ogc_api_features"
+        assert result["metadata"]["collection_id"] == "observations"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"collection_id": "private"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "collection_id": "observations",
+                    "filter": "status='open'",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stac_runtime_enforces_collection_and_core_search_allowlists(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="STAC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="STAC runtime org",
+            slug=f"stac-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="STAC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://stac.example.com/api"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_stac_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="stac_api",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="STAC imagery",
+            configuration={
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["sentinel-2", "landsat.c2"],
+                "max_items": 100,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "stac.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public STAC API must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "base_url": "https://stac.example.com/api",
+                "collection_id": "sentinel-2",
+                "limit": 20,
+                "bbox": [-112, 40, -111, 41],
+                "datetime_value": "2026-09-20/2026-09-21",
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "stac.example.com",
+                    "collection_id": "sentinel-2",
+                    "item_count": 0,
+                    "source_item_count": 0,
+                    "truncated": False,
+                    "number_matched": 0,
+                    "number_returned": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_stac_items",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "collection_id": "sentinel-2",
+                "bbox": [-112, 40, -111, 41],
+                "datetime": "2026-09-20/2026-09-21",
+                "limit": 20,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "stac_api"
+        assert result["metadata"]["collection_id"] == "sentinel-2"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"collection_id": "private"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "collection_id": "sentinel-2",
+                    "query": {"eo:cloud_cover": {"lt": 20}},
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_runtime_enforces_exact_layer_allowlist(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="ArcGIS Enterprise runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="ArcGIS Enterprise runtime org",
+            slug=f"arcgis-enterprise-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="ArcGIS Enterprise Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        layer_url = (
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0"
+        )
+
+        async def fake_public_destination(value):
+            assert value == layer_url
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service."
+            "validate_public_arcgis_feature_layer_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="arcgis_enterprise_public",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="Public avalanche layers",
+            configuration={"feature_layer_urls": [layer_url]},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "gis.example.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError(
+                "public ArcGIS Enterprise must not load customer credentials"
+            )
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "layer_url": layer_url,
+                "where": "STATUS='OPEN'",
+                "out_fields": ["NAME", "STATUS"],
+                "return_geometry": True,
+                "result_record_count": 25,
+                "result_offset": 0,
+            }
+            return ProviderQueryResult(
+                data={"features": []},
+                metadata={
+                    "source_host": "gis.example.gov",
+                    "feature_count": 0,
+                    "layer_url": layer_url,
+                    "return_geometry": True,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_public_arcgis_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "where": "STATUS='OPEN'",
+                "out_fields": ["NAME", "STATUS"],
+                "return_geometry": True,
+                "result_record_count": 25,
+                "result_offset": 0,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "arcgis_enterprise_public"
+        assert result["metadata"]["source_host"] == "gis.example.gov"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "layer_url": (
+                        "https://other.example.gov/server/rest/services/"
+                        "Private/FeatureServer/0"
+                    )
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "layer_url": layer_url,
+                    "token": "not-allowed",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nws_forecast_runtime_is_credential_free_and_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="NWS runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="NWS runtime org",
+            slug=f"nws-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="NWS Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="nws_forecast",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="NWS forecasts",
+            configuration={"max_periods": 8},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "api.weather.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("NWS forecast must not load customer credentials")
+
+        async def fake_forecast(**kwargs):
+            assert kwargs == {
+                "latitude": 40.6,
+                "longitude": -111.7,
+                "max_periods": 4,
+            }
+            return ProviderQueryResult(
+                data={
+                    "periods": [
+                        {"number": 1, "name": "Today"},
+                        {"number": 2, "name": "Tonight"},
+                    ]
+                },
+                metadata={
+                    "source_host": "api.weather.gov",
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "period_count": 2,
+                    "source_period_count": 2,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_nws_forecast",
+            fake_forecast,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="weather.forecast.read",
+            payload={
+                "latitude": 40.6,
+                "longitude": -111.7,
+                "periods": 4,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nws_forecast"
+        assert result["metadata"]["source_host"] == "api.weather.gov"
+
+        with pytest.raises(InvalidConfiguration, match="configured maximum"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.forecast.read",
+                payload={
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "periods": 9,
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.forecast.read",
+                payload={
+                    "latitude": 40.6,
+                    "longitude": -111.7,
+                    "url": "https://example.com/forecast",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()

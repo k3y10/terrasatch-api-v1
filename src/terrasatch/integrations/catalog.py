@@ -84,18 +84,28 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Query connected data",
         "access": "read",
     },
+    "weather.forecast.read": {
+        "key": "weather.forecast.read",
+        "label": "Read weather forecasts",
+        "access": "read",
+    },
 }
 
 _SUPPORTED_PROVIDER_KEYS = {
     "google_drive",
     "slack",
     "esri_arcgis",
+    "arcgis_enterprise_public",
     "microsoft_365",
     "microsoft_teams",
     "webhook",
     "cloudflare_r2",
     "aws_s3",
     "email",
+    "geojson",
+    "ogc_api_features",
+    "stac_api",
+    "nws_forecast",
     "snowflake",
     "caltopo",
 }
@@ -203,6 +213,54 @@ PROVIDERS: dict[str, ProviderDefinition] = {
             "Create approved reports and files in a standard regional Amazon S3 bucket."
         ),
     },
+    "geojson": {
+        "key": "geojson",
+        "name": "GeoJSON / REST",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read features from one administrator-approved public HTTPS GeoJSON endpoint."
+        ),
+    },
+    "ogc_api_features": {
+        "key": "ogc_api_features",
+        "name": "OGC API Features",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read approved collections through the OGC API Features Core interface."
+        ),
+    },
+    "stac_api": {
+        "key": "stac_api",
+        "name": "STAC API",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Search approved STAC collections for bounded geospatial items."
+        ),
+    },
+    "nws_forecast": {
+        "key": "nws_forecast",
+        "name": "National Weather Service",
+        "category": "weather",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["weather.forecast.read"],
+        "description": (
+            "Read official NWS point forecasts through api.weather.gov."
+        ),
+    },
     "snowflake": {
         "key": "snowflake",
         "name": "Snowflake",
@@ -222,6 +280,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "scopes": ["user", "team", "organization"],
         "capabilities": ["map.features.query"],
         "description": "Read approved ArcGIS Online feature layers through Satchy.",
+    },
+    "arcgis_enterprise_public": {
+        "key": "arcgis_enterprise_public",
+        "name": "ArcGIS Enterprise (Public)",
+        "category": "mapping",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["map.features.query"],
+        "description": (
+            "Read administrator-approved public ArcGIS Enterprise FeatureServer layers."
+        ),
     },
     "mapbox": {
         "key": "mapbox",
@@ -337,6 +407,7 @@ def provider_catalog(
             and settings.integration_secret_store_is_configured
         )
         platform_supported = support_status == "supported" and auth_type == "platform"
+        public_https_ready = support_status == "supported" and auth_type == "public_https"
         platform_ready = bool(
             platform_supported
             and settings is not None
@@ -356,6 +427,10 @@ def provider_catalog(
             connect_status = "coming_soon"
             setup_status = "planned"
             runtime_ready = False
+        elif public_https_ready:
+            connect_status = "available"
+            setup_status = "available"
+            runtime_ready = True
         elif platform_ready:
             connect_status = "available"
             setup_status = "available"

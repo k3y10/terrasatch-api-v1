@@ -108,6 +108,21 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["cloudflare_r2"]["can_connect"] is True
     assert with_store["aws_s3"]["connect_status"] == "external_setup_required"
     assert with_store["aws_s3"]["can_connect"] is True
+    assert with_store["geojson"]["connect_status"] == "available"
+    assert with_store["geojson"]["runtime_ready"] is True
+    assert with_store["geojson"]["can_connect"] is True
+    assert with_store["ogc_api_features"]["connect_status"] == "available"
+    assert with_store["ogc_api_features"]["runtime_ready"] is True
+    assert with_store["ogc_api_features"]["can_connect"] is True
+    assert with_store["stac_api"]["connect_status"] == "available"
+    assert with_store["stac_api"]["runtime_ready"] is True
+    assert with_store["stac_api"]["can_connect"] is True
+    assert with_store["arcgis_enterprise_public"]["connect_status"] == "available"
+    assert with_store["arcgis_enterprise_public"]["runtime_ready"] is True
+    assert with_store["arcgis_enterprise_public"]["can_connect"] is True
+    assert with_store["nws_forecast"]["connect_status"] == "available"
+    assert with_store["nws_forecast"]["runtime_ready"] is True
+    assert with_store["nws_forecast"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -184,6 +199,143 @@ def test_operational_email_configuration_is_allowlisted_and_normalized() -> None
         )
 
 
+def test_geojson_configuration_is_fixed_and_bounded() -> None:
+    configuration: dict[str, object] = {
+        "endpoint_url": "https://data.example.com/observations.geojson",
+        "max_features": 250,
+    }
+    _validate_configuration("geojson", configuration)
+    assert configuration == {
+        "endpoint_url": "https://data.example.com/observations.geojson",
+        "max_features": 250,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="HTTPS URL"):
+        _validate_configuration(
+            "geojson",
+            {
+                "endpoint_url": "http://data.example.com/feed.geojson",
+                "max_features": 100,
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="between 1 and 1000"):
+        _validate_configuration(
+            "geojson",
+            {
+                "endpoint_url": "https://data.example.com/feed.geojson",
+                "max_features": 1001,
+            },
+        )
+
+
+def test_ogc_api_configuration_normalizes_allowlisted_collections() -> None:
+    configuration: dict[str, object] = {
+        "base_url": "https://maps.example.com/ogc/",
+        "collection_ids": ["observations", "incidents-2026"],
+        "max_features": 250,
+    }
+    _validate_configuration("ogc_api_features", configuration)
+    assert configuration == {
+        "base_url": "https://maps.example.com/ogc",
+        "collection_ids": ["observations", "incidents-2026"],
+        "max_features": 250,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "ogc_api_features",
+            {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["observations", "observations"],
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="collection ID"):
+        _validate_configuration(
+            "ogc_api_features",
+            {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["../private"],
+            },
+        )
+
+
+def test_stac_api_configuration_normalizes_allowlisted_collections() -> None:
+    configuration: dict[str, object] = {
+        "base_url": "https://stac.example.com/api/",
+        "collection_ids": ["sentinel-2", "landsat.c2"],
+        "max_items": 200,
+    }
+    _validate_configuration("stac_api", configuration)
+    assert configuration == {
+        "base_url": "https://stac.example.com/api",
+        "collection_ids": ["sentinel-2", "landsat.c2"],
+        "max_items": 200,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "stac_api",
+            {
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["sentinel-2", "sentinel-2"],
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="collection ID"):
+        _validate_configuration(
+            "stac_api",
+            {
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["../private"],
+            },
+        )
+
+
+def test_public_arcgis_enterprise_configuration_allowlists_exact_layers() -> None:
+    configuration: dict[str, object] = {
+        "feature_layer_urls": [
+            (
+                "https://gis.example.gov/server/rest/services/"
+                "Avalanche/FeatureServer/0"
+            ),
+            (
+                "https://gis.example.gov/server/rest/services/"
+                "Roads/FeatureServer/2"
+            ),
+        ]
+    }
+    _validate_configuration("arcgis_enterprise_public", configuration)
+    assert len(configuration["feature_layer_urls"]) == 2
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "arcgis_enterprise_public",
+            {
+                "feature_layer_urls": [
+                    "https://gis.example.gov/server/rest/services/A/FeatureServer/0",
+                    "https://gis.example.gov/server/rest/services/A/FeatureServer/0",
+                ]
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="FeatureServer"):
+        _validate_configuration(
+            "arcgis_enterprise_public",
+            {
+                "feature_layer_urls": [
+                    "https://gis.example.gov/server/rest/services/A/MapServer/0"
+                ]
+            },
+        )
+
+
+def test_nws_forecast_configuration_bounds_period_count() -> None:
+    configuration: dict[str, object] = {"max_periods": 8}
+    _validate_configuration("nws_forecast", configuration)
+    assert configuration == {"max_periods": 8}
+
+    with pytest.raises(InvalidConfiguration, match="between 1 and 14"):
+        _validate_configuration("nws_forecast", {"max_periods": 15})
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -240,6 +392,31 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["aws_s3"]["capability_details"]
     }
     assert s3_labels["document.create"] == "Create reports and files"
+    geojson_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["geojson"]["capability_details"]
+    }
+    assert geojson_labels["map.features.query"] == "Read map features"
+    ogc_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["ogc_api_features"]["capability_details"]
+    }
+    assert ogc_labels["map.features.query"] == "Read map features"
+    stac_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["stac_api"]["capability_details"]
+    }
+    assert stac_labels["map.features.query"] == "Read map features"
+    enterprise_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["arcgis_enterprise_public"]["capability_details"]
+    }
+    assert enterprise_labels["map.features.query"] == "Read map features"
+    nws_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["nws_forecast"]["capability_details"]
+    }
+    assert nws_labels["weather.forecast.read"] == "Read weather forecasts"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:

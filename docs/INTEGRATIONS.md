@@ -79,8 +79,9 @@ token in the HTTP Authorization header, cap a response at 200 features and 2 MB,
 non-`*.arcgis.com` destinations. This prevents the layer URL from becoming a general-purpose
 server-side request primitive.
 
-ArcGIS Enterprise and feature-editing capabilities remain planned; this adapter does not claim those
-capabilities yet.
+This OAuth adapter remains limited to ArcGIS Online. Public ArcGIS Enterprise FeatureServer reads
+are handled by the separate ArcGIS Enterprise (Public) provider below; authenticated Enterprise
+portals and feature-editing capabilities remain outside this adapter.
 
 1. Create ArcGIS OAuth credentials for a server-side application.
 2. Register the callback:
@@ -176,6 +177,110 @@ The adapter keeps the same approved text/JSON/CSV/Markdown MIME types and 5 MB b
 document runtime. For long-lived credentials, use a dedicated least-privilege IAM principal scoped to
 the intended bucket/prefix. Temporary STS-style credentials are supported through `session_token`.
 
+## GeoJSON / REST
+
+GeoJSON / REST is a read-only `map.features.query` source for public HTTPS FeatureCollection
+endpoints. A team or organization administrator approves exactly one endpoint URL and a maximum
+feature count when creating the connection. The URL cannot contain embedded credentials, query
+parameters, fragments, IP literals, localhost-style names, or non-HTTPS schemes.
+
+TerraSatch resolves the configured hostname and rejects non-public DNS results at connection setup.
+The destination is checked again immediately before a live query, redirects remain disabled, and
+the response is streamed with a hard 5 MB ceiling. Returned JSON must be a GeoJSON
+`FeatureCollection`; the configured feature limit is between 1 and 1000. If the source contains
+more features, TerraSatch returns the configured prefix and marks the response metadata as truncated.
+
+Satchy cannot provide a different URL or runtime filter payload for this provider. The endpoint is
+fixed by the administrator, the provider uses no customer credential record, and the normal
+organization/team plus `agent:satchy` read grants still apply.
+
+## OGC API Features
+
+OGC API Features is a read-only `map.features.query` integration for standards-based public
+feature services. A team or organization administrator configures one public HTTPS API base URL,
+between one and 25 approved collection IDs, and a maximum feature count between 1 and 1000.
+
+The initial TerraSatch adapter intentionally implements a narrow Part 1/Core query surface. Runtime
+queries may select only an approved collection and may optionally provide a four-value WGS84
+`bbox`, an OGC `datetime` instant/interval, and a `limit` no larger than the administrator's
+configured maximum. TerraSatch does not expose CQL2 filters, alternate CRS selection, arbitrary
+query parameters, writes, or automatic pagination in this first adapter.
+
+The base URL must be public HTTPS without embedded credentials, query parameters, or fragments.
+TerraSatch rejects local/IP/internal destinations, checks public DNS during connection setup and
+again immediately before live reads, disables redirects, and streams responses through the same
+5 MB hard ceiling used by the GeoJSON provider. Responses must be GeoJSON FeatureCollections;
+TerraSatch also caps the returned feature list even if a noncompliant service ignores the requested
+limit.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control access.
+
+## STAC API
+
+STAC API is a read-only `map.features.query` integration for public SpatioTemporal Asset Catalog
+services. A team or organization administrator configures one public HTTPS STAC API base URL,
+between one and 25 approved collection IDs, and a maximum item count between 1 and 1000.
+
+The first TerraSatch adapter uses the STAC Item Search `/search` endpoint with a deliberately
+small query surface: one approved collection, an optional four-value WGS84 `bbox`, optional
+STAC/OGC `datetime`, and a bounded `limit`. TerraSatch does not expose free-text search, CQL2
+or filter extensions, arbitrary STAC query extensions, asset downloads, writes, or automatic
+pagination in this first version.
+
+The base URL must be public HTTPS without embedded credentials, query parameters, or fragments.
+TerraSatch rejects local/IP/internal destinations, checks public DNS during connection setup and
+again before a live search, disables redirects, and streams responses through a hard 5 MB ceiling.
+Search responses must be GeoJSON FeatureCollections whose features contain STAC Item identifiers
+and `stac_version`. TerraSatch also caps the returned item list even if a noncompliant service
+returns more than the requested limit.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control access. Asset metadata can be returned as part of a STAC Item,
+but TerraSatch does not fetch or download those assets through this adapter.
+
+## ArcGIS Enterprise (Public)
+
+ArcGIS Enterprise (Public) is a read-only `map.features.query` provider for publicly reachable
+ArcGIS Server or ArcGIS Enterprise FeatureServer layers. It is separate from the existing ArcGIS
+Online OAuth integration so TerraSatch does not loosen the `*.arcgis.com` trust boundary used by
+connected ArcGIS Online accounts.
+
+A team or organization administrator approves between one and 20 exact HTTPS FeatureServer layer
+URLs ending in `/FeatureServer/<layerId>`. The hostname must be public DNS; TerraSatch rejects
+embedded credentials, query parameters, fragments, IP literals, localhost/internal destinations,
+and non-HTTPS URLs. DNS is checked at connection setup and again immediately before live queries.
+
+Runtime queries support the same narrow ArcGIS feature-query surface already used by TerraSatch:
+`where`, `out_fields`, `return_geometry`, `result_record_count`, and `result_offset`.
+The selected layer must exactly match an administrator-approved URL. Result counts remain capped at
+200 per request, response bodies are streamed through a 2 MB hard ceiling, redirects are disabled,
+and the public adapter does not send an Authorization header or load a customer credential record.
+
+The initial public adapter does not browse services, mint ArcGIS tokens, call administrative
+endpoints, edit features, or accept arbitrary REST parameters.
+
+## National Weather Service
+
+The National Weather Service integration is a read-only `weather.forecast.read` provider backed
+by the official `api.weather.gov` service. It requires no customer API key. TerraSatch identifies
+itself with a dedicated User-Agent as required by NWS and uses only the fixed NWS API host.
+
+A team or organization administrator configures a maximum of 1-14 standard forecast periods.
+Runtime callers provide only latitude, longitude, and an optional period count no larger than that
+configured maximum. TerraSatch first calls the NWS `/points/{latitude},{longitude}` endpoint,
+then follows only the returned forecast URL when it still resolves to the fixed
+`api.weather.gov/gridpoints/<office>/<x>,<y>/forecast` path. No arbitrary URL is accepted from
+the caller or from linked response data.
+
+Point lookups are capped at 1 MB and forecast responses at 2 MB, redirects remain disabled, and
+coordinates are normalized to four decimal places. The initial adapter exposes the standard
+12-hour-period forecast only; hourly forecasts, alerts, observations, radar, grid data, and other
+NWS endpoints remain outside this first provider.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control forecast access.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -234,8 +339,9 @@ keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
-- `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
+- `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
+- `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.

@@ -26,6 +26,11 @@ _SLACK_WEBHOOK_HOST = "hooks.slack.com"
 _TEAMS_WEBHOOK_HOST_SUFFIXES = (".logic.azure.com", ".api.powerplatform.com")
 _R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
 _S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
+_NWS_ROOT = "https://api.weather.gov"
+_NWS_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_NWS_FORECAST_PATH = re.compile(
+    r"^/gridpoints/[A-Z]{3}/[0-9]+,[0-9]+/forecast/?$"
+)
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _ALLOWED_DRIVE_MIME_TYPES = {
     "application/json",
@@ -49,6 +54,12 @@ class ProviderQueryResult:
 
 _ARCGIS_LAYER_PATH = re.compile(r"/FeatureServer/\d+/?$", re.I)
 _ARCGIS_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_OGC_COLLECTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$")
+_STAC_COLLECTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$")
+_OGC_DATETIME = re.compile(
+    r"^(?:\.\.|[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9:.+-]+Z?)?)"
+    r"(?:/(?:\.\.|[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9:.+-]+Z?)?))?$"
+)
 
 
 def validate_arcgis_feature_layer_url(value: str) -> str:
@@ -70,6 +81,57 @@ def validate_arcgis_feature_layer_url(value: str) -> str:
             "ArcGIS feature layer must be an HTTPS ArcGIS Online FeatureServer layer URL"
         )
     return normalized
+
+
+def validate_public_arcgis_feature_layer_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer URL has an invalid port"
+        ) from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+        or not _ARCGIS_LAYER_PATH.search(parsed.path)
+    ):
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer must be an HTTPS FeatureServer layer URL"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer must use a DNS hostname"
+        )
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer destination is not allowed"
+        )
+    return normalized
+
+
+async def validate_public_arcgis_feature_layer_destination(value: str) -> str:
+    normalized = validate_public_arcgis_feature_layer_url(value)
+    return await _validate_public_hostname(
+        normalized,
+        label="Public ArcGIS Enterprise layer",
+    )
 
 
 def _validate_https_webhook_url(
@@ -121,17 +183,7 @@ def _validate_https_webhook_url(
     return normalized
 
 
-async def validate_public_webhook_destination(
-    value: str,
-    *,
-    label: str,
-    allowed_host_suffixes: tuple[str, ...] | None = None,
-) -> str:
-    normalized = _validate_https_webhook_url(
-        value,
-        label=label,
-        allowed_host_suffixes=allowed_host_suffixes,
-    )
+async def _validate_public_hostname(normalized: str, *, label: str) -> str:
     hostname = urlsplit(normalized).hostname
     assert hostname is not None
     try:
@@ -144,24 +196,175 @@ async def validate_public_webhook_destination(
         )
     except OSError as error:
         raise ProviderUnavailable(
-            f"{label} webhook destination could not be resolved"
+            f"{label} destination could not be resolved"
         ) from error
 
     addresses = {item[4][0].split("%", 1)[0] for item in infos if item[4]}
     if not addresses:
-        raise ProviderUnavailable(f"{label} webhook destination could not be resolved")
+        raise ProviderUnavailable(f"{label} destination could not be resolved")
 
     for address in addresses:
         try:
             resolved = ipaddress.ip_address(address)
         except ValueError as error:
             raise ProviderUnavailable(
-                f"{label} webhook destination returned an invalid address"
+                f"{label} destination returned an invalid address"
             ) from error
         if not resolved.is_global:
             raise InvalidConfiguration(
-                f"{label} webhook destination resolves to a non-public address"
+                f"{label} destination resolves to a non-public address"
             )
+    return normalized
+
+
+async def validate_public_webhook_destination(
+    value: str,
+    *,
+    label: str,
+    allowed_host_suffixes: tuple[str, ...] | None = None,
+) -> str:
+    normalized = _validate_https_webhook_url(
+        value,
+        label=label,
+        allowed_host_suffixes=allowed_host_suffixes,
+    )
+    return await _validate_public_hostname(normalized, label=f"{label} webhook")
+
+
+def validate_geojson_url(value: str) -> str:
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("GeoJSON endpoint has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "GeoJSON endpoint must be an HTTPS URL without credentials, query, or fragment"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration("GeoJSON endpoint must use a DNS hostname")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration("GeoJSON endpoint destination is not allowed")
+    return normalized
+
+
+async def validate_public_geojson_destination(value: str) -> str:
+    normalized = validate_geojson_url(value)
+    return await _validate_public_hostname(normalized, label="GeoJSON endpoint")
+
+
+def validate_ogc_api_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("OGC API base URL has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "OGC API base URL must be HTTPS without credentials, query, or fragment"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration("OGC API base URL must use a DNS hostname")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration("OGC API destination is not allowed")
+    return normalized
+
+
+async def validate_public_ogc_destination(value: str) -> str:
+    normalized = validate_ogc_api_base_url(value)
+    return await _validate_public_hostname(normalized, label="OGC API")
+
+
+def validate_stac_api_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("STAC API base URL has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "STAC API base URL must be HTTPS without credentials, query, or fragment"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration("STAC API base URL must use a DNS hostname")
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration("STAC API destination is not allowed")
+    return normalized
+
+
+async def validate_public_stac_destination(value: str) -> str:
+    normalized = validate_stac_api_base_url(value)
+    return await _validate_public_hostname(normalized, label="STAC API")
+
+
+def validate_stac_collection_id(value: str) -> str:
+    normalized = value.strip()
+    if not _STAC_COLLECTION_ID.fullmatch(normalized):
+        raise InvalidConfiguration("STAC collection ID is invalid")
+    return normalized
+
+
+def validate_ogc_collection_id(value: str) -> str:
+    normalized = value.strip()
+    if not _OGC_COLLECTION_ID.fullmatch(normalized):
+        raise InvalidConfiguration("OGC collection ID is invalid")
     return normalized
 
 
@@ -619,6 +822,452 @@ async def put_cloudflare_r2_object(
     )
 
 
+def _validate_ogc_bbox(value: object) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or not all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value)
+    ):
+        raise InvalidConfiguration("OGC bbox must contain four numeric WGS84 values")
+    min_x, min_y, max_x, max_y = (float(item) for item in value)
+    if (
+        not -180 <= min_x <= 180
+        or not -180 <= max_x <= 180
+        or not -90 <= min_y <= 90
+        or not -90 <= max_y <= 90
+        or min_x > max_x
+        or min_y > max_y
+    ):
+        raise InvalidConfiguration("OGC bbox is outside the WGS84 bounds")
+    return ",".join(str(item) for item in (min_x, min_y, max_x, max_y))
+
+
+def _validate_ogc_datetime(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 128 or not _OGC_DATETIME.fullmatch(value):
+        raise InvalidConfiguration("OGC datetime is invalid")
+    return value
+
+
+async def query_ogc_features(
+    *,
+    base_url: str,
+    collection_id: str,
+    limit: int,
+    bbox: object = None,
+    datetime_value: object = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise InvalidConfiguration("OGC limit must be an integer between 1 and 1000")
+    base = validate_ogc_api_base_url(base_url)
+    collection = validate_ogc_collection_id(collection_id)
+    if transport is None:
+        await validate_public_ogc_destination(base)
+
+    params: dict[str, str] = {"limit": str(limit)}
+    safe_bbox = _validate_ogc_bbox(bbox)
+    if safe_bbox is not None:
+        params["bbox"] = safe_bbox
+    safe_datetime = _validate_ogc_datetime(datetime_value)
+    if safe_datetime is not None:
+        params["datetime"] = safe_datetime
+
+    endpoint = (
+        f"{base}/collections/{quote(collection, safe='-._~')}/items"
+    )
+    response = await _request_limited(
+        transport,
+        "GET",
+        endpoint,
+        max_bytes=5_000_000,
+        headers={"Accept": "application/geo+json, application/json"},
+        params=params,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"OGC API Features query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("OGC API Features returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable("OGC API Features must return a FeatureCollection")
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
+        raise ProviderUnavailable("OGC API Features response has invalid features")
+    for feature in raw_features:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            raise ProviderUnavailable("OGC API Features returned an invalid feature")
+    features = raw_features[:limit]
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    bbox_value = payload.get("bbox")
+    if isinstance(bbox_value, list):
+        data["bbox"] = bbox_value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": urlsplit(base).hostname,
+            "collection_id": collection,
+            "feature_count": len(features),
+            "source_feature_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
+            "number_matched": payload.get("numberMatched"),
+            "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
+async def query_stac_items(
+    *,
+    base_url: str,
+    collection_id: str,
+    limit: int,
+    bbox: object = None,
+    datetime_value: object = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise InvalidConfiguration("STAC limit must be an integer between 1 and 1000")
+    base = validate_stac_api_base_url(base_url)
+    collection = validate_stac_collection_id(collection_id)
+    if transport is None:
+        await validate_public_stac_destination(base)
+
+    params: dict[str, str] = {
+        "collections": collection,
+        "limit": str(limit),
+    }
+    safe_bbox = _validate_ogc_bbox(bbox)
+    if safe_bbox is not None:
+        params["bbox"] = safe_bbox
+    safe_datetime = _validate_ogc_datetime(datetime_value)
+    if safe_datetime is not None:
+        params["datetime"] = safe_datetime
+
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{base}/search",
+        max_bytes=5_000_000,
+        headers={"Accept": "application/geo+json, application/json"},
+        params=params,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"STAC API item search failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("STAC API returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable("STAC API search must return a FeatureCollection")
+    raw_items = payload.get("features")
+    if not isinstance(raw_items, list):
+        raise ProviderUnavailable("STAC API search response has invalid features")
+
+    for item in raw_items:
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "Feature"
+            or not isinstance(item.get("id"), str)
+            or not isinstance(item.get("stac_version"), str)
+        ):
+            raise ProviderUnavailable("STAC API returned an invalid STAC Item")
+    items = raw_items[:limit]
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": items,
+    }
+    bbox_value = payload.get("bbox")
+    if isinstance(bbox_value, list):
+        data["bbox"] = bbox_value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": urlsplit(base).hostname,
+            "collection_id": collection,
+            "item_count": len(items),
+            "source_item_count": len(raw_items),
+            "truncated": len(raw_items) > len(items),
+            "number_matched": payload.get("numberMatched"),
+            "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
+def validate_nws_forecast_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ProviderUnavailable("NWS returned an invalid forecast URL") from error
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").casefold() != "api.weather.gov"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+        or not _NWS_FORECAST_PATH.fullmatch(parsed.path)
+    ):
+        raise ProviderUnavailable("NWS returned an invalid forecast URL")
+    return normalized
+
+
+def _validate_weather_coordinates(latitude: object, longitude: object) -> tuple[float, float]:
+    if (
+        not isinstance(latitude, (int, float))
+        or isinstance(latitude, bool)
+        or not isinstance(longitude, (int, float))
+        or isinstance(longitude, bool)
+    ):
+        raise InvalidConfiguration(
+            "NWS forecast latitude and longitude must be numeric"
+        )
+    lat = round(float(latitude), 4)
+    lon = round(float(longitude), 4)
+    if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+        raise InvalidConfiguration(
+            "NWS forecast coordinates are outside valid latitude/longitude bounds"
+        )
+    return lat, lon
+
+
+async def query_nws_forecast(
+    *,
+    latitude: object,
+    longitude: object,
+    max_periods: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if (
+        not isinstance(max_periods, int)
+        or isinstance(max_periods, bool)
+        or not 1 <= max_periods <= 14
+    ):
+        raise InvalidConfiguration(
+            "NWS forecast max_periods must be an integer between 1 and 14"
+        )
+    lat, lon = _validate_weather_coordinates(latitude, longitude)
+    headers = {
+        "Accept": "application/geo+json",
+        "User-Agent": _NWS_USER_AGENT,
+    }
+
+    point_response = await _request_limited(
+        transport,
+        "GET",
+        f"{_NWS_ROOT}/points/{lat:.4f},{lon:.4f}",
+        max_bytes=1_000_000,
+        headers=headers,
+    )
+    if point_response.status_code < 200 or point_response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS point lookup failed with HTTP {point_response.status_code}"
+        )
+    try:
+        point_payload = point_response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS point lookup returned invalid JSON") from error
+    if not isinstance(point_payload, dict):
+        raise ProviderUnavailable("NWS point lookup returned an invalid response")
+    properties = point_payload.get("properties")
+    if not isinstance(properties, dict):
+        raise ProviderUnavailable("NWS point lookup is missing properties")
+    forecast_url = properties.get("forecast")
+    if not isinstance(forecast_url, str):
+        raise ProviderUnavailable("NWS point lookup is missing forecast URL")
+    forecast_url = validate_nws_forecast_url(forecast_url)
+
+    forecast_response = await _request_limited(
+        transport,
+        "GET",
+        forecast_url,
+        max_bytes=2_000_000,
+        headers=headers,
+    )
+    if forecast_response.status_code < 200 or forecast_response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS forecast query failed with HTTP {forecast_response.status_code}"
+        )
+    try:
+        forecast_payload = forecast_response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS forecast returned invalid JSON") from error
+    if not isinstance(forecast_payload, dict):
+        raise ProviderUnavailable("NWS forecast returned an invalid response")
+    forecast_properties = forecast_payload.get("properties")
+    if not isinstance(forecast_properties, dict):
+        raise ProviderUnavailable("NWS forecast is missing properties")
+    raw_periods = forecast_properties.get("periods")
+    if not isinstance(raw_periods, list):
+        raise ProviderUnavailable("NWS forecast periods are invalid")
+    periods: list[dict[str, object]] = []
+    for period in raw_periods[:max_periods]:
+        if not isinstance(period, dict):
+            raise ProviderUnavailable("NWS forecast returned an invalid period")
+        periods.append(period)
+
+    data: dict[str, object] = {
+        "periods": periods,
+    }
+    for key in ("updated", "units", "generatedAt"):
+        value = forecast_properties.get(key)
+        if value is not None:
+            data[key] = value
+
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": "api.weather.gov",
+            "latitude": lat,
+            "longitude": lon,
+            "office": properties.get("gridId"),
+            "grid_x": properties.get("gridX"),
+            "grid_y": properties.get("gridY"),
+            "period_count": len(periods),
+            "source_period_count": len(raw_periods),
+            "truncated": len(raw_periods) > len(periods),
+        },
+    )
+
+
+async def probe_nws_api(
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{_NWS_ROOT}/points/39.7456,-97.0892",
+        max_bytes=1_000_000,
+        headers={
+            "Accept": "application/geo+json",
+            "User-Agent": _NWS_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS API probe failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id="api.weather.gov",
+        metadata={"source_host": "api.weather.gov"},
+    )
+
+
+async def query_geojson_features(
+    *,
+    endpoint_url: str,
+    max_features: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(max_features, int) or isinstance(max_features, bool):
+        raise InvalidConfiguration("GeoJSON max_features must be an integer")
+    if not 1 <= max_features <= 1000:
+        raise InvalidConfiguration("GeoJSON max_features must be between 1 and 1000")
+
+    endpoint = validate_geojson_url(endpoint_url)
+    if transport is None:
+        await validate_public_geojson_destination(endpoint)
+
+    response = await _request_limited(
+        transport,
+        "GET",
+        endpoint,
+        max_bytes=5_000_000,
+        headers={"Accept": "application/geo+json, application/json"},
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"GeoJSON endpoint query failed with HTTP {response.status_code}"
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("GeoJSON endpoint returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable(
+            "GeoJSON endpoint must return a FeatureCollection"
+        )
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
+        raise ProviderUnavailable("GeoJSON FeatureCollection features must be a list")
+
+    features: list[dict[str, object]] = []
+    for feature in raw_features[:max_features]:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            raise ProviderUnavailable("GeoJSON endpoint returned an invalid feature")
+        features.append(feature)
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    bbox = payload.get("bbox")
+    if isinstance(bbox, list):
+        data["bbox"] = bbox
+
+    hostname = urlsplit(endpoint).hostname
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": hostname,
+            "feature_count": len(features),
+            "source_feature_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
+        },
+    )
+
+
+async def _request_limited(
+    transport: httpx.AsyncBaseTransport | None,
+    method: str,
+    url: str,
+    *,
+    max_bytes: int,
+    **kwargs,
+) -> httpx.Response:
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            async with client.stream(method, url, **kwargs) as response:
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > max_bytes:
+                        raise ProviderUnavailable(
+                            "Provider response exceeds the configured size limit"
+                        )
+                    content.extend(chunk)
+                return httpx.Response(
+                    response.status_code,
+                    headers=response.headers,
+                    content=bytes(content),
+                    request=response.request,
+                )
+    except ProviderUnavailable:
+        raise
+    except httpx.HTTPError as error:
+        raise ProviderUnavailable("Provider delivery request failed") from error
+
+
 async def _request(
     transport: httpx.AsyncBaseTransport | None,
     method: str,
@@ -971,6 +1620,106 @@ async def create_google_drive_file(
         external_id=external_id,
         metadata={key: value for key, value in safe.items() if value is not None},
     )
+
+
+async def query_public_arcgis_features(
+    *,
+    layer_url: str,
+    where: str = "1=1",
+    out_fields: list[str] | None = None,
+    return_geometry: bool = True,
+    result_record_count: int = 100,
+    result_offset: int = 0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    normalized_layer = validate_public_arcgis_feature_layer_url(layer_url)
+    if transport is None:
+        await validate_public_arcgis_feature_layer_destination(normalized_layer)
+
+    normalized_where = " ".join(where.split()).strip()
+    if not normalized_where or len(normalized_where) > 2000:
+        raise InvalidConfiguration(
+            "ArcGIS where clause must be between 1 and 2000 characters"
+        )
+
+    fields = out_fields or ["*"]
+    if not fields or len(fields) > 50:
+        raise InvalidConfiguration(
+            "ArcGIS out_fields must contain between 1 and 50 fields"
+        )
+    normalized_fields: list[str] = []
+    for field in fields:
+        candidate = field.strip()
+        if candidate != "*" and not _ARCGIS_FIELD.fullmatch(candidate):
+            raise InvalidConfiguration(
+                "ArcGIS out_fields contains an invalid field name"
+            )
+        normalized_fields.append(candidate)
+
+    if not 1 <= result_record_count <= 200:
+        raise InvalidConfiguration(
+            "ArcGIS queries are limited to 200 features per request"
+        )
+    if not 0 <= result_offset <= 1_000_000:
+        raise InvalidConfiguration(
+            "ArcGIS result offset is outside the allowed range"
+        )
+
+    response = await _request_limited(
+        transport,
+        "POST",
+        f"{normalized_layer}/query",
+        max_bytes=2_000_000,
+        data={
+            "f": "json",
+            "where": normalized_where,
+            "outFields": ",".join(normalized_fields),
+            "returnGeometry": "true" if return_geometry else "false",
+            "resultRecordCount": str(result_record_count),
+            "resultOffset": str(result_offset),
+        },
+    )
+    if response.status_code >= 400:
+        raise ProviderUnavailable(
+            f"Public ArcGIS Enterprise query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature response"
+        ) from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature response"
+        )
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        code = error_payload.get("code")
+        message = error_payload.get("message") or "query_failed"
+        raise ProviderUnavailable(
+            f"Public ArcGIS Enterprise query failed ({code}: {message})"
+        )
+
+    features = payload.get("features")
+    if features is not None and not isinstance(features, list):
+        raise ProviderUnavailable(
+            "Public ArcGIS Enterprise returned an invalid feature collection"
+        )
+    feature_count = len(features or [])
+    metadata: dict[str, object] = {
+        "feature_count": feature_count,
+        "layer_url": normalized_layer,
+        "return_geometry": return_geometry,
+        "source_host": urlsplit(normalized_layer).hostname,
+    }
+    if payload.get("geometryType"):
+        metadata["geometry_type"] = payload["geometryType"]
+    if payload.get("exceededTransferLimit") is not None:
+        metadata["exceeded_transfer_limit"] = bool(
+            payload["exceededTransferLimit"]
+        )
+    return ProviderQueryResult(data=payload, metadata=metadata)
 
 
 async def query_arcgis_features(

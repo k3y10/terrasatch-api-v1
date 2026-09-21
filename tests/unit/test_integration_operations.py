@@ -7,17 +7,23 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
     probe_aws_s3_bucket,
     probe_cloudflare_r2_bucket,
+    probe_nws_api,
     put_aws_s3_object,
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
+    query_geojson_features,
+    query_nws_forecast,
+    query_ogc_features,
+    query_public_arcgis_features,
     query_snowflake,
+    query_stac_items,
     read_mapbox_style,
     send_resend_notification,
     send_slack_message,
@@ -25,8 +31,17 @@ from terrasatch.integrations.operations import (
     send_webhook_notification,
     validate_aws_region,
     validate_generic_webhook_url,
+    validate_geojson_url,
+    validate_nws_forecast_url,
+    validate_ogc_api_base_url,
+    validate_public_arcgis_feature_layer_destination,
+    validate_public_arcgis_feature_layer_url,
+    validate_public_geojson_destination,
+    validate_public_ogc_destination,
+    validate_public_stac_destination,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
+    validate_stac_api_base_url,
     validate_teams_workflow_url,
 )
 
@@ -220,6 +235,173 @@ async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> Non
         )
         == "https://hooks.example.com/terrasatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_geojson_query_returns_bounded_feature_collection() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://data.example.com/observations.geojson"
+        assert request.headers["Accept"] == "application/geo+json, application/json"
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "bbox": [-112.0, 40.0, -111.0, 41.0],
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.8, 40.6]},
+                        "properties": {"name": "A"},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.7, 40.7]},
+                        "properties": {"name": "B"},
+                    },
+                ],
+            },
+        )
+
+    result = await query_geojson_features(
+        endpoint_url="https://data.example.com/observations.geojson",
+        max_features=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.data["type"] == "FeatureCollection"
+    assert len(result.data["features"]) == 1
+    assert result.metadata == {
+        "source_host": "data.example.com",
+        "feature_count": 1,
+        "source_feature_count": 2,
+        "truncated": True,
+    }
+
+
+def test_geojson_url_rejects_query_credentials_and_ip_literal() -> None:
+    for url in (
+        "https://data.example.com/feed.geojson?token=secret",
+        "https://user:pass@data.example.com/feed.geojson",
+        "https://127.0.0.1/feed.geojson",
+    ):
+        with pytest.raises(InvalidConfiguration):
+            validate_geojson_url(url)
+
+
+@pytest.mark.asyncio
+async def test_geojson_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("10.0.0.8", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_geojson_destination(
+            "https://data.example.com/feed.geojson"
+        )
+
+
+@pytest.mark.asyncio
+async def test_geojson_streaming_limit_rejects_large_response() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"x" * 5_000_001,
+            headers={"Content-Type": "application/geo+json"},
+        )
+
+    with pytest.raises(ProviderUnavailable, match="size limit"):
+        await query_geojson_features(
+            endpoint_url="https://data.example.com/feed.geojson",
+            max_features=100,
+            transport=httpx.MockTransport(responder),
+        )
+
+
+@pytest.mark.asyncio
+async def test_ogc_features_query_uses_only_core_parameters() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith(
+            "https://maps.example.com/ogc/collections/observations/items?"
+        )
+        params = dict(request.url.params)
+        assert params == {
+            "limit": "25",
+            "bbox": "-112.0,40.0,-111.0,41.0",
+            "datetime": "2026-09-20T00:00:00Z/2026-09-21T00:00:00Z",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "numberMatched": 40,
+                "numberReturned": 1,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-111.8, 40.6]},
+                        "properties": {"name": "Observation"},
+                    }
+                ],
+            },
+        )
+
+    result = await query_ogc_features(
+        base_url="https://maps.example.com/ogc",
+        collection_id="observations",
+        limit=25,
+        bbox=[-112, 40, -111, 41],
+        datetime_value="2026-09-20T00:00:00Z/2026-09-21T00:00:00Z",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["collection_id"] == "observations"
+    assert result.metadata["feature_count"] == 1
+    assert result.metadata["number_matched"] == 40
+
+
+def test_ogc_api_rejects_unsafe_base_url() -> None:
+    with pytest.raises(InvalidConfiguration, match="without credentials"):
+        validate_ogc_api_base_url("https://user:pass@maps.example.com/ogc")
+
+
+@pytest.mark.asyncio
+async def test_ogc_api_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("192.168.1.8", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_ogc_destination("https://maps.example.com/ogc")
+
+
+@pytest.mark.asyncio
+async def test_ogc_api_rejects_invalid_bbox_and_datetime() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"type": "FeatureCollection", "features": []},
+        )
+    )
+    with pytest.raises(InvalidConfiguration, match="WGS84"):
+        await query_ogc_features(
+            base_url="https://maps.example.com/ogc",
+            collection_id="observations",
+            limit=10,
+            bbox=[-200, 40, -111, 41],
+            transport=transport,
+        )
+    with pytest.raises(InvalidConfiguration, match="datetime"):
+        await query_ogc_features(
+            base_url="https://maps.example.com/ogc",
+            collection_id="observations",
+            limit=10,
+            datetime_value="not-a-date",
+            transport=transport,
+        )
 
 
 @pytest.mark.asyncio
@@ -542,3 +724,277 @@ async def test_mapbox_style_read_uses_fixed_api_host() -> None:
         transport=httpx.MockTransport(responder),
     )
     assert result.metadata["name"] == "Field"
+
+
+@pytest.mark.asyncio
+async def test_stac_item_search_uses_allowlisted_core_parameters() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith("https://stac.example.com/api/search?")
+        assert dict(request.url.params) == {
+            "collections": "sentinel-2",
+            "limit": "20",
+            "bbox": "-112.0,40.0,-111.0,41.0",
+            "datetime": "2026-09-20/2026-09-21",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "numberMatched": 2,
+                "numberReturned": 2,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "stac_version": "1.0.0",
+                        "id": "scene-a",
+                        "geometry": None,
+                        "properties": {"datetime": "2026-09-20T12:00:00Z"},
+                        "assets": {},
+                    },
+                    {
+                        "type": "Feature",
+                        "stac_version": "1.0.0",
+                        "id": "scene-b",
+                        "geometry": None,
+                        "properties": {"datetime": "2026-09-20T13:00:00Z"},
+                        "assets": {},
+                    },
+                ],
+            },
+        )
+
+    result = await query_stac_items(
+        base_url="https://stac.example.com/api",
+        collection_id="sentinel-2",
+        limit=20,
+        bbox=[-112, 40, -111, 41],
+        datetime_value="2026-09-20/2026-09-21",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["collection_id"] == "sentinel-2"
+    assert result.metadata["item_count"] == 2
+    assert result.metadata["number_matched"] == 2
+
+
+def test_stac_api_rejects_unsafe_base_url() -> None:
+    with pytest.raises(InvalidConfiguration, match="without credentials"):
+        validate_stac_api_base_url("https://user:pass@stac.example.com/api")
+
+
+@pytest.mark.asyncio
+async def test_stac_api_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("172.16.0.4", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_stac_destination("https://stac.example.com/api")
+
+
+@pytest.mark.asyncio
+async def test_stac_api_rejects_non_stac_items() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": "missing-version",
+                        "geometry": None,
+                        "properties": {},
+                    }
+                ],
+            },
+        )
+    )
+    with pytest.raises(ProviderUnavailable, match="invalid STAC Item"):
+        await query_stac_items(
+            base_url="https://stac.example.com/api",
+            collection_id="sentinel-2",
+            limit=10,
+            transport=transport,
+        )
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_query_has_no_auth_and_is_bounded() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert str(request.url) == (
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0/query"
+        )
+        assert "Authorization" not in request.headers
+        form = dict(request.url.params)
+        assert form == {}
+        body = request.content.decode()
+        assert "where=STATUS%3D%27OPEN%27" in body
+        assert "outFields=NAME%2CSTATUS" in body
+        assert "resultRecordCount=25" in body
+        return httpx.Response(
+            200,
+            json={
+                "objectIdFieldName": "OBJECTID",
+                "geometryType": "esriGeometryPoint",
+                "features": [
+                    {
+                        "attributes": {
+                            "OBJECTID": 1,
+                            "NAME": "Observation",
+                            "STATUS": "OPEN",
+                        },
+                        "geometry": {"x": -111.8, "y": 40.6},
+                    }
+                ],
+            },
+        )
+
+    result = await query_public_arcgis_features(
+        layer_url=(
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0"
+        ),
+        where="STATUS='OPEN'",
+        out_fields=["NAME", "STATUS"],
+        return_geometry=True,
+        result_record_count=25,
+        result_offset=0,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["feature_count"] == 1
+    assert result.metadata["source_host"] == "gis.example.gov"
+
+
+def test_public_arcgis_enterprise_rejects_unsafe_layer_urls() -> None:
+    for url in (
+        "http://gis.example.gov/server/rest/services/A/FeatureServer/0",
+        "https://127.0.0.1/server/rest/services/A/FeatureServer/0",
+        "https://user:pass@gis.example.gov/server/rest/services/A/FeatureServer/0",
+        "https://gis.example.gov/server/rest/services/A/MapServer/0",
+    ):
+        with pytest.raises(InvalidConfiguration):
+            validate_public_arcgis_feature_layer_url(url)
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_rejects_private_dns(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("10.1.2.3", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_arcgis_feature_layer_destination(
+            "https://gis.example.gov/server/rest/services/A/FeatureServer/0"
+        )
+
+
+@pytest.mark.asyncio
+async def test_nws_forecast_discovers_grid_and_uses_required_user_agent() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.headers["User-Agent"] == "TerraSatch/0.3 (+https://terrasatch.com)"
+        if request.url.path == "/points/40.6000,-111.7000":
+            return httpx.Response(
+                200,
+                json={
+                    "properties": {
+                        "forecast": (
+                            "https://api.weather.gov/gridpoints/SLC/100,200/forecast"
+                        ),
+                        "gridId": "SLC",
+                        "gridX": 100,
+                        "gridY": 200,
+                    }
+                },
+            )
+        assert request.url.path == "/gridpoints/SLC/100,200/forecast"
+        return httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "updated": "2026-09-21T12:00:00+00:00",
+                    "generatedAt": "2026-09-21T12:00:00+00:00",
+                    "units": "us",
+                    "periods": [
+                        {"number": 1, "name": "Today", "temperature": 60},
+                        {"number": 2, "name": "Tonight", "temperature": 38},
+                        {"number": 3, "name": "Monday", "temperature": 58},
+                    ],
+                }
+            },
+        )
+
+    result = await query_nws_forecast(
+        latitude=40.6,
+        longitude=-111.7,
+        max_periods=2,
+        transport=httpx.MockTransport(responder),
+    )
+    assert len(result.data["periods"]) == 2
+    assert result.metadata == {
+        "source_host": "api.weather.gov",
+        "latitude": 40.6,
+        "longitude": -111.7,
+        "office": "SLC",
+        "grid_x": 100,
+        "grid_y": 200,
+        "period_count": 2,
+        "source_period_count": 3,
+        "truncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_nws_rejects_forecast_link_to_other_host() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecast": "https://example.com/gridpoints/SLC/1,2/forecast"
+                }
+            },
+        )
+
+    with pytest.raises(ProviderUnavailable, match="invalid forecast URL"):
+        await query_nws_forecast(
+            latitude=40.6,
+            longitude=-111.7,
+            max_periods=2,
+            transport=httpx.MockTransport(responder),
+        )
+
+
+@pytest.mark.asyncio
+async def test_nws_rejects_invalid_coordinates_and_forecast_ports() -> None:
+    with pytest.raises(InvalidConfiguration, match="coordinates"):
+        await query_nws_forecast(
+            latitude=100,
+            longitude=-111.7,
+            max_periods=2,
+            transport=httpx.MockTransport(lambda request: httpx.Response(500)),
+        )
+    with pytest.raises(ProviderUnavailable, match="invalid forecast URL"):
+        validate_nws_forecast_url(
+            "https://api.weather.gov:bad/gridpoints/SLC/1,2/forecast"
+        )
+
+
+@pytest.mark.asyncio
+async def test_nws_probe_uses_fixed_service_root() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == (
+            "https://api.weather.gov/points/39.7456,-97.0892"
+        )
+        assert request.headers["User-Agent"].startswith("TerraSatch/")
+        return httpx.Response(200, json={"status": "ok"})
+
+    result = await probe_nws_api(transport=httpx.MockTransport(responder))
+    assert result.external_id == "api.weather.gov"

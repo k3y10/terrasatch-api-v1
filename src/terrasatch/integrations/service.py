@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -30,8 +31,18 @@ from .models import (
 from .operations import (
     validate_arcgis_feature_layer_url,
     validate_aws_region,
+    validate_geojson_url,
+    validate_ogc_api_base_url,
+    validate_ogc_collection_id,
+    validate_public_arcgis_feature_layer_destination,
+    validate_public_arcgis_feature_layer_url,
+    validate_public_geojson_destination,
+    validate_public_ogc_destination,
+    validate_public_stac_destination,
     validate_r2_endpoint_url,
     validate_s3_bucket_name,
+    validate_stac_api_base_url,
+    validate_stac_collection_id,
 )
 
 _SENSITIVE_KEY_PARTS = (
@@ -54,8 +65,13 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
+    "geojson": {"endpoint_url", "max_features"},
+    "ogc_api_features": {"base_url", "collection_ids", "max_features"},
+    "stac_api": {"base_url", "collection_ids", "max_items"},
+    "nws_forecast": {"max_periods"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
+    "arcgis_enterprise_public": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
 }
 
@@ -157,6 +173,96 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         configuration["recipients"] = normalized_recipients
         configuration["subject"] = " ".join(subject.split())
 
+    if provider_key == "geojson":
+        endpoint_url = configuration.get("endpoint_url")
+        max_features = configuration.get("max_features", 500)
+        if not isinstance(endpoint_url, str):
+            raise InvalidConfiguration("GeoJSON endpoint_url is required")
+        configuration["endpoint_url"] = validate_geojson_url(endpoint_url)
+        if (
+            not isinstance(max_features, int)
+            or isinstance(max_features, bool)
+            or not 1 <= max_features <= 1000
+        ):
+            raise InvalidConfiguration(
+                "GeoJSON max_features must be an integer between 1 and 1000"
+            )
+        configuration["max_features"] = max_features
+
+    if provider_key == "ogc_api_features":
+        base_url = configuration.get("base_url")
+        collection_ids = configuration.get("collection_ids")
+        max_features = configuration.get("max_features", 250)
+        if not isinstance(base_url, str):
+            raise InvalidConfiguration("OGC API base_url is required")
+        configuration["base_url"] = validate_ogc_api_base_url(base_url)
+        if (
+            not isinstance(collection_ids, list)
+            or not 1 <= len(collection_ids) <= 25
+            or not all(isinstance(item, str) for item in collection_ids)
+        ):
+            raise InvalidConfiguration(
+                "OGC API collection_ids must contain between 1 and 25 IDs"
+            )
+        normalized_collections = [
+            validate_ogc_collection_id(item) for item in collection_ids
+        ]
+        if len(set(normalized_collections)) != len(normalized_collections):
+            raise InvalidConfiguration("OGC API collection_ids cannot contain duplicates")
+        configuration["collection_ids"] = normalized_collections
+        if (
+            not isinstance(max_features, int)
+            or isinstance(max_features, bool)
+            or not 1 <= max_features <= 1000
+        ):
+            raise InvalidConfiguration(
+                "OGC API max_features must be an integer between 1 and 1000"
+            )
+        configuration["max_features"] = max_features
+
+    if provider_key == "stac_api":
+        base_url = configuration.get("base_url")
+        collection_ids = configuration.get("collection_ids")
+        max_items = configuration.get("max_items", 250)
+        if not isinstance(base_url, str):
+            raise InvalidConfiguration("STAC API base_url is required")
+        configuration["base_url"] = validate_stac_api_base_url(base_url)
+        if (
+            not isinstance(collection_ids, list)
+            or not 1 <= len(collection_ids) <= 25
+            or not all(isinstance(item, str) for item in collection_ids)
+        ):
+            raise InvalidConfiguration(
+                "STAC API collection_ids must contain between 1 and 25 IDs"
+            )
+        normalized_collections = [
+            validate_stac_collection_id(item) for item in collection_ids
+        ]
+        if len(set(normalized_collections)) != len(normalized_collections):
+            raise InvalidConfiguration("STAC API collection_ids cannot contain duplicates")
+        configuration["collection_ids"] = normalized_collections
+        if (
+            not isinstance(max_items, int)
+            or isinstance(max_items, bool)
+            or not 1 <= max_items <= 1000
+        ):
+            raise InvalidConfiguration(
+                "STAC API max_items must be an integer between 1 and 1000"
+            )
+        configuration["max_items"] = max_items
+
+    if provider_key == "nws_forecast":
+        max_periods = configuration.get("max_periods", 14)
+        if (
+            not isinstance(max_periods, int)
+            or isinstance(max_periods, bool)
+            or not 1 <= max_periods <= 14
+        ):
+            raise InvalidConfiguration(
+                "NWS max_periods must be an integer between 1 and 14"
+            )
+        configuration["max_periods"] = max_periods
+
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
         if not isinstance(account_host, str):
@@ -203,6 +309,27 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         if len(set(normalized_maps)) != len(normalized_maps):
             raise InvalidConfiguration("CalTopo map_ids cannot contain duplicates")
         configuration["map_ids"] = normalized_maps
+
+    if provider_key == "arcgis_enterprise_public":
+        raw_layers = configuration.get("feature_layer_urls")
+        if not isinstance(raw_layers, list) or not 1 <= len(raw_layers) <= 20:
+            raise InvalidConfiguration(
+                "Public ArcGIS Enterprise requires between 1 and 20 feature_layer_urls"
+            )
+        normalized_layers: list[str] = []
+        for raw_layer in raw_layers:
+            if not isinstance(raw_layer, str):
+                raise InvalidConfiguration(
+                    "Public ArcGIS Enterprise feature_layer_urls must contain strings"
+                )
+            normalized_layers.append(
+                validate_public_arcgis_feature_layer_url(raw_layer)
+            )
+        if len(set(normalized_layers)) != len(normalized_layers):
+            raise InvalidConfiguration(
+                "Public ArcGIS Enterprise feature_layer_urls cannot contain duplicates"
+            )
+        configuration["feature_layer_urls"] = normalized_layers
 
     if provider_key == "esri_arcgis":
         raw_layers = configuration.get("feature_layer_urls")
@@ -313,6 +440,24 @@ async def create_connection_request(
 
     _validate_configuration(provider_key, configuration)
     _assert_non_secret_configuration(configuration)
+    if provider_key == "geojson":
+        endpoint_url = configuration.get("endpoint_url")
+        assert isinstance(endpoint_url, str)
+        await validate_public_geojson_destination(endpoint_url)
+    elif provider_key == "ogc_api_features":
+        base_url = configuration.get("base_url")
+        assert isinstance(base_url, str)
+        await validate_public_ogc_destination(base_url)
+    elif provider_key == "stac_api":
+        base_url = configuration.get("base_url")
+        assert isinstance(base_url, str)
+        await validate_public_stac_destination(base_url)
+    elif provider_key == "arcgis_enterprise_public":
+        feature_layer_urls = configuration.get("feature_layer_urls")
+        assert isinstance(feature_layer_urls, list)
+        for layer_url in feature_layer_urls:
+            assert isinstance(layer_url, str)
+            await validate_public_arcgis_feature_layer_destination(layer_url)
 
     owner_user_id = user_id if scope == IntegrationScope.USER else None
     duplicate_query = select(IntegrationConnection).where(
@@ -347,7 +492,7 @@ async def create_connection_request(
         display_name=normalized_display_name[:255],
         status=(
             IntegrationStatus.CONNECTED.value
-            if provider["auth"] == "platform"
+            if provider["auth"] in {"platform", "public_https"}
             else IntegrationStatus.REQUESTED.value
         ),
         configuration=dict(configuration),
@@ -355,9 +500,54 @@ async def create_connection_request(
         provider_account_label=(
             "TerraSatch Resend"
             if provider_key == "email"
-            else None
+            else (
+                f"GeoJSON · {urlsplit(str(configuration['endpoint_url'])).hostname}"
+                if provider_key == "geojson"
+                else (
+                    f"OGC API · {urlsplit(str(configuration['base_url'])).hostname}"
+                    if provider_key == "ogc_api_features"
+                    else (
+                        f"STAC API · {urlsplit(str(configuration['base_url'])).hostname}"
+                        if provider_key == "stac_api"
+                        else (
+                            "ArcGIS Enterprise · "
+                            f"{urlsplit(str(configuration['feature_layer_urls'][0])).hostname}"
+                            if provider_key == "arcgis_enterprise_public"
+                            else (
+                                "National Weather Service"
+                                if provider_key == "nws_forecast"
+                                else None
+                            )
+                        )
+                    )
+                )
+            )
         ),
-        provider_account_id=("resend" if provider_key == "email" else None),
+        provider_account_id=(
+            "resend"
+            if provider_key == "email"
+            else (
+                urlsplit(str(configuration["endpoint_url"])).hostname
+                if provider_key == "geojson"
+                else (
+                    urlsplit(str(configuration["base_url"])).hostname
+                    if provider_key == "ogc_api_features"
+                    else (
+                        urlsplit(str(configuration["base_url"])).hostname
+                        if provider_key == "stac_api"
+                        else (
+                            urlsplit(str(configuration["feature_layer_urls"][0])).hostname
+                            if provider_key == "arcgis_enterprise_public"
+                            else (
+                                "api.weather.gov"
+                                if provider_key == "nws_forecast"
+                                else None
+                            )
+                        )
+                    )
+                )
+            )
+        ),
     )
     session.add(connection)
     await session.flush()

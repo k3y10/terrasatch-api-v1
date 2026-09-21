@@ -27,6 +27,13 @@ from .models import (
     IntegrationOAuthState,
     IntegrationStatus,
 )
+from .operations import (
+    probe_nws_api,
+    query_geojson_features,
+    query_ogc_features,
+    query_public_arcgis_features,
+    query_stac_items,
+)
 from .service import get_connection_for_management, revoke_connection
 
 
@@ -280,6 +287,86 @@ async def probe_connection(
                     "Operational email delivery is not configured"
                 )
             label, account_id = "TerraSatch Resend", "resend"
+        elif connection.provider == "geojson":
+            configuration = dict(connection.configuration or {})
+            endpoint_url = configuration.get("endpoint_url")
+            if not isinstance(endpoint_url, str):
+                raise ProviderUnavailable("GeoJSON endpoint is not configured")
+            result = await query_geojson_features(
+                endpoint_url=endpoint_url,
+                max_features=1,
+            )
+            source_host = result.metadata.get("source_host")
+            label = f"GeoJSON · {source_host}" if source_host else "GeoJSON"
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "ogc_api_features":
+            configuration = dict(connection.configuration or {})
+            base_url = configuration.get("base_url")
+            collection_ids = configuration.get("collection_ids")
+            if (
+                not isinstance(base_url, str)
+                or not isinstance(collection_ids, list)
+                or not collection_ids
+                or not isinstance(collection_ids[0], str)
+            ):
+                raise ProviderUnavailable("OGC API Features is not configured")
+            result = await query_ogc_features(
+                base_url=base_url,
+                collection_id=collection_ids[0],
+                limit=1,
+            )
+            source_host = result.metadata.get("source_host")
+            label = f"OGC API · {source_host}" if source_host else "OGC API"
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "stac_api":
+            configuration = dict(connection.configuration or {})
+            base_url = configuration.get("base_url")
+            collection_ids = configuration.get("collection_ids")
+            if (
+                not isinstance(base_url, str)
+                or not isinstance(collection_ids, list)
+                or not collection_ids
+                or not isinstance(collection_ids[0], str)
+            ):
+                raise ProviderUnavailable("STAC API is not configured")
+            result = await query_stac_items(
+                base_url=base_url,
+                collection_id=collection_ids[0],
+                limit=1,
+            )
+            source_host = result.metadata.get("source_host")
+            label = f"STAC API · {source_host}" if source_host else "STAC API"
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "arcgis_enterprise_public":
+            configuration = dict(connection.configuration or {})
+            feature_layer_urls = configuration.get("feature_layer_urls")
+            if (
+                not isinstance(feature_layer_urls, list)
+                or not feature_layer_urls
+                or not isinstance(feature_layer_urls[0], str)
+            ):
+                raise ProviderUnavailable(
+                    "Public ArcGIS Enterprise is not configured"
+                )
+            result = await query_public_arcgis_features(
+                layer_url=feature_layer_urls[0],
+                where="1=0",
+                out_fields=["*"],
+                return_geometry=False,
+                result_record_count=1,
+                result_offset=0,
+            )
+            source_host = result.metadata.get("source_host")
+            label = (
+                f"ArcGIS Enterprise · {source_host}"
+                if source_host
+                else "ArcGIS Enterprise"
+            )
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "nws_forecast":
+            result = await probe_nws_api()
+            label = "National Weather Service"
+            account_id = result.external_id
         else:
             credentials, _ = await active_credentials(
                 session,
