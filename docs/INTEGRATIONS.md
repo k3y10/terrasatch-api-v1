@@ -193,6 +193,28 @@ Satchy cannot provide a different URL or runtime filter payload for this provide
 fixed by the administrator, the provider uses no customer credential record, and the normal
 organization/team plus `agent:satchy` read grants still apply.
 
+## OGC API Features
+
+OGC API Features is a read-only `map.features.query` integration for standards-based public
+feature services. A team or organization administrator configures one public HTTPS API base URL,
+between one and 25 approved collection IDs, and a maximum feature count between 1 and 1000.
+
+The initial TerraSatch adapter intentionally implements a narrow Part 1/Core query surface. Runtime
+queries may select only an approved collection and may optionally provide a four-value WGS84
+`bbox`, an OGC `datetime` instant/interval, and a `limit` no larger than the administrator's
+configured maximum. TerraSatch does not expose CQL2 filters, alternate CRS selection, arbitrary
+query parameters, writes, or automatic pagination in this first adapter.
+
+The base URL must be public HTTPS without embedded credentials, query parameters, or fragments.
+TerraSatch rejects local/IP/internal destinations, checks public DNS during connection setup and
+again immediately before live reads, disables redirects, and streams responses through the same
+5 MB hard ceiling used by the GeoJSON provider. Responses must be GeoJSON FeatureCollections;
+TerraSatch also caps the returned feature list even if a noncompliant service ignores the requested
+limit.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant still control access.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -251,7 +273,7 @@ keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
-- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, and fixed public GeoJSON feeds.
+- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, fixed public GeoJSON feeds, and approved OGC API Features collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
