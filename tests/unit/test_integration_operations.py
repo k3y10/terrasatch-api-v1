@@ -11,7 +11,9 @@ from terrasatch.errors import InvalidConfiguration
 from terrasatch.integrations.operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
+    probe_aws_s3_bucket,
     probe_cloudflare_r2_bucket,
+    put_aws_s3_object,
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
@@ -20,6 +22,7 @@ from terrasatch.integrations.operations import (
     send_slack_message,
     send_teams_message,
     send_webhook_notification,
+    validate_aws_region,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
     validate_r2_endpoint_url,
@@ -177,6 +180,72 @@ async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> Non
         )
         == "https://hooks.example.com/terrasatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_aws_s3_bucket_probe_uses_regional_virtual_host_and_sigv4() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "HEAD"
+        assert str(request.url) == (
+            "https://field-reports.s3.us-west-2.amazonaws.com/"
+        )
+        assert "/us-west-2/s3/aws4_request" in request.headers["Authorization"]
+        assert request.headers["x-amz-content-sha256"] == (
+            "e3b0c44298fc1c149afbf4c8996fb924"
+            "27ae41e4649b934ca495991b7852b855"
+        )
+        return httpx.Response(200)
+
+    result = await probe_aws_s3_bucket(
+        {
+            "access_key_id": "aws-access",
+            "secret_access_key": "aws-secret",
+        },
+        region="us-west-2",
+        bucket="field-reports",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "field-reports"
+    assert result.metadata["region"] == "us-west-2"
+    assert result.metadata["endpoint_host"] == (
+        "field-reports.s3.us-west-2.amazonaws.com"
+    )
+
+
+@pytest.mark.asyncio
+async def test_aws_s3_put_supports_temporary_session_credentials() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert str(request.url) == (
+            "https://field-reports.s3.us-east-1.amazonaws.com/"
+            "exports/shift-report.txt"
+        )
+        assert request.content == b"Shift report"
+        assert request.headers["x-amz-security-token"] == "session-token"
+        assert "x-amz-security-token" in request.headers["Authorization"]
+        return httpx.Response(200, headers={"etag": '"aws-etag"'})
+
+    result = await put_aws_s3_object(
+        {
+            "access_key_id": "aws-access",
+            "secret_access_key": "aws-secret",
+            "session_token": "session-token",
+        },
+        region="us-east-1",
+        bucket="field-reports",
+        prefix="exports",
+        name="shift-report.txt",
+        content="Shift report",
+        mime_type="text/plain",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "exports/shift-report.txt"
+    assert result.metadata["etag"] == '"aws-etag"'
+
+
+def test_aws_s3_region_rejects_unsupported_partition() -> None:
+    with pytest.raises(InvalidConfiguration, match="region"):
+        validate_aws_region("cn-north-1")
 
 
 @pytest.mark.asyncio
