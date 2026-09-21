@@ -34,6 +34,8 @@ from .operations import (
     validate_geojson_url,
     validate_ogc_api_base_url,
     validate_ogc_collection_id,
+    validate_public_arcgis_feature_layer_destination,
+    validate_public_arcgis_feature_layer_url,
     validate_public_geojson_destination,
     validate_public_ogc_destination,
     validate_public_stac_destination,
@@ -68,6 +70,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "stac_api": {"base_url", "collection_ids", "max_items"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
+    "arcgis_enterprise_public": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
 }
 
@@ -294,6 +297,27 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             raise InvalidConfiguration("CalTopo map_ids cannot contain duplicates")
         configuration["map_ids"] = normalized_maps
 
+    if provider_key == "arcgis_enterprise_public":
+        raw_layers = configuration.get("feature_layer_urls")
+        if not isinstance(raw_layers, list) or not 1 <= len(raw_layers) <= 20:
+            raise InvalidConfiguration(
+                "Public ArcGIS Enterprise requires between 1 and 20 feature_layer_urls"
+            )
+        normalized_layers: list[str] = []
+        for raw_layer in raw_layers:
+            if not isinstance(raw_layer, str):
+                raise InvalidConfiguration(
+                    "Public ArcGIS Enterprise feature_layer_urls must contain strings"
+                )
+            normalized_layers.append(
+                validate_public_arcgis_feature_layer_url(raw_layer)
+            )
+        if len(set(normalized_layers)) != len(normalized_layers):
+            raise InvalidConfiguration(
+                "Public ArcGIS Enterprise feature_layer_urls cannot contain duplicates"
+            )
+        configuration["feature_layer_urls"] = normalized_layers
+
     if provider_key == "esri_arcgis":
         raw_layers = configuration.get("feature_layer_urls")
         if not isinstance(raw_layers, list) or not 1 <= len(raw_layers) <= 20:
@@ -415,6 +439,12 @@ async def create_connection_request(
         base_url = configuration.get("base_url")
         assert isinstance(base_url, str)
         await validate_public_stac_destination(base_url)
+    elif provider_key == "arcgis_enterprise_public":
+        feature_layer_urls = configuration.get("feature_layer_urls")
+        assert isinstance(feature_layer_urls, list)
+        for layer_url in feature_layer_urls:
+            assert isinstance(layer_url, str)
+            await validate_public_arcgis_feature_layer_destination(layer_url)
 
     owner_user_id = user_id if scope == IntegrationScope.USER else None
     duplicate_query = select(IntegrationConnection).where(
@@ -466,7 +496,12 @@ async def create_connection_request(
                     else (
                         f"STAC API · {urlsplit(str(configuration['base_url'])).hostname}"
                         if provider_key == "stac_api"
-                        else None
+                        else (
+                            "ArcGIS Enterprise · "
+                            f"{urlsplit(str(configuration['feature_layer_urls'][0])).hostname}"
+                            if provider_key == "arcgis_enterprise_public"
+                            else None
+                        )
                     )
                 )
             )
@@ -483,7 +518,11 @@ async def create_connection_request(
                     else (
                         urlsplit(str(configuration["base_url"])).hostname
                         if provider_key == "stac_api"
-                        else None
+                        else (
+                            urlsplit(str(configuration["feature_layer_urls"][0])).hostname
+                            if provider_key == "arcgis_enterprise_public"
+                            else None
+                        )
                     )
                 )
             )
