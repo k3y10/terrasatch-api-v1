@@ -24,7 +24,11 @@ from .models import (
     IntegrationScope,
     IntegrationStatus,
 )
-from .operations import validate_arcgis_feature_layer_url
+from .operations import (
+    validate_arcgis_feature_layer_url,
+    validate_r2_endpoint_url,
+    validate_s3_bucket_name,
+)
 
 _SENSITIVE_KEY_PARTS = (
     "secret",
@@ -77,8 +81,6 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         prefix = configuration.get("prefix", "")
         if not isinstance(endpoint_url, str):
             raise InvalidConfiguration("Cloudflare R2 endpoint_url is required")
-        from .operations import validate_r2_endpoint_url, validate_s3_bucket_name
-
         configuration["endpoint_url"] = validate_r2_endpoint_url(endpoint_url)
         if not isinstance(bucket, str):
             raise InvalidConfiguration("Cloudflare R2 bucket is required")
