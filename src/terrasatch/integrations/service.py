@@ -64,6 +64,8 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_calendar": {"calendar_id"},
     "microsoft_365": {"site_id", "drive_id", "folder_path"},
     "microsoft_calendar": {"calendar_id"},
+    "jira": {"cloud_id", "project_key", "issue_type"},
+    "confluence": {"cloud_id", "space_id", "parent_page_id"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
@@ -101,6 +103,53 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             ):
                 raise InvalidConfiguration("Calendar calendar_id is invalid")
             configuration["calendar_id"] = calendar_id.strip()
+
+    if provider_key in {"jira", "confluence"}:
+        cloud_id = configuration.get("cloud_id")
+        if (
+            not isinstance(cloud_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9-]{8,128}", cloud_id.strip())
+        ):
+            raise InvalidConfiguration("Atlassian cloud_id is invalid")
+        configuration["cloud_id"] = cloud_id.strip()
+
+    if provider_key == "jira":
+        project_key = configuration.get("project_key")
+        issue_type = configuration.get("issue_type")
+        if (
+            not isinstance(project_key, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", project_key.strip().upper())
+        ):
+            raise InvalidConfiguration("Jira project_key is invalid")
+        if (
+            not isinstance(issue_type, str)
+            or not issue_type.strip()
+            or len(issue_type.strip()) > 100
+            or "\n" in issue_type
+            or "\r" in issue_type
+        ):
+            raise InvalidConfiguration("Jira issue_type is invalid")
+        configuration["project_key"] = project_key.strip().upper()
+        configuration["issue_type"] = " ".join(issue_type.split())
+
+    if provider_key == "confluence":
+        space_id = configuration.get("space_id")
+        parent_page_id = configuration.get("parent_page_id")
+        if (
+            not isinstance(space_id, str)
+            or not space_id.isdigit()
+            or len(space_id) > 30
+        ):
+            raise InvalidConfiguration("Confluence space_id is invalid")
+        configuration["space_id"] = space_id
+        if parent_page_id is not None:
+            if (
+                not isinstance(parent_page_id, str)
+                or not parent_page_id.isdigit()
+                or len(parent_page_id) > 30
+            ):
+                raise InvalidConfiguration("Confluence parent_page_id is invalid")
+            configuration["parent_page_id"] = parent_page_id
 
     if provider_key == "microsoft_365":
         site_id = configuration.get("site_id")
