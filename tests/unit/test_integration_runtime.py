@@ -9,15 +9,17 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
-from terrasatch.identity.models import Account, Organization, Team, User
+from terrasatch.identity.models import Account, MembershipRole, Organization, Team, User
 from terrasatch.integrations.models import (
     IntegrationConnection,
     IntegrationDelivery,
     IntegrationGrant,
+    IntegrationScope,
     IntegrationStatus,
 )
 from terrasatch.integrations.operations import ProviderOperationResult, ProviderQueryResult
 from terrasatch.integrations.runtime import _delivery, execute, query, resolve_connection
+from terrasatch.integrations.service import create_connection_request
 
 
 @pytest.mark.asyncio
@@ -1094,5 +1096,111 @@ async def test_aws_s3_document_create_uses_generic_runtime(monkeypatch) -> None:
         )
         assert delivery.status == "delivered"
         assert delivery.external_id == "exports/handoff.md"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_operational_email_connection_and_runtime_use_platform_resend(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        resend_api_key=SecretStr("re_test_ops"),
+        integration_email_from=(
+            "TerraSatch Operations <operations@terrasatch.com>"
+        ),
+        integration_email_reply_to="support@terrasatch.com",
+    )
+
+    async with factory() as session:
+        account = Account(name="Email runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Email runtime org",
+            slug=f"email-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Email Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            settings=settings,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="email",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="Field operations email",
+            configuration={
+                "recipients": ["OPS@example.com", "lead@example.com"],
+                "subject": "Field operations update",
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_label == "TerraSatch Resend"
+        assert connection.configuration["recipients"] == [
+            "ops@example.com",
+            "lead@example.com",
+        ]
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("platform email must not load customer credentials")
+
+        async def fake_email(**kwargs):
+            assert kwargs["api_key"] == "re_test_ops"
+            assert kwargs["sender"] == (
+                "TerraSatch Operations <operations@terrasatch.com>"
+            )
+            assert kwargs["recipients"] == [
+                "ops@example.com",
+                "lead@example.com",
+            ]
+            assert kwargs["subject"] == "Field operations update"
+            assert kwargs["text"] == "Field update"
+            assert kwargs["connection_id"] == connection.id
+            assert kwargs["reply_to"] == "support@terrasatch.com"
+            return ProviderOperationResult(
+                external_id="email_ops_123",
+                metadata={"provider": "resend", "recipient_count": 2},
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.send_resend_notification",
+            fake_email,
+        )
+
+        delivery = await execute(
+            session,
+            settings,
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="notification.send",
+            request_id=uuid4(),
+            payload={"text": "Field update"},
+        )
+        assert delivery.status == "delivered"
+        assert delivery.external_id == "email_ops_123"
+        assert delivery.response_metadata == {
+            "provider": "resend",
+            "recipient_count": 2,
+        }
 
     await engine.dispose()
