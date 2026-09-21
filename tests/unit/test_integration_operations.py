@@ -691,8 +691,9 @@ async def test_microsoft_sharepoint_export_targets_approved_site_drive() -> None
 async def test_google_calendar_event_uses_configured_calendar() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == (
+        assert (
             "/calendar/v3/calendars/ops%40group.calendar.google.com/events"
+            in str(request.url)
         )
         payload = json.loads(request.content)
         assert payload["summary"] == "Shift briefing"
