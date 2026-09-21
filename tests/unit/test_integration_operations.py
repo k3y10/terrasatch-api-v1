@@ -11,6 +11,8 @@ from terrasatch.errors import InvalidConfiguration
 from terrasatch.integrations.operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
+    probe_cloudflare_r2_bucket,
+    put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
     query_snowflake,
@@ -20,6 +22,7 @@ from terrasatch.integrations.operations import (
     send_webhook_notification,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
+    validate_r2_endpoint_url,
     validate_teams_workflow_url,
 )
 
@@ -174,6 +177,69 @@ async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> Non
         )
         == "https://hooks.example.com/terrasatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_r2_bucket_probe_uses_sigv4_auto_region() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "HEAD"
+        assert str(request.url) == (
+            "https://abc123.r2.cloudflarestorage.com/field-reports"
+        )
+        assert "/auto/s3/aws4_request" in request.headers["Authorization"]
+        assert request.headers["x-amz-content-sha256"] == (
+            "e3b0c44298fc1c149afbf4c8996fb924"
+            "27ae41e4649b934ca495991b7852b855"
+        )
+        return httpx.Response(200)
+
+    result = await probe_cloudflare_r2_bucket(
+        {
+            "access_key_id": "r2-access",
+            "secret_access_key": "r2-secret",
+        },
+        endpoint_url="https://abc123.r2.cloudflarestorage.com",
+        bucket="field-reports",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "field-reports"
+    assert result.metadata["endpoint_host"] == "abc123.r2.cloudflarestorage.com"
+
+
+@pytest.mark.asyncio
+async def test_r2_document_create_puts_only_the_approved_object() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert str(request.url) == (
+            "https://abc123.r2.cloudflarestorage.com/"
+            "field-reports/exports/shift-report.txt"
+        )
+        assert request.content == b"Shift report"
+        assert request.headers["Content-Type"] == "text/plain"
+        assert "/auto/s3/aws4_request" in request.headers["Authorization"]
+        return httpx.Response(200, headers={"etag": '"etag-123"'})
+
+    result = await put_cloudflare_r2_object(
+        {
+            "access_key_id": "r2-access",
+            "secret_access_key": "r2-secret",
+        },
+        endpoint_url="https://abc123.r2.cloudflarestorage.com",
+        bucket="field-reports",
+        prefix="exports",
+        name="shift-report.txt",
+        content="Shift report",
+        mime_type="text/plain",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "exports/shift-report.txt"
+    assert result.metadata["bucket"] == "field-reports"
+    assert result.metadata["etag"] == '"etag-123"'
+
+
+def test_r2_endpoint_rejects_non_cloudflare_s3_destination() -> None:
+    with pytest.raises(InvalidConfiguration, match="R2 endpoint"):
+        validate_r2_endpoint_url("https://storage.example.com")
 
 
 @pytest.mark.asyncio
