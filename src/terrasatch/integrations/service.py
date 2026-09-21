@@ -687,9 +687,13 @@ async def create_connection_request(
                                 "National Weather Service"
                                 if provider_key == "nws_forecast"
                                 else (
-                                    "Utah Avalanche Center"
-                                    if provider_key == "uac_forecast"
-                                    else None
+                                    "National Weather Service Alerts"
+                                    if provider_key == "nws_alerts"
+                                    else (
+                                        "Utah Avalanche Center"
+                                        if provider_key == "uac_forecast"
+                                        else None
+                                    )
                                 )
                             )
                         )
@@ -714,7 +718,7 @@ async def create_connection_request(
                             if provider_key == "arcgis_enterprise_public"
                             else (
                                 "api.weather.gov"
-                                if provider_key == "nws_forecast"
+                                if provider_key in {"nws_forecast", "nws_alerts"}
                                 else (
                                     "utahavalanchecenter.org"
                                     if provider_key == "uac_forecast"
