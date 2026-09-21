@@ -110,6 +110,18 @@ class MobileObservationRequest(BaseModel):
     def normalize_required_text(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator("media_ids")
+    @classmethod
+    def normalize_media_ids(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            item = value.strip()
+            if not item or len(item) > 255:
+                raise ValueError("media_ids entries must be between 1 and 255 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
     @model_validator(mode="after")
     def validate_mobile_observation(self) -> Self:
         if (self.latitude is None) != (self.longitude is None):
