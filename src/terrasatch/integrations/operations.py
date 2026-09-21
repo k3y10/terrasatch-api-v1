@@ -15,6 +15,7 @@ import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
@@ -1824,6 +1825,182 @@ async def create_microsoft_calendar_event(
                 "event_id": result.get("id"),
                 "web_link": result.get("webLink"),
                 "is_cancelled": result.get("isCancelled"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
+def _atlassian_cloud_id(value: str) -> str:
+    normalized = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,128}", normalized):
+        raise InvalidConfiguration("Atlassian cloud_id is invalid")
+    return normalized
+
+
+def _jira_project_key(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", normalized):
+        raise InvalidConfiguration("Jira project_key is invalid")
+    return normalized
+
+
+async def create_jira_issue(
+    credentials: dict[str, object],
+    *,
+    cloud_id: str,
+    project_key: str,
+    issue_type: str,
+    title: str,
+    description: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Jira access token is unavailable")
+    safe_cloud = _atlassian_cloud_id(cloud_id)
+    safe_project = _jira_project_key(project_key)
+    clean_issue_type = " ".join(issue_type.split())
+    clean_title = " ".join(title.split())
+    if not clean_issue_type or len(clean_issue_type) > 100:
+        raise InvalidConfiguration("Jira issue_type is invalid")
+    if not clean_title or len(clean_title) > 255:
+        raise InvalidConfiguration("Jira issue title must be between 1 and 255 characters")
+    if len(description) > 10000:
+        raise InvalidConfiguration("Jira issue description is limited to 10000 characters")
+
+    fields: dict[str, object] = {
+        "project": {"key": safe_project},
+        "summary": clean_title,
+        "issuetype": {"name": clean_issue_type},
+    }
+    if description:
+        fields["description"] = {
+            "version": 1,
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": description}],
+                }
+            ],
+        }
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://api.atlassian.com/ex/jira/"
+            f"{quote(safe_cloud, safe='')}/rest/api/3/issue"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json={"fields": fields},
+    )
+    if response.status_code != 201:
+        raise ProviderUnavailable(
+            f"Jira issue creation failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("Jira returned an invalid issue response") from error
+    if not isinstance(payload, dict) or not payload.get("id"):
+        raise ProviderUnavailable("Jira did not return an issue ID")
+    return ProviderOperationResult(
+        external_id=str(payload["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "issue_id": payload.get("id"),
+                "issue_key": payload.get("key"),
+                "project_key": safe_project,
+                "issue_type": clean_issue_type,
+            }.items()
+            if value is not None
+        },
+    )
+
+
+async def create_confluence_page(
+    credentials: dict[str, object],
+    *,
+    cloud_id: str,
+    space_id: str,
+    parent_page_id: str | None,
+    title: str,
+    content: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    access_token = credentials.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise ProviderUnavailable("Confluence access token is unavailable")
+    safe_cloud = _atlassian_cloud_id(cloud_id)
+    if not space_id.isdigit() or len(space_id) > 30:
+        raise InvalidConfiguration("Confluence space_id is invalid")
+    if parent_page_id is not None and (
+        not parent_page_id.isdigit() or len(parent_page_id) > 30
+    ):
+        raise InvalidConfiguration("Confluence parent_page_id is invalid")
+    clean_title = " ".join(title.split())
+    if not clean_title or len(clean_title) > 255:
+        raise InvalidConfiguration(
+            "Confluence page title must be between 1 and 255 characters"
+        )
+    if len(content.encode("utf-8")) > 500_000:
+        raise InvalidConfiguration("Confluence page content is limited to 500 KB")
+
+    escaped_content = escape(content).replace("\n", "<br />")
+    body: dict[str, object] = {
+        "spaceId": space_id,
+        "status": "current",
+        "title": clean_title,
+        "body": {
+            "representation": "storage",
+            "value": f"<p>{escaped_content}</p>",
+        },
+    }
+    if parent_page_id is not None:
+        body["parentId"] = parent_page_id
+
+    response = await _request(
+        transport,
+        "POST",
+        (
+            "https://api.atlassian.com/ex/confluence/"
+            f"{quote(safe_cloud, safe='')}/wiki/api/v2/pages"
+        ),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json=body,
+    )
+    if response.status_code not in {200, 201}:
+        raise ProviderUnavailable(
+            f"Confluence page creation failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Confluence returned an invalid page response"
+        ) from error
+    if not isinstance(payload, dict) or not payload.get("id"):
+        raise ProviderUnavailable("Confluence did not return a page ID")
+    links = payload.get("_links") if isinstance(payload.get("_links"), dict) else {}
+    return ProviderOperationResult(
+        external_id=str(payload["id"]),
+        metadata={
+            key: value
+            for key, value in {
+                "page_id": payload.get("id"),
+                "space_id": space_id,
+                "parent_page_id": parent_page_id,
+                "web_path": links.get("webui"),
             }.items()
             if value is not None
         },
