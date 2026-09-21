@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from base64 import urlsafe_b64decode
 from binascii import Error as BinasciiError
+from email.utils import parseaddr
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
@@ -323,6 +324,14 @@ class Settings(BaseSettings):
                 return True
         return self.staging_payment_links_are_configured
 
+    @staticmethod
+    def _sender_uses_terrasatch_domain(value: str) -> bool:
+        _display_name, address = parseaddr(value)
+        if not address or "@" not in address:
+            return False
+        _local_part, domain = address.rsplit("@", 1)
+        return domain.casefold() == "terrasatch.com"
+
     @property
     def integration_email_sender(self) -> str | None:
         """Return the operational sender, falling back to the verified billing sender."""
@@ -337,7 +346,7 @@ class Settings(BaseSettings):
         if not self.resend_api_key or not sender:
             return False
         if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
-            return "@terrasatch.com" in sender.casefold()
+            return self._sender_uses_terrasatch_domain(sender)
         return True
 
     @property
