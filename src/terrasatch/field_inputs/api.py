@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
+from terrasatch.errors import AuthenticationFailed
 
 from .schemas import GarminIngestResponse, GarminIpcPayload
 from .service import (
@@ -49,6 +50,9 @@ async def post_garmin_inreach(
     request: Request,
 ) -> GarminIngestResponse:
     settings: Settings = request.app.state.settings
+    provided_token = _garmin_static_token(request)
+    if not provided_token:
+        raise AuthenticationFailed("Garmin inReach authorization is required")
 
     content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
     if content_type != "application/json":
@@ -73,7 +77,7 @@ async def post_garmin_inreach(
                 session,
                 settings,
                 connection=connection,
-                provided_token=_garmin_static_token(request),
+                provided_token=provided_token,
             )
 
             raw = await request.body()
