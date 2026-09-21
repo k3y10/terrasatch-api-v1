@@ -290,7 +290,10 @@ async def execute(
             )
             if capability == "notification.send" and connection.provider == "slack":
                 result = await send_slack_message(credentials, text=text)
-            elif capability == "notification.send" and connection.provider == "microsoft_teams":
+            elif (
+                capability == "notification.send"
+                and connection.provider == "microsoft_teams"
+            ):
                 result = await send_teams_message(credentials, text=text)
             elif capability == "notification.send" and connection.provider == "webhook":
                 result = await send_webhook_notification(
@@ -301,7 +304,9 @@ async def execute(
             elif capability == "document.create" and connection.provider == "google_drive":
                 folder_id = dict(connection.configuration or {}).get("folder_id")
                 if folder_id is not None and not isinstance(folder_id, str):
-                    raise InvalidConfiguration("Stored Google Drive folder ID is invalid")
+                    raise InvalidConfiguration(
+                        "Stored Google Drive folder ID is invalid"
+                    )
                 result = await create_google_drive_file(
                     credentials,
                     name=name,
@@ -319,7 +324,9 @@ async def execute(
                     or not isinstance(bucket, str)
                     or not isinstance(prefix, str)
                 ):
-                    raise InvalidConfiguration("Stored Amazon S3 configuration is invalid")
+                    raise InvalidConfiguration(
+                        "Stored Amazon S3 configuration is invalid"
+                    )
                 result = await put_aws_s3_object(
                     credentials,
                     region=region,
@@ -329,7 +336,10 @@ async def execute(
                     content=content,
                     mime_type=mime_type,
                 )
-            elif capability == "document.create" and connection.provider == "cloudflare_r2":
+            elif (
+                capability == "document.create"
+                and connection.provider == "cloudflare_r2"
+            ):
                 configuration = dict(connection.configuration or {})
                 endpoint_url = configuration.get("endpoint_url")
                 bucket = configuration.get("bucket")
@@ -339,7 +349,9 @@ async def execute(
                     or not isinstance(bucket, str)
                     or not isinstance(prefix, str)
                 ):
-                    raise InvalidConfiguration("Stored Cloudflare R2 configuration is invalid")
+                    raise InvalidConfiguration(
+                        "Stored Cloudflare R2 configuration is invalid"
+                    )
                 result = await put_cloudflare_r2_object(
                     credentials,
                     endpoint_url=endpoint_url,
@@ -349,10 +361,15 @@ async def execute(
                     content=content,
                     mime_type=mime_type,
                 )
-            elif capability == "document.create" and connection.provider == "microsoft_365":
+            elif (
+                capability == "document.create"
+                and connection.provider == "microsoft_365"
+            ):
                 folder_path = dict(connection.configuration or {}).get("folder_path")
                 if folder_path is not None and not isinstance(folder_path, str):
-                    raise InvalidConfiguration("Stored Microsoft folder_path is invalid")
+                    raise InvalidConfiguration(
+                        "Stored Microsoft folder_path is invalid"
+                    )
                 result = await create_microsoft_drive_file(
                     credentials,
                     name=name,
@@ -364,81 +381,6 @@ async def execute(
                 raise InvalidConfiguration(
                     f"{connection.provider} does not implement {capability}"
                 )
-            result = await send_slack_message(credentials, text=text)
-        elif capability == "notification.send" and connection.provider == "microsoft_teams":
-            result = await send_teams_message(credentials, text=text)
-        elif capability == "notification.send" and connection.provider == "webhook":
-            result = await send_webhook_notification(
-                credentials,
-                text=text,
-                request_id=request_id,
-            )
-        elif capability == "document.create" and connection.provider == "google_drive":
-            folder_id = dict(connection.configuration or {}).get("folder_id")
-            if folder_id is not None and not isinstance(folder_id, str):
-                raise InvalidConfiguration("Stored Google Drive folder ID is invalid")
-            result = await create_google_drive_file(
-                credentials,
-                name=name,
-                content=content,
-                mime_type=mime_type,
-                folder_id=folder_id,
-            )
-        elif capability == "document.create" and connection.provider == "aws_s3":
-            configuration = dict(connection.configuration or {})
-            region = configuration.get("region")
-            bucket = configuration.get("bucket")
-            prefix = configuration.get("prefix", "")
-            if (
-                not isinstance(region, str)
-                or not isinstance(bucket, str)
-                or not isinstance(prefix, str)
-            ):
-                raise InvalidConfiguration("Stored Amazon S3 configuration is invalid")
-            result = await put_aws_s3_object(
-                credentials,
-                region=region,
-                bucket=bucket,
-                prefix=prefix,
-                name=name,
-                content=content,
-                mime_type=mime_type,
-            )
-        elif capability == "document.create" and connection.provider == "cloudflare_r2":
-            configuration = dict(connection.configuration or {})
-            endpoint_url = configuration.get("endpoint_url")
-            bucket = configuration.get("bucket")
-            prefix = configuration.get("prefix", "")
-            if (
-                not isinstance(endpoint_url, str)
-                or not isinstance(bucket, str)
-                or not isinstance(prefix, str)
-            ):
-                raise InvalidConfiguration("Stored Cloudflare R2 configuration is invalid")
-            result = await put_cloudflare_r2_object(
-                credentials,
-                endpoint_url=endpoint_url,
-                bucket=bucket,
-                prefix=prefix,
-                name=name,
-                content=content,
-                mime_type=mime_type,
-            )
-        elif capability == "document.create" and connection.provider == "microsoft_365":
-            folder_path = dict(connection.configuration or {}).get("folder_path")
-            if folder_path is not None and not isinstance(folder_path, str):
-                raise InvalidConfiguration("Stored Microsoft folder_path is invalid")
-            result = await create_microsoft_drive_file(
-                credentials,
-                name=name,
-                content=content,
-                mime_type=mime_type,
-                folder_path=folder_path,
-            )
-        else:
-            raise InvalidConfiguration(
-                f"{connection.provider} does not implement {capability}"
-            )
     except TerraSatchError as error:
         delivery.status = "failed"
         delivery.last_error = error.message[:1000]
