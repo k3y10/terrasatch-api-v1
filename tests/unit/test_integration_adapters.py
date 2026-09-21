@@ -117,6 +117,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["stac_api"]["connect_status"] == "available"
     assert with_store["stac_api"]["runtime_ready"] is True
     assert with_store["stac_api"]["can_connect"] is True
+    assert with_store["arcgis_enterprise_public"]["connect_status"] == "available"
+    assert with_store["arcgis_enterprise_public"]["runtime_ready"] is True
+    assert with_store["arcgis_enterprise_public"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -284,6 +287,43 @@ def test_stac_api_configuration_normalizes_allowlisted_collections() -> None:
         )
 
 
+def test_public_arcgis_enterprise_configuration_allowlists_exact_layers() -> None:
+    configuration: dict[str, object] = {
+        "feature_layer_urls": [
+            (
+                "https://gis.example.gov/server/rest/services/"
+                "Avalanche/FeatureServer/0"
+            ),
+            (
+                "https://gis.example.gov/server/rest/services/"
+                "Roads/FeatureServer/2"
+            ),
+        ]
+    }
+    _validate_configuration("arcgis_enterprise_public", configuration)
+    assert len(configuration["feature_layer_urls"]) == 2
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "arcgis_enterprise_public",
+            {
+                "feature_layer_urls": [
+                    "https://gis.example.gov/server/rest/services/A/FeatureServer/0",
+                    "https://gis.example.gov/server/rest/services/A/FeatureServer/0",
+                ]
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="FeatureServer"):
+        _validate_configuration(
+            "arcgis_enterprise_public",
+            {
+                "feature_layer_urls": [
+                    "https://gis.example.gov/server/rest/services/A/MapServer/0"
+                ]
+            },
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -355,6 +395,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["stac_api"]["capability_details"]
     }
     assert stac_labels["map.features.query"] == "Read map features"
+    enterprise_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["arcgis_enterprise_public"]["capability_details"]
+    }
+    assert enterprise_labels["map.features.query"] == "Read map features"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
