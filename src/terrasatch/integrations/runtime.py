@@ -33,6 +33,7 @@ from .operations import (
     query_caltopo_map,
     query_caltopo_team,
     query_geojson_features,
+    query_nws_alerts,
     query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
@@ -596,6 +597,7 @@ async def query(
             "stac_api",
             "arcgis_enterprise_public",
             "nws_forecast",
+            "nws_alerts",
             "uac_forecast",
         }:
             credentials, _ = await active_credentials(
@@ -823,6 +825,91 @@ async def query(
                 latitude=latitude,
                 longitude=longitude,
                 max_periods=requested_periods,
+            )
+
+        elif (
+            capability == "weather.alerts.read"
+            and connection.provider == "nws_alerts"
+        ):
+            configuration = dict(connection.configuration or {})
+            allowed_areas = configuration.get("areas", [])
+            allowed_zones = configuration.get("zones", [])
+            allow_point_queries = configuration.get("allow_point_queries", False)
+            max_alerts = configuration.get("max_alerts", 50)
+            if (
+                not isinstance(allowed_areas, list)
+                or not all(isinstance(item, str) for item in allowed_areas)
+                or not isinstance(allowed_zones, list)
+                or not all(isinstance(item, str) for item in allowed_zones)
+                or not isinstance(allow_point_queries, bool)
+                or not isinstance(max_alerts, int)
+            ):
+                raise InvalidConfiguration("Stored NWS alerts configuration is invalid")
+
+            allowed_keys = {"area", "zone", "latitude", "longitude", "limit"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "NWS active alerts received unsupported query parameters"
+                )
+            area = payload.get("area")
+            zone = payload.get("zone")
+            latitude = payload.get("latitude")
+            longitude = payload.get("longitude")
+            requested_limit = payload.get("limit", max_alerts)
+            if (
+                not isinstance(requested_limit, int)
+                or isinstance(requested_limit, bool)
+                or not 1 <= requested_limit <= max_alerts
+            ):
+                raise InvalidConfiguration(
+                    "NWS alert limit must be between 1 and the configured max_alerts"
+                )
+
+            explicit_selectors = int(area is not None) + int(zone is not None)
+            has_point = latitude is not None or longitude is not None
+            explicit_selectors += int(has_point)
+            if explicit_selectors == 0:
+                fixed_count = len(allowed_areas) + len(allowed_zones)
+                if fixed_count == 1 and not allow_point_queries:
+                    if allowed_areas:
+                        area = allowed_areas[0]
+                    else:
+                        zone = allowed_zones[0]
+                else:
+                    raise InvalidConfiguration(
+                        "NWS active alerts require area, zone, or point"
+                    )
+            elif explicit_selectors != 1:
+                raise InvalidConfiguration(
+                    "NWS active alerts require exactly one selector"
+                )
+
+            if area is not None:
+                if not isinstance(area, str):
+                    raise InvalidConfiguration("NWS alert area must be a string")
+                area = area.strip().upper()
+                if area not in allowed_areas:
+                    raise InvalidConfiguration(
+                        "NWS alert area is not approved for this connection"
+                    )
+            if zone is not None:
+                if not isinstance(zone, str):
+                    raise InvalidConfiguration("NWS alert zone must be a string")
+                zone = zone.strip().upper()
+                if zone not in allowed_zones:
+                    raise InvalidConfiguration(
+                        "NWS alert zone is not approved for this connection"
+                    )
+            if has_point and not allow_point_queries:
+                raise InvalidConfiguration(
+                    "NWS point alert queries are not approved for this connection"
+                )
+            result = await query_nws_alerts(
+                area=area if isinstance(area, str) else None,
+                zone=zone if isinstance(zone, str) else None,
+                latitude=latitude,
+                longitude=longitude,
+                max_alerts=requested_limit,
             )
 
         elif (
