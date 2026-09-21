@@ -1009,6 +1009,10 @@ async def query_stac_items(
 def validate_nws_forecast_url(value: str) -> str:
     normalized = value.strip().rstrip("/")
     parsed = urlsplit(normalized)
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ProviderUnavailable("NWS returned an invalid forecast URL") from error
     if (
         parsed.scheme != "https"
         or (parsed.hostname or "").casefold() != "api.weather.gov"
@@ -1016,7 +1020,7 @@ def validate_nws_forecast_url(value: str) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
-        or parsed.port not in {None, 443}
+        or port not in {None, 443}
         or not _NWS_FORECAST_PATH.fullmatch(parsed.path)
     ):
         raise ProviderUnavailable("NWS returned an invalid forecast URL")
