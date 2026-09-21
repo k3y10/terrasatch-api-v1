@@ -33,6 +33,7 @@ from .operations import (
     query_ogc_features,
     query_public_arcgis_features,
     query_stac_items,
+    query_uac_forecast,
 )
 from .service import get_connection_for_management, revoke_connection
 
@@ -367,6 +368,20 @@ async def probe_connection(
             result = await probe_nws_api()
             label = "National Weather Service"
             account_id = result.external_id
+        elif connection.provider == "uac_forecast":
+            configuration = dict(connection.configuration or {})
+            regions = configuration.get("regions")
+            if (
+                not isinstance(regions, list)
+                or not regions
+                or not isinstance(regions[0], str)
+            ):
+                raise ProviderUnavailable(
+                    "Utah Avalanche Center forecast is not configured"
+                )
+            await query_uac_forecast(region=regions[0])
+            label = "Utah Avalanche Center"
+            account_id = "utahavalanchecenter.org"
         else:
             credentials, _ = await active_credentials(
                 session,
