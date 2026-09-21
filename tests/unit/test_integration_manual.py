@@ -359,3 +359,102 @@ async def test_r2_access_keys_are_encrypted_and_connection_metadata_is_safe(
         assert "r2-super-secret" not in str(connected.configuration)
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_aws_s3_credentials_are_encrypted_and_connection_metadata_is_safe(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii"))
+    )
+
+    async with factory() as session:
+        account = Account(name="AWS S3 integration account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="AWS S3 integration org",
+            slug=f"aws-s3-integration-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="AWS S3 Admin",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="aws_s3",
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name="AWS field reports",
+            status=IntegrationStatus.REQUESTED.value,
+            configuration={
+                "region": "us-west-2",
+                "bucket": "field-reports",
+                "prefix": "exports",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+
+        async def fake_probe(provider, credentials, configuration):
+            assert provider == "aws_s3"
+            assert credentials == {
+                "access_key_id": "aws-access",
+                "secret_access_key": "aws-secret",
+                "session_token": "aws-session",
+            }
+            assert configuration["region"] == "us-west-2"
+            assert configuration["bucket"] == "field-reports"
+            return (
+                "Amazon S3 · field-reports",
+                "field-reports.s3.us-west-2.amazonaws.com",
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.manual_service.probe_manual_credentials",
+            fake_probe,
+        )
+        connected = await bind_manual_credentials(
+            session,
+            settings,
+            organization_id=organization.id,
+            user_id=user.id,
+            role=MembershipRole.ADMIN,
+            connection_id=connection.id,
+            values={
+                "access_key_id": "aws-access",
+                "secret_access_key": "aws-secret",
+                "session_token": "aws-session",
+            },
+        )
+        await session.commit()
+
+        credential = await session.scalar(
+            select(IntegrationCredential).where(
+                IntegrationCredential.connection_id == connection.id
+            )
+        )
+        assert credential is not None
+        assert "aws-access" not in credential.encrypted_payload
+        assert "aws-secret" not in credential.encrypted_payload
+        assert "aws-session" not in credential.encrypted_payload
+        assert decrypt_payload(settings, credential.encrypted_payload) == {
+            "access_key_id": "aws-access",
+            "secret_access_key": "aws-secret",
+            "session_token": "aws-session",
+        }
+        assert connected.status == IntegrationStatus.CONNECTED.value
+        assert connected.provider_account_label == "Amazon S3 · field-reports"
+        assert "aws-secret" not in str(connected.configuration)
+
+    await engine.dispose()
