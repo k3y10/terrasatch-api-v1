@@ -268,3 +268,94 @@ async def test_teams_workflows_url_is_encrypted(monkeypatch) -> None:
         assert connected.provider_account_label == "Microsoft Teams Workflows"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_r2_access_keys_are_encrypted_and_connection_metadata_is_safe(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii"))
+    )
+
+    async with factory() as session:
+        account = Account(name="R2 integration account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="R2 integration org",
+            slug=f"r2-integration-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="R2 Admin",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="cloudflare_r2",
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name="Field reports",
+            status=IntegrationStatus.REQUESTED.value,
+            configuration={
+                "endpoint_url": "https://abc123.r2.cloudflarestorage.com",
+                "bucket": "field-reports",
+                "prefix": "exports",
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+
+        async def fake_probe(provider, credentials, configuration):
+            assert provider == "cloudflare_r2"
+            assert credentials == {
+                "access_key_id": "r2-access",
+                "secret_access_key": "r2-super-secret",
+            }
+            assert configuration["bucket"] == "field-reports"
+            return "Cloudflare R2 · field-reports", "abc123.r2.cloudflarestorage.com"
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.manual_service.probe_manual_credentials",
+            fake_probe,
+        )
+        connected = await bind_manual_credentials(
+            session,
+            settings,
+            organization_id=organization.id,
+            user_id=user.id,
+            role=MembershipRole.ADMIN,
+            connection_id=connection.id,
+            values={
+                "access_key_id": "r2-access",
+                "secret_access_key": "r2-super-secret",
+            },
+        )
+        await session.commit()
+
+        credential = await session.scalar(
+            select(IntegrationCredential).where(
+                IntegrationCredential.connection_id == connection.id
+            )
+        )
+        assert credential is not None
+        assert "r2-access" not in credential.encrypted_payload
+        assert "r2-super-secret" not in credential.encrypted_payload
+        assert decrypt_payload(settings, credential.encrypted_payload) == {
+            "access_key_id": "r2-access",
+            "secret_access_key": "r2-super-secret",
+        }
+        assert connected.status == IntegrationStatus.CONNECTED.value
+        assert connected.provider_account_label == "Cloudflare R2 · field-reports"
+        assert "r2-super-secret" not in str(connected.configuration)
+
+    await engine.dispose()
