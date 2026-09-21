@@ -28,6 +28,7 @@ from terrasatch.integrations.operations import (
     query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
+    query_uac_forecast,
     read_mapbox_style,
     send_resend_notification,
     send_slack_message,
@@ -47,6 +48,7 @@ from terrasatch.integrations.operations import (
     validate_r2_endpoint_url,
     validate_stac_api_base_url,
     validate_teams_workflow_url,
+    validate_uac_region,
 )
 
 
@@ -1187,3 +1189,43 @@ async def test_nws_probe_uses_fixed_service_root() -> None:
 
     result = await probe_nws_api(transport=httpx.MockTransport(responder))
     assert result.external_id == "api.weather.gov"
+
+
+@pytest.mark.asyncio
+async def test_uac_forecast_uses_fixed_region_endpoint_and_user_agent() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert str(request.url) == (
+            "https://utahavalanchecenter.org/forecast/salt-lake/json"
+        )
+        assert request.headers["User-Agent"] == (
+            "TerraSatch/0.3 (+https://terrasatch.com)"
+        )
+        assert request.headers["Accept"] == "application/json"
+        return httpx.Response(
+            200,
+            json={
+                "date_issued": "2026-09-21",
+                "overall_danger_rose": [2] * 24,
+                "bottom_line": "Test forecast",
+            },
+        )
+
+    result = await query_uac_forecast(
+        region="salt-lake",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata == {
+        "source_host": "utahavalanchecenter.org",
+        "region": "salt-lake",
+    }
+    assert result.data["forecast"]["bottom_line"] == "Test forecast"
+
+
+def test_uac_region_allowlist_is_exact() -> None:
+    assert validate_uac_region(" Salt-Lake ") == "salt-lake"
+    assert validate_uac_region("uintas") == "uintas"
+    with pytest.raises(InvalidConfiguration, match="not supported"):
+        validate_uac_region("colorado")
+    with pytest.raises(InvalidConfiguration, match="not supported"):
+        validate_uac_region("../salt-lake")
