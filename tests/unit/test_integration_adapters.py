@@ -120,6 +120,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["arcgis_enterprise_public"]["connect_status"] == "available"
     assert with_store["arcgis_enterprise_public"]["runtime_ready"] is True
     assert with_store["arcgis_enterprise_public"]["can_connect"] is True
+    assert with_store["nws_forecast"]["connect_status"] == "available"
+    assert with_store["nws_forecast"]["runtime_ready"] is True
+    assert with_store["nws_forecast"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -324,6 +327,15 @@ def test_public_arcgis_enterprise_configuration_allowlists_exact_layers() -> Non
         )
 
 
+def test_nws_forecast_configuration_bounds_period_count() -> None:
+    configuration: dict[str, object] = {"max_periods": 8}
+    _validate_configuration("nws_forecast", configuration)
+    assert configuration == {"max_periods": 8}
+
+    with pytest.raises(InvalidConfiguration, match="between 1 and 14"):
+        _validate_configuration("nws_forecast", {"max_periods": 15})
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -400,6 +412,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["arcgis_enterprise_public"]["capability_details"]
     }
     assert enterprise_labels["map.features.query"] == "Read map features"
+    nws_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["nws_forecast"]["capability_details"]
+    }
+    assert nws_labels["weather.forecast.read"] == "Read weather forecasts"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
