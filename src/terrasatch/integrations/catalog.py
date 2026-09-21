@@ -74,6 +74,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Create calendar events",
         "access": "write",
     },
+    "task.create": {
+        "key": "task.create",
+        "label": "Create work items",
+        "access": "write",
+    },
     "map.features.query": {
         "key": "map.features.query",
         "label": "Read map features",
@@ -105,6 +110,8 @@ _SUPPORTED_PROVIDER_KEYS = {
     "microsoft_365",
     "microsoft_calendar",
     "microsoft_teams",
+    "jira",
+    "confluence",
     "webhook",
     "cloudflare_r2",
     "aws_s3",
@@ -174,6 +181,30 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["calendar.event.create"],
         "description": (
             "Create approved events in a configured Outlook or shared Microsoft calendar."
+        ),
+    },
+    "jira": {
+        "key": "jira",
+        "name": "Jira",
+        "category": "work_management",
+        "auth": "oauth2",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["task.create"],
+        "description": (
+            "Create approved Jira issues in one configured project and issue type."
+        ),
+    },
+    "confluence": {
+        "key": "confluence",
+        "name": "Confluence",
+        "category": "knowledge",
+        "auth": "oauth2",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["document.create"],
+        "description": (
+            "Create approved pages in one configured Confluence space."
         ),
     },
     "slack": {
