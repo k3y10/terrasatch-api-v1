@@ -114,6 +114,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["ogc_api_features"]["connect_status"] == "available"
     assert with_store["ogc_api_features"]["runtime_ready"] is True
     assert with_store["ogc_api_features"]["can_connect"] is True
+    assert with_store["stac_api"]["connect_status"] == "available"
+    assert with_store["stac_api"]["runtime_ready"] is True
+    assert with_store["stac_api"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -250,6 +253,37 @@ def test_ogc_api_configuration_normalizes_allowlisted_collections() -> None:
         )
 
 
+def test_stac_api_configuration_normalizes_allowlisted_collections() -> None:
+    configuration: dict[str, object] = {
+        "base_url": "https://stac.example.com/api/",
+        "collection_ids": ["sentinel-2", "landsat.c2"],
+        "max_items": 200,
+    }
+    _validate_configuration("stac_api", configuration)
+    assert configuration == {
+        "base_url": "https://stac.example.com/api",
+        "collection_ids": ["sentinel-2", "landsat.c2"],
+        "max_items": 200,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "stac_api",
+            {
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["sentinel-2", "sentinel-2"],
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="collection ID"):
+        _validate_configuration(
+            "stac_api",
+            {
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["../private"],
+            },
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -316,6 +350,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["ogc_api_features"]["capability_details"]
     }
     assert ogc_labels["map.features.query"] == "Read map features"
+    stac_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["stac_api"]["capability_details"]
+    }
+    assert stac_labels["map.features.query"] == "Read map features"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
