@@ -238,6 +238,27 @@ The provider uses no customer credential record. Normal team/organization audien
 `agent:satchy` grant still control access. Asset metadata can be returned as part of a STAC Item,
 but TerraSatch does not fetch or download those assets through this adapter.
 
+## ArcGIS Enterprise (Public)
+
+ArcGIS Enterprise (Public) is a read-only `map.features.query` provider for publicly reachable
+ArcGIS Server or ArcGIS Enterprise FeatureServer layers. It is separate from the existing ArcGIS
+Online OAuth integration so TerraSatch does not loosen the `*.arcgis.com` trust boundary used by
+connected ArcGIS Online accounts.
+
+A team or organization administrator approves between one and 20 exact HTTPS FeatureServer layer
+URLs ending in `/FeatureServer/<layerId>`. The hostname must be public DNS; TerraSatch rejects
+embedded credentials, query parameters, fragments, IP literals, localhost/internal destinations,
+and non-HTTPS URLs. DNS is checked at connection setup and again immediately before live queries.
+
+Runtime queries support the same narrow ArcGIS feature-query surface already used by TerraSatch:
+`where`, `out_fields`, `return_geometry`, `result_record_count`, and `result_offset`.
+The selected layer must exactly match an administrator-approved URL. Result counts remain capped at
+200 per request, response bodies are streamed through a 2 MB hard ceiling, redirects are disabled,
+and the public adapter does not send an Authorization header or load a customer credential record.
+
+The initial public adapter does not browse services, mint ArcGIS tokens, call administrative
+endpoints, edit features, or accept arbitrary REST parameters.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -296,7 +317,7 @@ keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
-- `map.features.query`: approved ArcGIS Online layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
+- `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
