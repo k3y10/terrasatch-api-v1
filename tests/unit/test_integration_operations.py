@@ -9,7 +9,9 @@ import pytest
 
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.operations import (
+    create_google_calendar_event,
     create_google_drive_file,
+    create_microsoft_calendar_event,
     create_microsoft_drive_file,
     probe_aws_s3_bucket,
     probe_cloudflare_r2_bucket,
@@ -681,6 +683,95 @@ async def test_microsoft_sharepoint_export_targets_approved_site_drive() -> None
     )
     assert result.external_id == "sharepoint-item-1"
     assert result.metadata["target"] == "sharepoint_site"
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_event_uses_configured_calendar() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == (
+            "/calendar/v3/calendars/ops%40group.calendar.google.com/events"
+        )
+        payload = json.loads(request.content)
+        assert payload["summary"] == "Shift briefing"
+        assert payload["start"]["dateTime"] == "2026-09-22T08:00:00-06:00"
+        return httpx.Response(
+            201,
+            json={
+                "id": "google-event-1",
+                "htmlLink": "https://calendar.google.com/event?eid=1",
+                "status": "confirmed",
+            },
+        )
+
+    result = await create_google_calendar_event(
+        {"access_token": "google-calendar-access"},
+        calendar_id="ops@group.calendar.google.com",
+        title="Shift briefing",
+        start="2026-09-22T08:00:00-06:00",
+        end="2026-09-22T09:00:00-06:00",
+        description="Morning operational briefing",
+        location="Operations room",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "google-event-1"
+    assert result.metadata["calendar_id"] == "ops@group.calendar.google.com"
+
+
+@pytest.mark.asyncio
+async def test_microsoft_calendar_event_normalizes_to_utc() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1.0/me/calendars/shared-calendar/events"
+        payload = json.loads(request.content)
+        assert payload["subject"] == "Shift briefing"
+        assert payload["start"] == {
+            "dateTime": "2026-09-22T14:00:00",
+            "timeZone": "UTC",
+        }
+        assert payload["end"] == {
+            "dateTime": "2026-09-22T15:00:00",
+            "timeZone": "UTC",
+        }
+        return httpx.Response(
+            201,
+            json={
+                "id": "ms-event-1",
+                "webLink": "https://outlook.office.com/calendar/item/1",
+                "isCancelled": False,
+            },
+        )
+
+    result = await create_microsoft_calendar_event(
+        {"access_token": "ms-calendar-access"},
+        calendar_id="shared-calendar",
+        title="Shift briefing",
+        start="2026-09-22T08:00:00-06:00",
+        end="2026-09-22T09:00:00-06:00",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "ms-event-1"
+    assert result.metadata["calendar_id"] == "shared-calendar"
+
+
+@pytest.mark.asyncio
+async def test_calendar_events_require_offset_and_positive_duration() -> None:
+    with pytest.raises(InvalidConfiguration, match="UTC offset"):
+        await create_google_calendar_event(
+            {"access_token": "calendar-access"},
+            calendar_id=None,
+            title="Bad event",
+            start="2026-09-22T08:00:00",
+            end="2026-09-22T09:00:00",
+        )
+    with pytest.raises(InvalidConfiguration, match="after start"):
+        await create_microsoft_calendar_event(
+            {"access_token": "calendar-access"},
+            calendar_id=None,
+            title="Bad event",
+            start="2026-09-22T10:00:00-06:00",
+            end="2026-09-22T09:00:00-06:00",
+        )
 
 
 @pytest.mark.asyncio
