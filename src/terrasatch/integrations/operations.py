@@ -792,12 +792,13 @@ async def query_ogc_features(
         raise ProviderUnavailable("OGC API Features returned invalid JSON") from error
     if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
         raise ProviderUnavailable("OGC API Features must return a FeatureCollection")
-    features = payload.get("features")
-    if not isinstance(features, list):
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
         raise ProviderUnavailable("OGC API Features response has invalid features")
-    for feature in features:
+    for feature in raw_features:
         if not isinstance(feature, dict) or feature.get("type") != "Feature":
             raise ProviderUnavailable("OGC API Features returned an invalid feature")
+    features = raw_features[:limit]
 
     data: dict[str, object] = {
         "type": "FeatureCollection",
@@ -812,6 +813,8 @@ async def query_ogc_features(
             "source_host": urlsplit(base).hostname,
             "collection_id": collection,
             "feature_count": len(features),
+            "source_feature_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
             "number_matched": payload.get("numberMatched"),
             "number_returned": payload.get("numberReturned"),
         },
