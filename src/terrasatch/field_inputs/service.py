@@ -7,6 +7,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,12 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
 from terrasatch.errors import AuthenticationFailed, InvalidConfiguration, ResourceNotFound
-from terrasatch.field_inputs.schemas import GarminEvent, GarminIpcPayload, MobileObservationRequest
 from terrasatch.integrations.models import IntegrationConnection, IntegrationStatus
 from terrasatch.integrations.oauth_service import active_credentials
 from terrasatch.radio.models import OperationalEvent, Transmission
 from terrasatch.radio.schemas import RfMetadata, TransmissionCreateRequest
 from terrasatch.radio.service import ingest_transmission
+
+if TYPE_CHECKING:
+    from terrasatch.field_inputs.schemas import (
+        GarminEvent,
+        GarminIpcPayload,
+        MobileObservationRequest,
+    )
 
 
 _GARMIN_MESSAGE_LABELS = {
