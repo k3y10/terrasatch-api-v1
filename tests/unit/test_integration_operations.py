@@ -23,6 +23,7 @@ from terrasatch.integrations.operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_geojson_features,
+    query_nws_alerts,
     query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
@@ -1229,3 +1230,99 @@ def test_uac_region_allowlist_is_exact() -> None:
         validate_uac_region("colorado")
     with pytest.raises(InvalidConfiguration, match="not supported"):
         validate_uac_region("../salt-lake")
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_use_fixed_endpoint_and_preserve_features() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/alerts/active"
+        assert request.url.params["zone"] == "UTC035"
+        assert request.headers["User-Agent"] == (
+            "TerraSatch/0.3 (+https://terrasatch.com)"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "title": "Current watches, warnings, and advisories",
+                "features": [
+                    {
+                        "id": "urn:oid:alert-1",
+                        "type": "Feature",
+                        "geometry": None,
+                        "properties": {
+                            "event": "Winter Storm Warning",
+                            "severity": "Severe",
+                            "headline": "Test warning",
+                        },
+                    },
+                    {
+                        "id": "urn:oid:alert-2",
+                        "type": "Feature",
+                        "geometry": None,
+                        "properties": {
+                            "event": "Wind Advisory",
+                            "severity": "Moderate",
+                        },
+                    },
+                ],
+            },
+        )
+
+    result = await query_nws_alerts(
+        zone="utc035",
+        max_alerts=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert len(result.data["features"]) == 1
+    assert result.data["features"][0]["properties"]["event"] == (
+        "Winter Storm Warning"
+    )
+    assert result.metadata == {
+        "source_host": "api.weather.gov",
+        "selector_type": "zone",
+        "selector_value": "UTC035",
+        "alert_count": 1,
+        "source_alert_count": 2,
+        "truncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_support_point_selector() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["point"] == "40.6000,-111.7000"
+        return httpx.Response(
+            200,
+            json={"type": "FeatureCollection", "features": []},
+        )
+
+    result = await query_nws_alerts(
+        latitude=40.6,
+        longitude=-111.7,
+        max_alerts=10,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["selector_type"] == "point"
+    assert result.metadata["selector_value"] == "40.6000,-111.7000"
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_require_one_valid_selector() -> None:
+    with pytest.raises(InvalidConfiguration, match="exactly one"):
+        await query_nws_alerts(
+            area="UT",
+            zone="UTC035",
+            max_alerts=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="latitude and longitude"):
+        await query_nws_alerts(
+            latitude=40.6,
+            max_alerts=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="area code"):
+        await query_nws_alerts(
+            area="UTAH",
+            max_alerts=10,
+        )
