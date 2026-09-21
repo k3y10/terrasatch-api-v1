@@ -19,6 +19,7 @@ from terrasatch.integrations.operations import (
     query_caltopo_map,
     query_geojson_features,
     query_ogc_features,
+    query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
     read_mapbox_style,
@@ -31,6 +32,8 @@ from terrasatch.integrations.operations import (
     validate_geojson_url,
     validate_ogc_api_base_url,
     validate_public_geojson_destination,
+    validate_public_arcgis_feature_layer_destination,
+    validate_public_arcgis_feature_layer_url,
     validate_public_ogc_destination,
     validate_public_stac_destination,
     validate_public_webhook_destination,
@@ -812,4 +815,79 @@ async def test_stac_api_rejects_non_stac_items() -> None:
             collection_id="sentinel-2",
             limit=10,
             transport=transport,
+        )
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_query_has_no_auth_and_is_bounded() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert str(request.url) == (
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0/query"
+        )
+        assert "Authorization" not in request.headers
+        form = dict(request.url.params)
+        assert form == {}
+        body = request.content.decode()
+        assert "where=STATUS%3D%27OPEN%27" in body
+        assert "outFields=NAME%2CSTATUS" in body
+        assert "resultRecordCount=25" in body
+        return httpx.Response(
+            200,
+            json={
+                "objectIdFieldName": "OBJECTID",
+                "geometryType": "esriGeometryPoint",
+                "features": [
+                    {
+                        "attributes": {
+                            "OBJECTID": 1,
+                            "NAME": "Observation",
+                            "STATUS": "OPEN",
+                        },
+                        "geometry": {"x": -111.8, "y": 40.6},
+                    }
+                ],
+            },
+        )
+
+    result = await query_public_arcgis_features(
+        layer_url=(
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0"
+        ),
+        where="STATUS='OPEN'",
+        out_fields=["NAME", "STATUS"],
+        return_geometry=True,
+        result_record_count=25,
+        result_offset=0,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["feature_count"] == 1
+    assert result.metadata["source_host"] == "gis.example.gov"
+
+
+def test_public_arcgis_enterprise_rejects_unsafe_layer_urls() -> None:
+    for url in (
+        "http://gis.example.gov/server/rest/services/A/FeatureServer/0",
+        "https://127.0.0.1/server/rest/services/A/FeatureServer/0",
+        "https://user:pass@gis.example.gov/server/rest/services/A/FeatureServer/0",
+        "https://gis.example.gov/server/rest/services/A/MapServer/0",
+    ):
+        with pytest.raises(InvalidConfiguration):
+            validate_public_arcgis_feature_layer_url(url)
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_rejects_private_dns(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [(2, 1, 6, "", ("10.1.2.3", 443))]
+
+    monkeypatch.setattr(
+        "terrasatch.integrations.operations.socket.getaddrinfo",
+        fake_getaddrinfo,
+    )
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_arcgis_feature_layer_destination(
+            "https://gis.example.gov/server/rest/services/A/FeatureServer/0"
         )
