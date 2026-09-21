@@ -27,7 +27,7 @@ from .models import (
     IntegrationOAuthState,
     IntegrationStatus,
 )
-from .operations import query_geojson_features
+from .operations import query_geojson_features, query_ogc_features
 from .service import get_connection_for_management, revoke_connection
 
 
@@ -292,6 +292,25 @@ async def probe_connection(
             )
             source_host = result.metadata.get("source_host")
             label = f"GeoJSON · {source_host}" if source_host else "GeoJSON"
+            account_id = str(source_host) if source_host else None
+        elif connection.provider == "ogc_api_features":
+            configuration = dict(connection.configuration or {})
+            base_url = configuration.get("base_url")
+            collection_ids = configuration.get("collection_ids")
+            if (
+                not isinstance(base_url, str)
+                or not isinstance(collection_ids, list)
+                or not collection_ids
+                or not isinstance(collection_ids[0], str)
+            ):
+                raise ProviderUnavailable("OGC API Features is not configured")
+            result = await query_ogc_features(
+                base_url=base_url,
+                collection_id=collection_ids[0],
+                limit=1,
+            )
+            source_host = result.metadata.get("source_host")
+            label = f"OGC API · {source_host}" if source_host else "OGC API"
             account_id = str(source_host) if source_host else None
         else:
             credentials, _ = await active_credentials(
