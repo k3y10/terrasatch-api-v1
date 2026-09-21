@@ -78,6 +78,57 @@ def validate_arcgis_feature_layer_url(value: str) -> str:
     return normalized
 
 
+def validate_public_arcgis_feature_layer_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer URL has an invalid port"
+        ) from error
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+        or not _ARCGIS_LAYER_PATH.search(parsed.path)
+    ):
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer must be an HTTPS FeatureServer layer URL"
+        )
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer must use a DNS hostname"
+        )
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration(
+            "Public ArcGIS Enterprise layer destination is not allowed"
+        )
+    return normalized
+
+
+async def validate_public_arcgis_feature_layer_destination(value: str) -> str:
+    normalized = validate_public_arcgis_feature_layer_url(value)
+    return await _validate_public_hostname(
+        normalized,
+        label="Public ArcGIS Enterprise layer",
+    )
+
+
 def _validate_https_webhook_url(
     value: str,
     *,
