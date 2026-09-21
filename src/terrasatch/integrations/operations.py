@@ -1105,17 +1105,22 @@ async def query_firms_detections(
         )
     west, south, east, north = validate_firms_bounds(bounds)
     area = f"{west:g},{south:g},{east:g},{north:g}"
-    response = await _request_limited(
-        transport,
-        "GET",
-        (
-            f"{_FIRMS_ROOT}/api/area/csv/"
-            f"{quote(map_key.strip(), safe='')}/"
-            f"{normalized_source}/{area}/{days}"
-        ),
-        max_bytes=8_000_000,
-        headers={"User-Agent": "TerraSatch/0.3 (+https://terrasatch.com)"},
-    )
+    try:
+        response = await _request_limited(
+            transport,
+            "GET",
+            (
+                f"{_FIRMS_ROOT}/api/area/csv/"
+                f"{quote(map_key.strip(), safe='')}/"
+                f"{normalized_source}/{area}/{days}"
+            ),
+            max_bytes=8_000_000,
+            headers={"User-Agent": "TerraSatch/0.3 (+https://terrasatch.com)"},
+        )
+    except ProviderUnavailable as error:
+        if error.message == "Provider response exceeds the configured size limit":
+            raise
+        raise ProviderUnavailable("NASA FIRMS request failed") from None
     if response.status_code < 200 or response.status_code >= 300:
         raise ProviderUnavailable(
             f"NASA FIRMS area query failed with HTTP {response.status_code}"
