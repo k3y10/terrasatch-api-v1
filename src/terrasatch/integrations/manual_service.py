@@ -20,6 +20,7 @@ from .operations import (
     query_caltopo_team,
     query_snowflake,
     validate_generic_webhook_url,
+    validate_public_webhook_destination,
     validate_teams_workflow_url,
 )
 from .service import get_connection_for_management
@@ -76,6 +77,10 @@ async def probe_manual_credentials(
         if not isinstance(raw_url, str):
             raise InvalidConfiguration("Microsoft Teams webhook credential is missing")
         url = validate_teams_workflow_url(raw_url)
+        await validate_public_webhook_destination(
+            url,
+            label="Microsoft Teams",
+        )
         host = urlsplit(url).hostname
         return "Microsoft Teams Workflows", host
 
@@ -84,6 +89,7 @@ async def probe_manual_credentials(
         if not isinstance(raw_url, str):
             raise InvalidConfiguration("Webhook credential is missing")
         url = validate_generic_webhook_url(raw_url)
+        await validate_public_webhook_destination(url, label="Generic")
         host = urlsplit(url).hostname
         return f"Webhook · {host}", host
 
