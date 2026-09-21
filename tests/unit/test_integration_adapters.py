@@ -127,6 +127,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["nws_forecast"]["connect_status"] == "available"
     assert with_store["nws_forecast"]["runtime_ready"] is True
     assert with_store["nws_forecast"]["can_connect"] is True
+    assert with_store["nws_alerts"]["connect_status"] == "available"
+    assert with_store["nws_alerts"]["runtime_ready"] is True
+    assert with_store["nws_alerts"]["can_connect"] is True
     assert with_store["uac_forecast"]["connect_status"] == "available"
     assert with_store["uac_forecast"]["runtime_ready"] is True
     assert with_store["uac_forecast"]["can_connect"] is True
@@ -363,6 +366,37 @@ def test_microsoft_365_configuration_supports_sharepoint_targets() -> None:
         )
 
 
+def test_nws_alert_configuration_normalizes_and_bounds_selectors() -> None:
+    configuration: dict[str, object] = {
+        "areas": ["ut"],
+        "zones": ["utc035", "utz111"],
+        "allow_point_queries": True,
+        "max_alerts": 25,
+    }
+    _validate_configuration("nws_alerts", configuration)
+    assert configuration == {
+        "areas": ["UT"],
+        "zones": ["UTC035", "UTZ111"],
+        "allow_point_queries": True,
+        "max_alerts": 25,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="require"):
+        _validate_configuration(
+            "nws_alerts",
+            {
+                "areas": [],
+                "zones": [],
+                "allow_point_queries": False,
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="zone code"):
+        _validate_configuration(
+            "nws_alerts",
+            {"zones": ["bad-zone"]},
+        )
+
+
 def test_uac_configuration_normalizes_and_allowlists_regions() -> None:
     configuration: dict[str, object] = {
         "regions": ["Salt-Lake", "uintas", "moab"],
@@ -465,6 +499,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["nws_forecast"]["capability_details"]
     }
     assert nws_labels["weather.forecast.read"] == "Read weather forecasts"
+    alert_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["nws_alerts"]["capability_details"]
+    }
+    assert alert_labels["weather.alerts.read"] == "Read active weather alerts"
     uac_labels = {
         detail["key"]: detail["label"]
         for detail in catalog["uac_forecast"]["capability_details"]
