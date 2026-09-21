@@ -38,6 +38,7 @@ from .operations import (
     query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
+    query_uac_forecast,
     read_mapbox_style,
     send_resend_notification,
     send_slack_message,
@@ -595,6 +596,7 @@ async def query(
             "stac_api",
             "arcgis_enterprise_public",
             "nws_forecast",
+            "uac_forecast",
         }:
             credentials, _ = await active_credentials(
                 session,
@@ -822,6 +824,38 @@ async def query(
                 longitude=longitude,
                 max_periods=requested_periods,
             )
+
+        elif (
+            capability == "avalanche.forecast.read"
+            and connection.provider == "uac_forecast"
+        ):
+            configuration = dict(connection.configuration or {})
+            allowed_regions = configuration.get("regions")
+            if (
+                not isinstance(allowed_regions, list)
+                or not allowed_regions
+                or not all(isinstance(item, str) for item in allowed_regions)
+            ):
+                raise InvalidConfiguration("Stored UAC forecast configuration is invalid")
+            allowed_keys = {"region"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "UAC forecast received unsupported query parameters"
+                )
+            requested_region = payload.get("region")
+            if requested_region is None and len(allowed_regions) == 1:
+                region = allowed_regions[0]
+            elif isinstance(requested_region, str):
+                region = requested_region.strip().casefold()
+            else:
+                raise InvalidConfiguration(
+                    "UAC forecast requires region when multiple regions are approved"
+                )
+            if region not in allowed_regions:
+                raise InvalidConfiguration(
+                    "UAC forecast region is not approved for this connection"
+                )
+            result = await query_uac_forecast(region=region)
 
         elif capability == "map.features.query" and connection.provider == "esri_arcgis":
             configured_layers = dict(connection.configuration or {}).get(
