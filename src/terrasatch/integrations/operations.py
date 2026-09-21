@@ -1022,6 +1022,118 @@ async def query_stac_items(
     )
 
 
+def validate_nws_alert_area(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", normalized):
+        raise InvalidConfiguration("NWS alert area code is invalid")
+    return normalized
+
+
+def validate_nws_alert_zone(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}[0-9]{3}", normalized):
+        raise InvalidConfiguration("NWS alert zone code is invalid")
+    return normalized
+
+
+async def query_nws_alerts(
+    *,
+    area: str | None = None,
+    zone: str | None = None,
+    latitude: object | None = None,
+    longitude: object | None = None,
+    max_alerts: int = 50,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if (
+        not isinstance(max_alerts, int)
+        or isinstance(max_alerts, bool)
+        or not 1 <= max_alerts <= 100
+    ):
+        raise InvalidConfiguration(
+            "NWS active-alert max_alerts must be an integer between 1 and 100"
+        )
+
+    has_point = latitude is not None or longitude is not None
+    if has_point and (latitude is None or longitude is None):
+        raise InvalidConfiguration(
+            "NWS active-alert point queries require latitude and longitude"
+        )
+    selector_count = int(area is not None) + int(zone is not None) + int(has_point)
+    if selector_count != 1:
+        raise InvalidConfiguration(
+            "NWS active alerts require exactly one area, zone, or point selector"
+        )
+
+    params: dict[str, str] = {}
+    selector_type: str
+    selector_value: str
+    if area is not None:
+        selector_type = "area"
+        selector_value = validate_nws_alert_area(area)
+        params["area"] = selector_value
+    elif zone is not None:
+        selector_type = "zone"
+        selector_value = validate_nws_alert_zone(zone)
+        params["zone"] = selector_value
+    else:
+        lat, lon = _validate_weather_coordinates(latitude, longitude)
+        selector_type = "point"
+        selector_value = f"{lat:.4f},{lon:.4f}"
+        params["point"] = selector_value
+
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{_NWS_ROOT}/alerts/active",
+        max_bytes=5_000_000,
+        params=params,
+        headers={
+            "Accept": "application/geo+json",
+            "User-Agent": _NWS_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS active-alert query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS active alerts returned invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("NWS active alerts returned an invalid response")
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
+        raise ProviderUnavailable("NWS active alerts response has invalid features")
+    for feature in raw_features:
+        if (
+            not isinstance(feature, dict)
+            or not isinstance(feature.get("properties"), dict)
+        ):
+            raise ProviderUnavailable("NWS active alerts returned an invalid alert")
+    features = raw_features[:max_alerts]
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    for key in ("title", "updated"):
+        value = payload.get(key)
+        if value is not None:
+            data[key] = value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": "api.weather.gov",
+            "selector_type": selector_type,
+            "selector_value": selector_value,
+            "alert_count": len(features),
+            "source_alert_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
+        },
+    )
+
+
 def validate_uac_region(value: str) -> str:
     normalized = value.strip().casefold()
     if normalized not in _UAC_REGIONS:
