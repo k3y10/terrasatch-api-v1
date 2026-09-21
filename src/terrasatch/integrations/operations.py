@@ -134,23 +134,23 @@ async def _validate_public_hostname(normalized: str, *, label: str) -> str:
         )
     except OSError as error:
         raise ProviderUnavailable(
-            f"{label} webhook destination could not be resolved"
+            f"{label} destination could not be resolved"
         ) from error
 
     addresses = {item[4][0].split("%", 1)[0] for item in infos if item[4]}
     if not addresses:
-        raise ProviderUnavailable(f"{label} webhook destination could not be resolved")
+        raise ProviderUnavailable(f"{label} destination could not be resolved")
 
     for address in addresses:
         try:
             resolved = ipaddress.ip_address(address)
         except ValueError as error:
             raise ProviderUnavailable(
-                f"{label} webhook destination returned an invalid address"
+                f"{label} destination returned an invalid address"
             ) from error
         if not resolved.is_global:
             raise InvalidConfiguration(
-                f"{label} webhook destination resolves to a non-public address"
+                f"{label} destination resolves to a non-public address"
             )
     return normalized
 
