@@ -93,9 +93,20 @@ portals and feature-editing capabilities remain outside this adapter.
 ## Microsoft 365
 
 Microsoft 365 uses delegated Microsoft identity-platform OAuth with `offline_access`, `User.Read`,
-and `Files.ReadWrite`. The first supported capability is `document.create`, implemented as a small
-file upload to the connected user's OneDrive. Team and organization OneDrive/SharePoint routing is
-not advertised yet; the initial connection scope is intentionally personal.
+and `Files.ReadWrite`. The supported `document.create` capability can target either the connected
+member's OneDrive or an administrator-approved SharePoint document library through Microsoft Graph.
+
+Personal connections default to the member's `/me/drive` and may optionally configure a folder
+path. Team and organization connections must configure a SharePoint `site_id` so a shared
+connection cannot silently write into the authorizing administrator's personal OneDrive. An optional
+`drive_id` selects a specific document library; otherwise TerraSatch uses the site's default drive.
+Folder paths remain fixed in connection configuration rather than supplied by Satchy at execution
+time.
+
+The delegated `Files.ReadWrite` permission is intentionally retained rather than requesting broad
+tenant-wide SharePoint write scopes. The signed-in Microsoft user must already have access to the
+configured site or drive. TerraSatch stores the delegated access/refresh tokens only in the encrypted
+connection credential record.
 
 ## Microsoft Teams
 
