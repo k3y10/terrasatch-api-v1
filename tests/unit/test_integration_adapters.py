@@ -108,6 +108,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["cloudflare_r2"]["can_connect"] is True
     assert with_store["aws_s3"]["connect_status"] == "external_setup_required"
     assert with_store["aws_s3"]["can_connect"] is True
+    assert with_store["geojson"]["connect_status"] == "available"
+    assert with_store["geojson"]["runtime_ready"] is True
+    assert with_store["geojson"]["can_connect"] is True
 
 
 def test_operational_email_requires_platform_sender_and_resend_key() -> None:
@@ -184,6 +187,35 @@ def test_operational_email_configuration_is_allowlisted_and_normalized() -> None
         )
 
 
+def test_geojson_configuration_is_fixed_and_bounded() -> None:
+    configuration: dict[str, object] = {
+        "endpoint_url": "https://data.example.com/observations.geojson",
+        "max_features": 250,
+    }
+    _validate_configuration("geojson", configuration)
+    assert configuration == {
+        "endpoint_url": "https://data.example.com/observations.geojson",
+        "max_features": 250,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="HTTPS URL"):
+        _validate_configuration(
+            "geojson",
+            {
+                "endpoint_url": "http://data.example.com/feed.geojson",
+                "max_features": 100,
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="between 1 and 1000"):
+        _validate_configuration(
+            "geojson",
+            {
+                "endpoint_url": "https://data.example.com/feed.geojson",
+                "max_features": 1001,
+            },
+        )
+
+
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
     settings = Settings(
         integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
@@ -240,6 +272,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["aws_s3"]["capability_details"]
     }
     assert s3_labels["document.create"] == "Create reports and files"
+    geojson_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["geojson"]["capability_details"]
+    }
+    assert geojson_labels["map.features.query"] == "Read map features"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:
