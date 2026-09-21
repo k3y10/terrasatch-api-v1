@@ -1056,20 +1056,6 @@ def validate_firms_bounds(value: object) -> tuple[float, float, float, float]:
     return west, south, east, north
 
 
-def _firms_bounds_within(
-    requested: tuple[float, float, float, float],
-    approved: tuple[float, float, float, float],
-) -> bool:
-    west, south, east, north = requested
-    approved_west, approved_south, approved_east, approved_north = approved
-    return (
-        approved_west <= west
-        and approved_south <= south
-        and east <= approved_east
-        and north <= approved_north
-    )
-
-
 async def query_firms_detections(
     credentials: dict[str, object],
     *,
