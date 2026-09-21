@@ -11,8 +11,10 @@ from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.adapters import (
     ArcGISOAuthAdapter,
+    GoogleCalendarOAuthAdapter,
     GoogleDriveOAuthAdapter,
     Microsoft365OAuthAdapter,
+    MicrosoftCalendarOAuthAdapter,
     SlackOAuthAdapter,
 )
 from terrasatch.integrations.catalog import provider_catalog
@@ -509,6 +511,46 @@ async def test_google_drive_oauth_uses_narrow_drive_file_scope_and_probes_identi
 
 
 @pytest.mark.asyncio
+async def test_google_calendar_oauth_uses_event_scope_and_separate_token() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"google_calendar":{"client_id":"google-client","client_secret":"google-secret",'
+            '"redirect_uri":"https://api.example.com/google-calendar/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GoogleCalendarOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "calendar-access",
+                    "refresh_token": "calendar-refresh",
+                    "expires_in": 3600,
+                    "scope": "https://www.googleapis.com/auth/calendar.events",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url).startswith(GoogleCalendarOAuthAdapter.events_endpoint):
+            assert request.headers["Authorization"] == "Bearer calendar-access"
+            return httpx.Response(200, json={"items": []})
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = GoogleCalendarOAuthAdapter(
+        resolve_provider_app_config(settings, "google_calendar", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="calendar-state"))
+    params = parse_qs(authorization.query)
+    assert params["scope"] == ["https://www.googleapis.com/auth/calendar.events"]
+    result = await adapter.exchange_code(code="calendar-code")
+    assert result.account_id == "primary"
+    assert result.credentials["provider"] == "google_calendar"
+    assert result.credentials["refresh_token"] == "calendar-refresh"
+
+
+@pytest.mark.asyncio
 async def test_slack_oauth_requests_incoming_webhook_and_stores_destination_metadata() -> None:
     settings = configured_settings()
     def responder(request: httpx.Request) -> httpx.Response:
@@ -739,6 +781,52 @@ async def test_microsoft_oauth_requests_one_drive_scopes_and_probes_identity() -
     assert result.account_id == "user-123"
     assert result.credentials["refresh_token"] == "ms-refresh"
 
+
+
+@pytest.mark.asyncio
+async def test_microsoft_calendar_oauth_uses_shared_calendar_scope() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"microsoft_calendar":{"client_id":"ms-client","client_secret":"ms-secret",'
+            '"redirect_uri":"https://api.example.com/microsoft-calendar/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == MicrosoftCalendarOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ms-calendar-access",
+                    "refresh_token": "ms-calendar-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access User.Read Calendars.ReadWrite.Shared",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url).startswith(MicrosoftCalendarOAuthAdapter.profile_endpoint):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "user-123",
+                    "displayName": "Field User",
+                    "userPrincipalName": "field@example.com",
+                },
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = MicrosoftCalendarOAuthAdapter(
+        resolve_provider_app_config(settings, "microsoft_calendar", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="ms-calendar-state"))
+    params = parse_qs(authorization.query)
+    assert "Calendars.ReadWrite.Shared" in params["scope"][0]
+    assert "Files.ReadWrite" not in params["scope"][0]
+    result = await adapter.exchange_code(code="ms-calendar-code")
+    assert result.account_id == "user-123"
+    assert result.credentials["provider"] == "microsoft_calendar"
 
 
 def test_mapbox_managed_service_requires_fixed_style_allowlist() -> None:
