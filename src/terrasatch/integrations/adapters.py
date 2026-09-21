@@ -1,4 +1,4 @@
-"""OAuth provider adapters for Google Drive, Microsoft 365, Slack, and ArcGIS Online."""
+"""OAuth provider adapters for supported TerraSatch workspace services."""
 
 from __future__ import annotations
 
