@@ -99,6 +99,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Read weather forecasts",
         "access": "read",
     },
+    "avalanche.forecast.read": {
+        "key": "avalanche.forecast.read",
+        "label": "Read avalanche forecasts",
+        "access": "read",
+    },
 }
 
 _SUPPORTED_PROVIDER_KEYS = {
@@ -120,6 +125,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "ogc_api_features",
     "stac_api",
     "nws_forecast",
+    "uac_forecast",
     "snowflake",
     "caltopo",
 }
@@ -323,6 +329,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["weather.forecast.read"],
         "description": (
             "Read official NWS point forecasts through api.weather.gov."
+        ),
+    },
+    "uac_forecast": {
+        "key": "uac_forecast",
+        "name": "Utah Avalanche Center",
+        "category": "avalanche",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["avalanche.forecast.read"],
+        "description": (
+            "Read official Utah Avalanche Center daily forecast JSON by approved region."
         ),
     },
     "snowflake": {
