@@ -254,6 +254,30 @@ class GoogleDriveOAuthAdapter:
             raise ProviderUnavailable("Google credential revocation could not be confirmed")
 
 
+class GoogleCalendarOAuthAdapter(GoogleDriveOAuthAdapter):
+    """Google Calendar OAuth adapter kept separate from Drive authorization."""
+
+    provider_key = "google_calendar"
+    scopes = ("https://www.googleapis.com/auth/calendar.events",)
+    events_endpoint = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+
+    async def probe(self, credentials: dict[str, object]) -> tuple[str | None, str | None]:
+        access_token = credentials.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ProviderUnavailable("Google Calendar access token is unavailable")
+        response = await _request(
+            self.transport,
+            "GET",
+            self.events_endpoint,
+            params={"maxResults": "1"},
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code >= 400:
+            raise ProviderUnavailable("Google Calendar connection check failed")
+        _json_payload(response, provider="Google Calendar")
+        return "Google Calendar", "primary"
+
+
 class Microsoft365OAuthAdapter:
     """Microsoft Graph delegated OAuth adapter for personal OneDrive output."""
 
@@ -400,6 +424,17 @@ class Microsoft365OAuthAdapter:
         # Microsoft does not expose a delegated refresh-token revocation endpoint
         # suitable for this flow. Disconnect deletes TerraSatch's encrypted copy.
         return None
+
+
+class MicrosoftCalendarOAuthAdapter(Microsoft365OAuthAdapter):
+    """Microsoft delegated OAuth adapter for user and shared calendars."""
+
+    provider_key = "microsoft_calendar"
+    scopes = (
+        "offline_access",
+        "User.Read",
+        "Calendars.ReadWrite.Shared",
+    )
 
 
 class SlackOAuthAdapter:
@@ -737,8 +772,12 @@ def get_adapter(
     assert app_config is not None
     if provider_key == "google_drive":
         return GoogleDriveOAuthAdapter(app_config, transport=transport)
+    if provider_key == "google_calendar":
+        return GoogleCalendarOAuthAdapter(app_config, transport=transport)
     if provider_key == "microsoft_365":
         return Microsoft365OAuthAdapter(app_config, transport=transport)
+    if provider_key == "microsoft_calendar":
+        return MicrosoftCalendarOAuthAdapter(app_config, transport=transport)
     if provider_key == "slack":
         return SlackOAuthAdapter(app_config, transport=transport)
     if provider_key == "esri_arcgis":
