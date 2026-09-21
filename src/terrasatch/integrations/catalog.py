@@ -104,6 +104,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Read active weather alerts",
         "access": "read",
     },
+    "wildfire.detections.read": {
+        "key": "wildfire.detections.read",
+        "label": "Read active fire detections",
+        "access": "read",
+    },
     "avalanche.forecast.read": {
         "key": "avalanche.forecast.read",
         "label": "Read avalanche forecasts",
@@ -131,6 +136,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "stac_api",
     "nws_forecast",
     "nws_alerts",
+    "nasa_firms",
     "uac_forecast",
     "snowflake",
     "caltopo",
@@ -347,6 +353,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["weather.alerts.read"],
         "description": (
             "Read official active NWS watches, warnings, advisories, and alerts."
+        ),
+    },
+    "nasa_firms": {
+        "key": "nasa_firms",
+        "name": "NASA FIRMS",
+        "category": "wildfire",
+        "auth": "service_account",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["wildfire.detections.read"],
+        "description": (
+            "Read bounded near-real-time satellite active-fire detections from NASA FIRMS."
         ),
     },
     "uac_forecast": {
