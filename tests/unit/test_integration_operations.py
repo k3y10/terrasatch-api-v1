@@ -19,6 +19,7 @@ from terrasatch.integrations.operations import (
     send_teams_message,
     send_webhook_notification,
     validate_generic_webhook_url,
+    validate_public_webhook_destination,
     validate_teams_workflow_url,
 )
 
@@ -129,6 +130,50 @@ def test_generic_webhook_rejects_local_and_ip_destinations() -> None:
     ):
         with pytest.raises(InvalidConfiguration):
             validate_generic_webhook_url(url)
+
+
+@pytest.mark.asyncio
+async def test_generic_webhook_rejects_private_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [
+            (
+                2,
+                1,
+                6,
+                "",
+                ("169.254.169.254", 443),
+            )
+        ]
+
+    monkeypatch.setattr("terrasatch.integrations.operations.socket.getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(InvalidConfiguration, match="non-public address"):
+        await validate_public_webhook_destination(
+            "https://hooks.example.com/terrasatch",
+            label="Generic",
+        )
+
+
+@pytest.mark.asyncio
+async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> None:
+    def fake_getaddrinfo(*args, **kwargs):
+        return [
+            (
+                2,
+                1,
+                6,
+                "",
+                ("93.184.216.34", 443),
+            )
+        ]
+
+    monkeypatch.setattr("terrasatch.integrations.operations.socket.getaddrinfo", fake_getaddrinfo)
+    assert (
+        await validate_public_webhook_destination(
+            "https://hooks.example.com/terrasatch",
+            label="Generic",
+        )
+        == "https://hooks.example.com/terrasatch"
+    )
 
 
 @pytest.mark.asyncio
