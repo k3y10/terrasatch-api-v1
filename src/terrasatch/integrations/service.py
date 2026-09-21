@@ -61,7 +61,7 @@ _EMAIL_ADDRESS = re.compile(
 
 _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "google_drive": {"folder_id"},
-    "microsoft_365": {"folder_path"},
+    "microsoft_365": {"site_id", "drive_id", "folder_path"},
     "cloudflare_r2": {"endpoint_url", "bucket", "prefix"},
     "aws_s3": {"region", "bucket", "prefix"},
     "email": {"recipients", "subject"},
@@ -89,6 +89,27 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
 
     if provider_key == "microsoft_365":
+        site_id = configuration.get("site_id")
+        drive_id = configuration.get("drive_id")
+        if site_id is not None:
+            if (
+                not isinstance(site_id, str)
+                or not site_id.strip()
+                or len(site_id) > 512
+                or "/" in site_id
+                or "://" in site_id
+            ):
+                raise InvalidConfiguration("Microsoft site_id is invalid")
+            configuration["site_id"] = site_id.strip()
+        if drive_id is not None:
+            if (
+                not isinstance(drive_id, str)
+                or not drive_id.strip()
+                or len(drive_id) > 512
+                or "/" in drive_id
+            ):
+                raise InvalidConfiguration("Microsoft drive_id is invalid")
+            configuration["drive_id"] = drive_id.strip()
         folder_path = configuration.get("folder_path")
         if folder_path is not None:
             if not isinstance(folder_path, str) or len(folder_path) > 512:
@@ -440,6 +461,14 @@ async def create_connection_request(
 
     _validate_configuration(provider_key, configuration)
     _assert_non_secret_configuration(configuration)
+    if (
+        provider_key == "microsoft_365"
+        and scope != IntegrationScope.USER
+        and not configuration.get("site_id")
+    ):
+        raise InvalidConfiguration(
+            "Team or organization Microsoft 365 connections require a SharePoint site_id"
+        )
     if provider_key == "geojson":
         endpoint_url = configuration.get("endpoint_url")
         assert isinstance(endpoint_url, str)
