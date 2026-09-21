@@ -1320,3 +1320,136 @@ async def test_geojson_runtime_uses_fixed_public_endpoint_without_credentials(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ogc_runtime_enforces_collection_and_core_query_allowlists(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="OGC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="OGC runtime org",
+            slug=f"ogc-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="OGC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://maps.example.com/ogc"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_ogc_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="ogc_api_features",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="OGC field data",
+            configuration={
+                "base_url": "https://maps.example.com/ogc",
+                "collection_ids": ["observations", "incidents"],
+                "max_features": 100,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "maps.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public OGC API must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "base_url": "https://maps.example.com/ogc",
+                "collection_id": "observations",
+                "limit": 25,
+                "bbox": [-112, 40, -111, 41],
+                "datetime_value": "2026-09-20/2026-09-21",
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "maps.example.com",
+                    "collection_id": "observations",
+                    "feature_count": 0,
+                    "source_feature_count": 0,
+                    "truncated": False,
+                    "number_matched": 0,
+                    "number_returned": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_ogc_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "collection_id": "observations",
+                "bbox": [-112, 40, -111, 41],
+                "datetime": "2026-09-20/2026-09-21",
+                "limit": 25,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "ogc_api_features"
+        assert result["metadata"]["collection_id"] == "observations"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"collection_id": "private"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "collection_id": "observations",
+                    "filter": "status='open'",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
