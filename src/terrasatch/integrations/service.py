@@ -38,9 +38,9 @@ from .operations import (
     validate_public_ogc_destination,
     validate_public_stac_destination,
     validate_r2_endpoint_url,
+    validate_s3_bucket_name,
     validate_stac_api_base_url,
     validate_stac_collection_id,
-    validate_s3_bucket_name,
 )
 
 _SENSITIVE_KEY_PARTS = (
