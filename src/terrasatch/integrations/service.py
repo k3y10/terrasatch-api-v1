@@ -74,6 +74,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "ogc_api_features": {"base_url", "collection_ids", "max_features"},
     "stac_api": {"base_url", "collection_ids", "max_items"},
     "nws_forecast": {"max_periods"},
+    "nws_alerts": {"areas", "zones", "allow_point_queries", "max_alerts"},
     "uac_forecast": {"regions"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
@@ -348,6 +349,58 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
                 "NWS max_periods must be an integer between 1 and 14"
             )
         configuration["max_periods"] = max_periods
+
+    if provider_key == "nws_alerts":
+        areas = configuration.get("areas", [])
+        zones = configuration.get("zones", [])
+        allow_point_queries = configuration.get("allow_point_queries", False)
+        max_alerts = configuration.get("max_alerts", 50)
+        if (
+            not isinstance(areas, list)
+            or len(areas) > 25
+            or not all(isinstance(item, str) for item in areas)
+        ):
+            raise InvalidConfiguration("NWS alert areas must be a list of up to 25 codes")
+        normalized_areas: list[str] = []
+        for area in areas:
+            normalized = area.strip().upper()
+            if not re.fullmatch(r"[A-Z]{2}", normalized):
+                raise InvalidConfiguration("NWS alert area code is invalid")
+            normalized_areas.append(normalized)
+        if len(set(normalized_areas)) != len(normalized_areas):
+            raise InvalidConfiguration("NWS alert areas cannot contain duplicates")
+        if (
+            not isinstance(zones, list)
+            or len(zones) > 50
+            or not all(isinstance(item, str) for item in zones)
+        ):
+            raise InvalidConfiguration("NWS alert zones must be a list of up to 50 codes")
+        normalized_zones: list[str] = []
+        for zone in zones:
+            normalized = zone.strip().upper()
+            if not re.fullmatch(r"[A-Z]{3}[0-9]{3}", normalized):
+                raise InvalidConfiguration("NWS alert zone code is invalid")
+            normalized_zones.append(normalized)
+        if len(set(normalized_zones)) != len(normalized_zones):
+            raise InvalidConfiguration("NWS alert zones cannot contain duplicates")
+        if not isinstance(allow_point_queries, bool):
+            raise InvalidConfiguration("NWS allow_point_queries must be boolean")
+        if not normalized_areas and not normalized_zones and not allow_point_queries:
+            raise InvalidConfiguration(
+                "NWS alerts require an approved area, zone, or point queries"
+            )
+        if (
+            not isinstance(max_alerts, int)
+            or isinstance(max_alerts, bool)
+            or not 1 <= max_alerts <= 100
+        ):
+            raise InvalidConfiguration(
+                "NWS max_alerts must be an integer between 1 and 100"
+            )
+        configuration["areas"] = normalized_areas
+        configuration["zones"] = normalized_zones
+        configuration["allow_point_queries"] = allow_point_queries
+        configuration["max_alerts"] = max_alerts
 
     if provider_key == "uac_forecast":
         regions = configuration.get("regions")
