@@ -99,6 +99,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Read weather forecasts",
         "access": "read",
     },
+    "weather.alerts.read": {
+        "key": "weather.alerts.read",
+        "label": "Read active weather alerts",
+        "access": "read",
+    },
     "avalanche.forecast.read": {
         "key": "avalanche.forecast.read",
         "label": "Read avalanche forecasts",
@@ -125,6 +130,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "ogc_api_features",
     "stac_api",
     "nws_forecast",
+    "nws_alerts",
     "uac_forecast",
     "snowflake",
     "caltopo",
@@ -329,6 +335,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["weather.forecast.read"],
         "description": (
             "Read official NWS point forecasts through api.weather.gov."
+        ),
+    },
+    "nws_alerts": {
+        "key": "nws_alerts",
+        "name": "National Weather Service Alerts",
+        "category": "weather",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["weather.alerts.read"],
+        "description": (
+            "Read official active NWS watches, warnings, advisories, and alerts."
         ),
     },
     "uac_forecast": {
