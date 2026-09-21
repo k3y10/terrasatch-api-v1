@@ -2502,3 +2502,164 @@ async def test_nws_alert_runtime_is_credential_free_and_selector_bounded(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_firms_runtime_enforces_approved_bounds_source_and_limits(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="FIRMS runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="FIRMS runtime org",
+            slug=f"firms-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="FIRMS Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="nasa_firms",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="NASA FIRMS",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "bounds": [-114.0, 37.0, -109.0, 42.0],
+                "sources": ["VIIRS_NOAA21_NRT", "LANDSAT_NRT"],
+                "max_days": 3,
+                "max_detections": 750,
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["wildfire.detections.read"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["wildfire.detections.read"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"map_key": "firms-secret-key"}, object()
+
+        async def fake_query(credentials, **kwargs):
+            assert credentials == {"map_key": "firms-secret-key"}
+            assert kwargs == {
+                "bounds": [-113.0, 38.0, -110.0, 41.0],
+                "source": "VIIRS_NOAA21_NRT",
+                "days": 2,
+                "max_detections": 100,
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "firms.modaps.eosdis.nasa.gov",
+                    "source": "VIIRS_NOAA21_NRT",
+                    "bounds": [-113.0, 38.0, -110.0, 41.0],
+                    "day_range": 2,
+                    "detection_count": 0,
+                    "source_detection_count": 0,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_firms_detections",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="wildfire.detections.read",
+            payload={
+                "bounds": [-113, 38, -110, 41],
+                "source": "viirs_noaa21_nrt",
+                "days": 2,
+                "limit": 100,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nasa_firms"
+        assert result["metadata"]["source"] == "VIIRS_NOAA21_NRT"
+
+        with pytest.raises(InvalidConfiguration, match="operating envelope"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "bounds": [-115, 38, -110, 41],
+                    "source": "VIIRS_NOAA21_NRT",
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "source": "MODIS_NRT",
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "source": "VIIRS_NOAA21_NRT",
+                    "url": "https://example.com/fires.csv",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
