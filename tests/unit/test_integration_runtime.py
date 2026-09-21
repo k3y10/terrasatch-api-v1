@@ -1586,3 +1586,144 @@ async def test_stac_runtime_enforces_collection_and_core_search_allowlists(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_public_arcgis_enterprise_runtime_enforces_exact_layer_allowlist(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="ArcGIS Enterprise runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="ArcGIS Enterprise runtime org",
+            slug=f"arcgis-enterprise-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="ArcGIS Enterprise Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        layer_url = (
+            "https://gis.example.gov/server/rest/services/"
+            "Avalanche/FeatureServer/0"
+        )
+
+        async def fake_public_destination(value):
+            assert value == layer_url
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service."
+            "validate_public_arcgis_feature_layer_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="arcgis_enterprise_public",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="Public avalanche layers",
+            configuration={"feature_layer_urls": [layer_url]},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "gis.example.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError(
+                "public ArcGIS Enterprise must not load customer credentials"
+            )
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "layer_url": layer_url,
+                "where": "STATUS='OPEN'",
+                "out_fields": ["NAME", "STATUS"],
+                "return_geometry": True,
+                "result_record_count": 25,
+                "result_offset": 0,
+            }
+            return ProviderQueryResult(
+                data={"features": []},
+                metadata={
+                    "source_host": "gis.example.gov",
+                    "feature_count": 0,
+                    "layer_url": layer_url,
+                    "return_geometry": True,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_public_arcgis_features",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "where": "STATUS='OPEN'",
+                "out_fields": ["NAME", "STATUS"],
+                "return_geometry": True,
+                "result_record_count": 25,
+                "result_offset": 0,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "arcgis_enterprise_public"
+        assert result["metadata"]["source_host"] == "gis.example.gov"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "layer_url": (
+                        "https://other.example.gov/server/rest/services/"
+                        "Private/FeatureServer/0"
+                    )
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "layer_url": layer_url,
+                    "token": "not-allowed",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
