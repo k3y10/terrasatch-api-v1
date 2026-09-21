@@ -31,6 +31,7 @@ MANUAL_CREDENTIAL_PROVIDERS = {
     "aws_s3",
     "caltopo",
     "cloudflare_r2",
+    "garmin",
     "microsoft_teams",
     "snowflake",
     "webhook",
@@ -107,6 +108,12 @@ async def probe_manual_credentials(
             f"Cloudflare R2 · {bucket}",
             str(host) if host else bucket,
         )
+
+    if provider == "garmin":
+        static_token = credentials.get("static_token")
+        if not isinstance(static_token, str) or not static_token:
+            raise InvalidConfiguration("Garmin static token is missing")
+        return "Garmin inReach Portal Connect", "ipc-outbound"
 
     if provider == "microsoft_teams":
         raw_url = credentials.get("webhook_url")
@@ -263,6 +270,13 @@ async def bind_manual_credentials(
                 "secret_access_key",
                 max_length=4096,
             ),
+        }
+    elif connection.provider == "garmin":
+        expected = {"static_token"}
+        if set(values) != expected:
+            raise InvalidConfiguration("Garmin credentials require static_token")
+        credential_payload = {
+            "static_token": _required_string(values, "static_token", max_length=4096)
         }
     elif connection.provider == "microsoft_teams":
         expected = {"webhook_url"}

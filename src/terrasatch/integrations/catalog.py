@@ -399,13 +399,15 @@ PROVIDERS: dict[str, ProviderDefinition] = {
     },
     "garmin": {
         "key": "garmin",
-        "name": "Garmin",
-        "category": "outdoor",
-        "auth": "oauth2_partner",
+        "name": "Garmin inReach Portal Connect",
+        "category": "field",
+        "auth": "service_account",
         "setup_status": "planned",
-        "scopes": ["user", "team", "organization"],
+        "scopes": ["team", "organization"],
         "capabilities": [],
-        "description": "Partner-gated Garmin Connect APIs after TerraSatch program approval.",
+        "description": (
+            "Partner-gated inReach Portal Connect ingestion for professional field messaging."
+        ),
     },
     "alltrails": {
         "key": "alltrails",

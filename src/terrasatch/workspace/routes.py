@@ -23,6 +23,11 @@ from terrasatch.billing.service import get_stripe_customer_id, get_subscription_
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.models import EdgeDevice
+from terrasatch.field_inputs.schemas import (
+    MobileObservationRequest,
+    MobileObservationResponse,
+)
+from terrasatch.field_inputs.service import ingest_mobile_observation
 from terrasatch.identity.access import (
     authenticate_user,
     get_user_organization_access,
@@ -93,6 +98,49 @@ class ModulePreferences(BaseModel):
         max_length=5
     )
     satchy: SatchyPreferenceSettings | None = None
+
+
+@router.post(
+    "/organizations/{organization_id}/field/observations",
+    response_model=MobileObservationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_mobile_observation(
+    organization_id: UUID,
+    payload: MobileObservationRequest,
+    request: Request,
+) -> MobileObservationResponse:
+    csrf(request)
+    settings = request.app.state.settings
+    async with create_session_factory(settings)() as session:
+        try:
+            user, membership = await access(request, session, organization_id)
+            await writable(session, membership)
+            await enforce_public_rate_limit(
+                settings,
+                category="mobile-field-observation",
+                identifier=str(user.id),
+                limit=120,
+                window=60,
+            )
+            transmission, transcript, events, duplicate = await ingest_mobile_observation(
+                session,
+                settings,
+                organization_id=organization_id,
+                user_id=user.id,
+                payload=payload,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+    return MobileObservationResponse(
+        transmission_id=transmission.id,
+        transcript_id=transcript.id,
+        event_ids=[item.id for item in events],
+        duplicate=duplicate,
+    )
 
 
 @router.post("/organizations/{organization_id}/preferences")

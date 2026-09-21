@@ -77,6 +77,7 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "esri_arcgis": {"feature_layer_urls"},
     "arcgis_enterprise_public": {"feature_layer_urls"},
     "caltopo": {"caltopo_team_id", "map_ids"},
+    "garmin": {"site_id", "agent_id", "channel_id", "allowed_imeis"},
 }
 
 
@@ -91,6 +92,40 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
         folder_id = configuration["folder_id"]
         if not isinstance(folder_id, str) or not folder_id.strip() or len(folder_id) > 512:
             raise InvalidConfiguration("Google Drive folder_id must be a non-empty string")
+
+    if provider_key == "garmin":
+        site_id = configuration.get("site_id")
+        if not isinstance(site_id, str):
+            raise InvalidConfiguration("Garmin site_id is required")
+        try:
+            configuration["site_id"] = str(UUID(site_id))
+        except ValueError as error:
+            raise InvalidConfiguration("Garmin site_id is invalid") from error
+        for key in ("agent_id", "channel_id"):
+            value = configuration.get(key)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise InvalidConfiguration(f"Garmin {key} is invalid")
+                try:
+                    configuration[key] = str(UUID(value))
+                except ValueError as error:
+                    raise InvalidConfiguration(f"Garmin {key} is invalid") from error
+        allowed_imeis = configuration.get("allowed_imeis", [])
+        if (
+            not isinstance(allowed_imeis, list)
+            or len(allowed_imeis) > 250
+            or not all(isinstance(item, str) for item in allowed_imeis)
+        ):
+            raise InvalidConfiguration("Garmin allowed_imeis must be a list")
+        normalized_imeis = []
+        for imei in allowed_imeis:
+            normalized = imei.strip()
+            if not re.fullmatch(r"[0-9]{15}", normalized):
+                raise InvalidConfiguration("Garmin allowed IMEI is invalid")
+            normalized_imeis.append(normalized)
+        if len(set(normalized_imeis)) != len(normalized_imeis):
+            raise InvalidConfiguration("Garmin allowed_imeis cannot contain duplicates")
+        configuration["allowed_imeis"] = normalized_imeis
 
     if provider_key in {"google_calendar", "microsoft_calendar"}:
         calendar_id = configuration.get("calendar_id")
