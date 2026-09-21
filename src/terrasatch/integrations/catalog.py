@@ -84,6 +84,11 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Query connected data",
         "access": "read",
     },
+    "weather.forecast.read": {
+        "key": "weather.forecast.read",
+        "label": "Read weather forecasts",
+        "access": "read",
+    },
 }
 
 _SUPPORTED_PROVIDER_KEYS = {
@@ -100,6 +105,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "geojson",
     "ogc_api_features",
     "stac_api",
+    "nws_forecast",
     "snowflake",
     "caltopo",
 }
@@ -241,6 +247,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["map.features.query"],
         "description": (
             "Search approved STAC collections for bounded geospatial items."
+        ),
+    },
+    "nws_forecast": {
+        "key": "nws_forecast",
+        "name": "National Weather Service",
+        "category": "weather",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["weather.forecast.read"],
+        "description": (
+            "Read official NWS point forecasts through api.weather.gov."
         ),
     },
     "snowflake": {
