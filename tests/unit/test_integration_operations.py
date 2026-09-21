@@ -11,17 +11,63 @@ from terrasatch.errors import InvalidConfiguration
 from terrasatch.integrations.operations import (
     create_google_drive_file,
     create_microsoft_drive_file,
+    probe_aws_s3_bucket,
+    probe_cloudflare_r2_bucket,
+    put_aws_s3_object,
+    put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
     query_snowflake,
     read_mapbox_style,
+    send_resend_notification,
     send_slack_message,
     send_teams_message,
     send_webhook_notification,
+    validate_aws_region,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
+    validate_r2_endpoint_url,
     validate_teams_workflow_url,
 )
+
+
+@pytest.mark.asyncio
+async def test_operational_email_uses_fixed_recipients_and_idempotency() -> None:
+    connection_id = uuid4()
+    request_id = uuid4()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.resend.com/emails"
+        assert request.headers["Authorization"] == "Bearer re_test_ops"
+        assert request.headers["Idempotency-Key"] == (
+            f"terrasatch-email/{connection_id}/{request_id}"
+        )
+        payload = json.loads(request.content)
+        assert payload == {
+            "from": "TerraSatch Operations <operations@terrasatch.com>",
+            "to": ["ops@example.com", "lead@example.com"],
+            "subject": "Field operations update",
+            "text": "Field update",
+            "reply_to": "support@terrasatch.com",
+        }
+        return httpx.Response(200, json={"id": "email_ops_123"})
+
+    result = await send_resend_notification(
+        api_key="re_test_ops",
+        sender="TerraSatch Operations <operations@terrasatch.com>",
+        recipients=["ops@example.com", "lead@example.com"],
+        subject="Field operations update",
+        text="Field update",
+        request_id=request_id,
+        connection_id=connection_id,
+        reply_to="support@terrasatch.com",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "email_ops_123"
+    assert result.metadata == {
+        "provider": "resend",
+        "recipient_count": 2,
+    }
 
 
 @pytest.mark.asyncio
@@ -174,6 +220,135 @@ async def test_generic_webhook_accepts_public_dns_resolution(monkeypatch) -> Non
         )
         == "https://hooks.example.com/terrasatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_aws_s3_bucket_probe_uses_regional_virtual_host_and_sigv4() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "HEAD"
+        assert str(request.url) == (
+            "https://field-reports.s3.us-west-2.amazonaws.com/"
+        )
+        assert "/us-west-2/s3/aws4_request" in request.headers["Authorization"]
+        assert request.headers["x-amz-content-sha256"] == (
+            "e3b0c44298fc1c149afbf4c8996fb924"
+            "27ae41e4649b934ca495991b7852b855"
+        )
+        return httpx.Response(200)
+
+    result = await probe_aws_s3_bucket(
+        {
+            "access_key_id": "aws-access",
+            "secret_access_key": "aws-secret",
+        },
+        region="us-west-2",
+        bucket="field-reports",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "field-reports"
+    assert result.metadata["region"] == "us-west-2"
+    assert result.metadata["endpoint_host"] == (
+        "field-reports.s3.us-west-2.amazonaws.com"
+    )
+
+
+@pytest.mark.asyncio
+async def test_aws_s3_put_supports_temporary_session_credentials() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert str(request.url) == (
+            "https://field-reports.s3.us-east-1.amazonaws.com/"
+            "exports/shift-report.txt"
+        )
+        assert request.content == b"Shift report"
+        assert request.headers["x-amz-security-token"] == "session-token"
+        assert "x-amz-security-token" in request.headers["Authorization"]
+        return httpx.Response(200, headers={"etag": '"aws-etag"'})
+
+    result = await put_aws_s3_object(
+        {
+            "access_key_id": "aws-access",
+            "secret_access_key": "aws-secret",
+            "session_token": "session-token",
+        },
+        region="us-east-1",
+        bucket="field-reports",
+        prefix="exports",
+        name="shift-report.txt",
+        content="Shift report",
+        mime_type="text/plain",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "exports/shift-report.txt"
+    assert result.metadata["etag"] == '"aws-etag"'
+
+
+def test_aws_s3_region_rejects_unsupported_partition() -> None:
+    with pytest.raises(InvalidConfiguration, match="region"):
+        validate_aws_region("cn-north-1")
+
+
+@pytest.mark.asyncio
+async def test_r2_bucket_probe_uses_sigv4_auto_region() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "HEAD"
+        assert str(request.url) == (
+            "https://abc123.r2.cloudflarestorage.com/field-reports"
+        )
+        assert "/auto/s3/aws4_request" in request.headers["Authorization"]
+        assert request.headers["x-amz-content-sha256"] == (
+            "e3b0c44298fc1c149afbf4c8996fb924"
+            "27ae41e4649b934ca495991b7852b855"
+        )
+        return httpx.Response(200)
+
+    result = await probe_cloudflare_r2_bucket(
+        {
+            "access_key_id": "r2-access",
+            "secret_access_key": "r2-secret",
+        },
+        endpoint_url="https://abc123.r2.cloudflarestorage.com",
+        bucket="field-reports",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "field-reports"
+    assert result.metadata["endpoint_host"] == "abc123.r2.cloudflarestorage.com"
+
+
+@pytest.mark.asyncio
+async def test_r2_document_create_puts_only_the_approved_object() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert str(request.url) == (
+            "https://abc123.r2.cloudflarestorage.com/"
+            "field-reports/exports/shift-report.txt"
+        )
+        assert request.content == b"Shift report"
+        assert request.headers["Content-Type"] == "text/plain"
+        assert "/auto/s3/aws4_request" in request.headers["Authorization"]
+        return httpx.Response(200, headers={"etag": '"etag-123"'})
+
+    result = await put_cloudflare_r2_object(
+        {
+            "access_key_id": "r2-access",
+            "secret_access_key": "r2-secret",
+        },
+        endpoint_url="https://abc123.r2.cloudflarestorage.com",
+        bucket="field-reports",
+        prefix="exports",
+        name="shift-report.txt",
+        content="Shift report",
+        mime_type="text/plain",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "exports/shift-report.txt"
+    assert result.metadata["bucket"] == "field-reports"
+    assert result.metadata["etag"] == '"etag-123"'
+
+
+def test_r2_endpoint_rejects_non_cloudflare_s3_destination() -> None:
+    with pytest.raises(InvalidConfiguration, match="R2 endpoint"):
+        validate_r2_endpoint_url("https://storage.example.com")
 
 
 @pytest.mark.asyncio

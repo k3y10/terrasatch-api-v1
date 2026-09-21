@@ -16,6 +16,8 @@ from terrasatch.identity.models import MembershipRole
 from .crypto import encrypt_payload
 from .models import IntegrationConnection, IntegrationCredential, IntegrationStatus
 from .operations import (
+    probe_aws_s3_bucket,
+    probe_cloudflare_r2_bucket,
     query_caltopo_map,
     query_caltopo_team,
     query_snowflake,
@@ -26,7 +28,9 @@ from .operations import (
 from .service import get_connection_for_management
 
 MANUAL_CREDENTIAL_PROVIDERS = {
+    "aws_s3",
     "caltopo",
+    "cloudflare_r2",
     "microsoft_teams",
     "snowflake",
     "webhook",
@@ -71,6 +75,38 @@ async def probe_manual_credentials(
                 since=int(datetime.now(UTC).timestamp() * 1000) - 60_000,
             )
         return f"CalTopo Team {team_id}", team_id
+
+    if provider == "aws_s3":
+        region = configuration.get("region")
+        bucket = configuration.get("bucket")
+        if not isinstance(region, str) or not isinstance(bucket, str):
+            raise InvalidConfiguration("Amazon S3 configuration is missing")
+        result = await probe_aws_s3_bucket(
+            credentials,
+            region=region,
+            bucket=bucket,
+        )
+        host = result.metadata.get("endpoint_host")
+        return (
+            f"Amazon S3 · {bucket}",
+            str(host) if host else bucket,
+        )
+
+    if provider == "cloudflare_r2":
+        endpoint_url = configuration.get("endpoint_url")
+        bucket = configuration.get("bucket")
+        if not isinstance(endpoint_url, str) or not isinstance(bucket, str):
+            raise InvalidConfiguration("Cloudflare R2 configuration is missing")
+        result = await probe_cloudflare_r2_bucket(
+            credentials,
+            endpoint_url=endpoint_url,
+            bucket=bucket,
+        )
+        host = result.metadata.get("endpoint_host")
+        return (
+            f"Cloudflare R2 · {bucket}",
+            str(host) if host else bucket,
+        )
 
     if provider == "microsoft_teams":
         raw_url = credentials.get("webhook_url")
@@ -180,6 +216,53 @@ async def bind_manual_credentials(
                 "programmatic_access_token",
                 max_length=8192,
             )
+        }
+    elif connection.provider == "aws_s3":
+        supplied = set(values)
+        allowed = (
+            {"access_key_id", "secret_access_key"},
+            {"access_key_id", "secret_access_key", "session_token"},
+        )
+        if supplied not in allowed:
+            raise InvalidConfiguration(
+                "Amazon S3 credentials require access_key_id, secret_access_key, "
+                "and optional session_token"
+            )
+        credential_payload = {
+            "access_key_id": _required_string(
+                values,
+                "access_key_id",
+                max_length=255,
+            ),
+            "secret_access_key": _required_string(
+                values,
+                "secret_access_key",
+                max_length=4096,
+            ),
+        }
+        if "session_token" in values:
+            credential_payload["session_token"] = _required_string(
+                values,
+                "session_token",
+                max_length=8192,
+            )
+    elif connection.provider == "cloudflare_r2":
+        expected = {"access_key_id", "secret_access_key"}
+        if set(values) != expected:
+            raise InvalidConfiguration(
+                "Cloudflare R2 credentials require access_key_id and secret_access_key"
+            )
+        credential_payload = {
+            "access_key_id": _required_string(
+                values,
+                "access_key_id",
+                max_length=255,
+            ),
+            "secret_access_key": _required_string(
+                values,
+                "secret_access_key",
+                max_length=4096,
+            ),
         }
     elif connection.provider == "microsoft_teams":
         expected = {"webhook_url"}

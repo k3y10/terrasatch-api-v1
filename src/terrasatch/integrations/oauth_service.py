@@ -274,22 +274,29 @@ async def probe_connection(
         raise ProviderUnavailable("Only connected integrations can be tested")
 
     try:
-        credentials, _ = await active_credentials(
-            session,
-            settings,
-            connection=connection,
-        )
-        if connection.provider in MANUAL_CREDENTIAL_PROVIDERS:
-            label, account_id = await probe_manual_credentials(
-                connection.provider,
-                credentials,
-                dict(connection.configuration or {}),
-            )
+        if connection.provider == "email":
+            if not settings.integration_email_is_configured:
+                raise ProviderUnavailable(
+                    "Operational email delivery is not configured"
+                )
+            label, account_id = "TerraSatch Resend", "resend"
         else:
-            label, account_id = await get_adapter(
-                connection.provider,
+            credentials, _ = await active_credentials(
+                session,
                 settings,
-            ).probe(credentials)
+                connection=connection,
+            )
+            if connection.provider in MANUAL_CREDENTIAL_PROVIDERS:
+                label, account_id = await probe_manual_credentials(
+                    connection.provider,
+                    credentials,
+                    dict(connection.configuration or {}),
+                )
+            else:
+                label, account_id = await get_adapter(
+                    connection.provider,
+                    settings,
+                ).probe(credentials)
     except TerraSatchError as error:
         connection.status = IntegrationStatus.ERROR.value
         connection.last_error = error.message[:1000]

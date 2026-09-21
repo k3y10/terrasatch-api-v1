@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from pydantic import SecretStr, ValidationError
 
 from terrasatch.config import Settings
-from terrasatch.errors import ProviderUnavailable
+from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.adapters import (
     ArcGISOAuthAdapter,
     GoogleDriveOAuthAdapter,
@@ -18,6 +18,7 @@ from terrasatch.integrations.adapters import (
 from terrasatch.integrations.catalog import provider_catalog
 from terrasatch.integrations.crypto import decrypt_payload, encrypt_payload
 from terrasatch.integrations.provider_config import resolve_provider_app_config
+from terrasatch.integrations.service import _validate_configuration
 
 
 def configured_settings() -> Settings:
@@ -103,6 +104,84 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["microsoft_teams"]["can_connect"] is True
     assert with_store["webhook"]["connect_status"] == "external_setup_required"
     assert with_store["webhook"]["can_connect"] is True
+    assert with_store["cloudflare_r2"]["connect_status"] == "external_setup_required"
+    assert with_store["cloudflare_r2"]["can_connect"] is True
+    assert with_store["aws_s3"]["connect_status"] == "external_setup_required"
+    assert with_store["aws_s3"]["can_connect"] is True
+
+
+def test_operational_email_requires_platform_sender_and_resend_key() -> None:
+    unavailable = {
+        item["key"]: item
+        for item in provider_catalog(Settings(), admin_access=True)
+    }
+    assert unavailable["email"]["connect_status"] == "needs_configuration"
+    assert unavailable["email"]["can_connect"] is False
+
+    available = {
+        item["key"]: item
+        for item in provider_catalog(
+            Settings(
+                resend_api_key=SecretStr("re_test_ops"),
+                integration_email_from=(
+                    "TerraSatch Operations <operations@terrasatch.com>"
+                ),
+            ),
+            admin_access=True,
+        )
+    }
+    assert available["email"]["connect_status"] == "available"
+    assert available["email"]["runtime_ready"] is True
+    assert available["email"]["can_connect"] is True
+
+
+def test_production_operational_email_requires_exact_terrasatch_sender_domain() -> None:
+    valid = Settings(
+        environment="production",
+        resend_api_key=SecretStr("re_test_ops"),
+        integration_email_from=(
+            "TerraSatch Operations <operations@terrasatch.com>"
+        ),
+    )
+    assert valid.integration_email_is_configured is True
+
+    lookalike = Settings(
+        environment="production",
+        resend_api_key=SecretStr("re_test_ops"),
+        integration_email_from=(
+            "TerraSatch Operations <operations@terrasatch.com.invalid>"
+        ),
+    )
+    assert lookalike.integration_email_is_configured is False
+
+
+def test_operational_email_configuration_is_allowlisted_and_normalized() -> None:
+    configuration: dict[str, object] = {
+        "recipients": ["OPS@Example.com", "lead@example.com"],
+        "subject": "  Field   operations update  ",
+    }
+    _validate_configuration("email", configuration)
+    assert configuration == {
+        "recipients": ["ops@example.com", "lead@example.com"],
+        "subject": "Field operations update",
+    }
+
+    with pytest.raises(InvalidConfiguration, match="duplicates"):
+        _validate_configuration(
+            "email",
+            {
+                "recipients": ["ops@example.com", "OPS@example.com"],
+                "subject": "Field update",
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="single-line"):
+        _validate_configuration(
+            "email",
+            {
+                "recipients": ["ops@example.com"],
+                "subject": "Field update\nBcc: outsider@example.com",
+            },
+        )
 
 
 def test_provider_config_bundle_replaces_per_provider_env_sprawl() -> None:
@@ -146,6 +225,21 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["webhook"]["capability_details"]
     }
     assert webhook_labels["notification.send"] == "Send notifications"
+    email_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["email"]["capability_details"]
+    }
+    assert email_labels["notification.send"] == "Send notifications"
+    r2_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["cloudflare_r2"]["capability_details"]
+    }
+    assert r2_labels["document.create"] == "Create reports and files"
+    s3_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["aws_s3"]["capability_details"]
+    }
+    assert s3_labels["document.create"] == "Create reports and files"
 
 
 def test_provider_catalog_never_offers_connect_without_secret_store() -> None:

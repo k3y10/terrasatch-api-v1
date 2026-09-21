@@ -111,6 +111,24 @@ TerraSatch accepts current Microsoft callback hosts under `*.logic.azure.com` an
 payload through the provider-neutral `notification.send` capability. The existing human approval,
 audience grant, `agent:satchy` grant, and durable idempotency boundary all remain in force.
 
+## Operational email
+
+Operational email is a TerraSatch-managed `notification.send` destination backed by the existing
+server-side Resend transport. An administrator creates a team- or organization-scoped connection
+with one to ten fixed recipient addresses and a fixed subject. Satchy supplies only the approved
+message body at execution time; it cannot choose new recipients, change the sender, or inject a new
+subject.
+
+The provider is connectable only when the API/worker has a Resend API key and a verified TerraSatch
+sender. `TERRASATCH_INTEGRATION_EMAIL_FROM` is preferred for operational mail; when omitted, the
+existing `TERRASATCH_BILLING_FROM` sender is used as a compatibility fallback. Reply-to follows the
+same operational-first, billing-fallback pattern. No Resend API key is stored per organization.
+
+Each send uses the durable TerraSatch delivery request ID plus the connection ID as Resend's
+`Idempotency-Key`. Resend documents idempotency keys for `POST /emails` with a maximum length of
+256 characters and a 24-hour deduplication window. TerraSatch stores only the returned provider
+message ID and recipient count in delivery metadata, not recipient addresses.
+
 ## Generic HTTPS webhooks
 
 Organization and team administrators can connect an HTTPS webhook as a provider-neutral
@@ -123,6 +141,40 @@ A generic webhook receives a compact JSON envelope with `type`, `version`, `requ
 connection is configured with an optional `signing_secret`, TerraSatch adds
 `X-TerraSatch-Timestamp` and an HMAC-SHA256 `X-TerraSatch-Signature` over
 `<timestamp>.<raw-body>`. Receivers should verify the signature and reject stale timestamps.
+
+## Cloudflare R2
+
+Cloudflare R2 uses its S3-compatible API through the existing provider-neutral `document.create`
+capability. Team or organization administrators configure the public R2 S3 endpoint, bucket, and an
+optional object prefix. The R2 access key ID and secret access key are submitted once through the
+protected credential endpoint and stored only in the encrypted credential record.
+
+TerraSatch signs R2 requests with AWS Signature Version 4 using R2's required `auto` region. Connection
+setup performs a signed `HeadBucket` probe, and approved exports use a signed `PutObject` request.
+The current adapter accepts only Cloudflare's `*.r2.cloudflarestorage.com` S3 endpoints, keeps
+redirects disabled, limits exports to the same approved text/JSON/CSV/Markdown MIME types and 5 MB
+boundary used by the document runtime, and never returns R2 credentials to the browser.
+
+Cloudflare recommends creating credentials with Object Read & Write access and scoping them to the
+specific bucket TerraSatch should use. R2 jurisdiction-specific endpoints are supported because they
+remain under the same Cloudflare R2 S3 hostname suffix.
+
+## Amazon S3
+
+Amazon S3 uses the same provider-neutral `document.create` capability as Drive, OneDrive, and R2.
+Team or organization administrators configure a standard AWS Region, bucket, and optional object
+prefix. Access key ID and secret access key are stored only in encrypted integration credentials;
+temporary credentials may also include an encrypted session token.
+
+TerraSatch uses AWS Signature Version 4 against the standard regional virtual-hosted S3 endpoint
+`https://<bucket>.s3.<region>.amazonaws.com`. Connection setup performs `HeadBucket`; approved
+exports use `PutObject`. The initial adapter intentionally supports general-purpose regional buckets
+only, not S3 Express directory buckets, access-point ARNs, or customer-defined endpoints. Bucket names
+are limited to the DNS-safe subset needed for virtual-hosted HTTPS requests.
+
+The adapter keeps the same approved text/JSON/CSV/Markdown MIME types and 5 MB boundary as the
+document runtime. For long-lived credentials, use a dedicated least-privilege IAM principal scoped to
+the intended bucket/prefix. Temporary STS-style credentials are supported through `session_token`.
 
 ## Snowflake
 
@@ -180,8 +232,8 @@ instead of being exposed as connectable.
 Connected or TerraSatch-managed providers currently expose these server-side capabilities while
 keeping customer credentials out of browser state:
 
-- `notification.send`: Slack, Microsoft Teams Workflows, and generic signed HTTPS webhooks.
-- `document.create`: Google Drive and Microsoft OneDrive.
+- `notification.send`: Slack, Microsoft Teams Workflows, operational email, and generic signed HTTPS webhooks.
+- `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
 - `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.

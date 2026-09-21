@@ -14,6 +14,7 @@ import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
@@ -23,6 +24,8 @@ from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
 _SLACK_WEBHOOK_HOST = "hooks.slack.com"
 _TEAMS_WEBHOOK_HOST_SUFFIXES = (".logic.azure.com", ".api.powerplatform.com")
+_R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
+_S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _ALLOWED_DRIVE_MIME_TYPES = {
     "application/json",
@@ -178,6 +181,444 @@ def validate_teams_workflow_url(value: str) -> str:
     return normalized
 
 
+def validate_r2_endpoint_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration("Cloudflare R2 endpoint has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not hostname.endswith(_R2_ENDPOINT_SUFFIX)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            "Cloudflare R2 endpoint must be the HTTPS S3 API account endpoint"
+        )
+    return f"https://{hostname}"
+
+
+def validate_s3_bucket_name(value: str) -> str:
+    normalized = value.strip()
+    if not _S3_BUCKET_NAME.fullmatch(normalized):
+        raise InvalidConfiguration(
+            "Object-storage bucket must be 3-63 lowercase letters, numbers, or hyphens"
+        )
+    return normalized
+
+
+def validate_aws_region(value: str) -> str:
+    normalized = value.strip().casefold()
+    if (
+        len(normalized) > 32
+        or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+){2,3}", normalized)
+        or normalized.startswith(("cn-", "us-iso-", "us-isob-"))
+    ):
+        raise InvalidConfiguration(
+            "Amazon S3 region must be a supported standard AWS region code"
+        )
+    return normalized
+
+
+def _aws4_sign(key: bytes, value: str) -> bytes:
+    return hmac.new(key, value.encode(), hashlib.sha256).digest()
+
+
+def _r2_authorization_headers(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    host: str,
+    canonical_uri: str,
+    body: bytes,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    access_key_id = credentials.get("access_key_id")
+    secret_access_key = credentials.get("secret_access_key")
+    if not isinstance(access_key_id, str) or not access_key_id:
+        raise ProviderUnavailable("Cloudflare R2 access key is unavailable")
+    if not isinstance(secret_access_key, str) or not secret_access_key:
+        raise ProviderUnavailable("Cloudflare R2 secret access key is unavailable")
+
+    instant = now or datetime.now(UTC)
+    amz_date = instant.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = instant.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    canonical_headers = (
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join(
+        [
+            method,
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/auto/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
+    date_key = _aws4_sign(f"AWS4{secret_access_key}".encode(), date_stamp)
+    region_key = _aws4_sign(date_key, "auto")
+    service_key = _aws4_sign(region_key, "s3")
+    signing_key = _aws4_sign(service_key, "aws4_request")
+    signature = hmac.new(
+        signing_key,
+        string_to_sign.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "Authorization": (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amz_date,
+    }
+
+
+def _aws_s3_authorization_headers(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    host: str,
+    canonical_uri: str,
+    region: str,
+    body: bytes,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    access_key_id = credentials.get("access_key_id")
+    secret_access_key = credentials.get("secret_access_key")
+    session_token = credentials.get("session_token")
+    if not isinstance(access_key_id, str) or not access_key_id:
+        raise ProviderUnavailable("Amazon S3 access key is unavailable")
+    if not isinstance(secret_access_key, str) or not secret_access_key:
+        raise ProviderUnavailable("Amazon S3 secret access key is unavailable")
+    if session_token is not None and (
+        not isinstance(session_token, str) or not session_token
+    ):
+        raise InvalidConfiguration("Stored Amazon S3 session token is invalid")
+
+    safe_region = validate_aws_region(region)
+    instant = now or datetime.now(UTC)
+    amz_date = instant.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = instant.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    canonical_header_lines = [
+        f"host:{host}",
+        f"x-amz-content-sha256:{payload_hash}",
+        f"x-amz-date:{amz_date}",
+    ]
+    signed_header_names = ["host", "x-amz-content-sha256", "x-amz-date"]
+    if isinstance(session_token, str):
+        canonical_header_lines.append(f"x-amz-security-token:{session_token}")
+        signed_header_names.append("x-amz-security-token")
+
+    canonical_headers = "\n".join(canonical_header_lines) + "\n"
+    signed_headers = ";".join(signed_header_names)
+    canonical_request = "\n".join(
+        [
+            method,
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/{safe_region}/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
+    date_key = _aws4_sign(f"AWS4{secret_access_key}".encode(), date_stamp)
+    region_key = _aws4_sign(date_key, safe_region)
+    service_key = _aws4_sign(region_key, "s3")
+    signing_key = _aws4_sign(service_key, "aws4_request")
+    signature = hmac.new(
+        signing_key,
+        string_to_sign.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    headers = {
+        "Authorization": (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amz_date,
+    }
+    if isinstance(session_token, str):
+        headers["x-amz-security-token"] = session_token
+    return headers
+
+
+async def _aws_s3_request(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    region: str,
+    bucket: str,
+    key: str | None = None,
+    body: bytes = b"",
+    content_type: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.Response:
+    safe_region = validate_aws_region(region)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    host = f"{safe_bucket}.s3.{safe_region}.amazonaws.com"
+    canonical_uri = "/"
+    if key is not None:
+        canonical_uri = f"/{quote(key, safe='/-_.~')}"
+    headers = _aws_s3_authorization_headers(
+        credentials,
+        method=method,
+        host=host,
+        canonical_uri=canonical_uri,
+        region=safe_region,
+        body=body,
+    )
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    return await _request(
+        transport,
+        method,
+        f"https://{host}{canonical_uri}",
+        headers=headers,
+        content=body,
+    )
+
+
+async def probe_aws_s3_bucket(
+    credentials: dict[str, object],
+    *,
+    region: str,
+    bucket: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _aws_s3_request(
+        credentials,
+        method="HEAD",
+        region=region,
+        bucket=bucket,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Amazon S3 bucket probe failed with HTTP {response.status_code}"
+        )
+    safe_region = validate_aws_region(region)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    return ProviderOperationResult(
+        external_id=safe_bucket,
+        metadata={
+            "bucket": safe_bucket,
+            "region": safe_region,
+            "endpoint_host": f"{safe_bucket}.s3.{safe_region}.amazonaws.com",
+        },
+    )
+
+
+async def put_aws_s3_object(
+    credentials: dict[str, object],
+    *,
+    region: str,
+    bucket: str,
+    name: str,
+    content: str,
+    mime_type: str,
+    prefix: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    if mime_type not in _ALLOWED_DRIVE_MIME_TYPES:
+        raise InvalidConfiguration("Amazon S3 export MIME type is not allowed")
+    media = content.encode()
+    if len(media) > 5_000_000:
+        raise InvalidConfiguration("Amazon S3 export is limited to 5 MB")
+
+    clean_name = "/".join(
+        segment.strip()
+        for segment in name.replace("\\", "/").split("/")
+        if segment.strip()
+    )
+    if (
+        not clean_name
+        or len(clean_name) > 1024
+        or ".." in clean_name.split("/")
+    ):
+        raise InvalidConfiguration("Amazon S3 object name is invalid")
+    clean_prefix = prefix.strip("/")
+    key = f"{clean_prefix}/{clean_name}" if clean_prefix else clean_name
+
+    response = await _aws_s3_request(
+        credentials,
+        method="PUT",
+        region=region,
+        bucket=bucket,
+        key=key,
+        body=media,
+        content_type=mime_type,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Amazon S3 upload failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id=key,
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "region": validate_aws_region(region),
+            "key": key,
+            "etag": response.headers.get("etag"),
+        },
+    )
+
+
+async def _r2_request(
+    credentials: dict[str, object],
+    *,
+    method: str,
+    endpoint_url: str,
+    bucket: str,
+    key: str | None = None,
+    body: bytes = b"",
+    content_type: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.Response:
+    endpoint = validate_r2_endpoint_url(endpoint_url)
+    safe_bucket = validate_s3_bucket_name(bucket)
+    host = urlsplit(endpoint).hostname
+    assert host is not None
+    canonical_uri = f"/{quote(safe_bucket, safe='-_.~')}"
+    if key is not None:
+        canonical_uri += f"/{quote(key, safe='/-_.~')}"
+    headers = _r2_authorization_headers(
+        credentials,
+        method=method,
+        host=host,
+        canonical_uri=canonical_uri,
+        body=body,
+    )
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    return await _request(
+        transport,
+        method,
+        f"{endpoint}{canonical_uri}",
+        headers=headers,
+        content=body,
+    )
+
+
+async def probe_cloudflare_r2_bucket(
+    credentials: dict[str, object],
+    *,
+    endpoint_url: str,
+    bucket: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    response = await _r2_request(
+        credentials,
+        method="HEAD",
+        endpoint_url=endpoint_url,
+        bucket=bucket,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Cloudflare R2 bucket probe failed with HTTP {response.status_code}"
+        )
+    endpoint = validate_r2_endpoint_url(endpoint_url)
+    return ProviderOperationResult(
+        external_id=validate_s3_bucket_name(bucket),
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "endpoint_host": urlsplit(endpoint).hostname,
+        },
+    )
+
+
+async def put_cloudflare_r2_object(
+    credentials: dict[str, object],
+    *,
+    endpoint_url: str,
+    bucket: str,
+    name: str,
+    content: str,
+    mime_type: str,
+    prefix: str = "",
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    if mime_type not in _ALLOWED_DRIVE_MIME_TYPES:
+        raise InvalidConfiguration("R2 export MIME type is not allowed")
+    media = content.encode()
+    if len(media) > 5_000_000:
+        raise InvalidConfiguration("R2 export is limited to 5 MB")
+
+    clean_name = "/".join(
+        segment.strip()
+        for segment in name.replace("\\", "/").split("/")
+        if segment.strip()
+    )
+    if (
+        not clean_name
+        or len(clean_name) > 1024
+        or ".." in clean_name.split("/")
+    ):
+        raise InvalidConfiguration("R2 object name is invalid")
+    clean_prefix = prefix.strip("/")
+    key = f"{clean_prefix}/{clean_name}" if clean_prefix else clean_name
+
+    response = await _r2_request(
+        credentials,
+        method="PUT",
+        endpoint_url=endpoint_url,
+        bucket=bucket,
+        key=key,
+        body=media,
+        content_type=mime_type,
+        transport=transport,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Cloudflare R2 upload failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id=key,
+        metadata={
+            "bucket": validate_s3_bucket_name(bucket),
+            "key": key,
+            "etag": response.headers.get("etag"),
+        },
+    )
+
+
 async def _request(
     transport: httpx.AsyncBaseTransport | None,
     method: str,
@@ -239,6 +680,81 @@ async def send_slack_message(
     return ProviderOperationResult(
         external_id=str(incoming.get("channel_id") or "") or None,
         metadata={key: value for key, value in metadata.items() if value},
+    )
+
+
+async def send_resend_notification(
+    *,
+    api_key: str,
+    sender: str,
+    recipients: list[str],
+    subject: str,
+    text: str,
+    request_id: UUID,
+    connection_id: UUID,
+    reply_to: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    normalized_text = text.strip()
+    if not normalized_text:
+        raise InvalidConfiguration("Operational email message cannot be empty")
+    if len(normalized_text) > 10_000:
+        raise InvalidConfiguration("Operational email message is limited to 10000 characters")
+    if not api_key.strip():
+        raise ProviderUnavailable("Operational Resend API key is unavailable")
+    if not sender.strip() or "\n" in sender or "\r" in sender:
+        raise InvalidConfiguration("Operational email sender is invalid")
+    if not recipients or len(recipients) > 10:
+        raise InvalidConfiguration("Operational email requires 1-10 recipients")
+    if (
+        not subject.strip()
+        or len(subject.strip()) > 160
+        or "\n" in subject
+        or "\r" in subject
+    ):
+        raise InvalidConfiguration("Operational email subject is invalid")
+
+    payload: dict[str, object] = {
+        "from": sender.strip(),
+        "to": recipients,
+        "subject": subject.strip(),
+        "text": normalized_text,
+    }
+    if reply_to:
+        if "\n" in reply_to or "\r" in reply_to:
+            raise InvalidConfiguration("Operational email reply-to is invalid")
+        payload["reply_to"] = reply_to.strip()
+
+    response = await _request(
+        transport,
+        "POST",
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": (
+                f"terrasatch-email/{connection_id}/{request_id}"
+            )[:256],
+        },
+        json=payload,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Operational email delivery failed with HTTP {response.status_code}"
+        )
+    try:
+        data = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Operational email provider returned an invalid response"
+        ) from error
+    message_id = str(data.get("id") or "").strip() if isinstance(data, dict) else ""
+    return ProviderOperationResult(
+        external_id=message_id[:255] or None,
+        metadata={
+            "provider": "resend",
+            "recipient_count": len(recipients),
+        },
     )
 
 
