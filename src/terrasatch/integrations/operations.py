@@ -683,6 +683,81 @@ async def send_slack_message(
     )
 
 
+async def send_resend_notification(
+    *,
+    api_key: str,
+    sender: str,
+    recipients: list[str],
+    subject: str,
+    text: str,
+    request_id: UUID,
+    connection_id: UUID,
+    reply_to: str | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    normalized_text = text.strip()
+    if not normalized_text:
+        raise InvalidConfiguration("Operational email message cannot be empty")
+    if len(normalized_text) > 10_000:
+        raise InvalidConfiguration("Operational email message is limited to 10000 characters")
+    if not api_key.strip():
+        raise ProviderUnavailable("Operational Resend API key is unavailable")
+    if not sender.strip() or "\n" in sender or "\r" in sender:
+        raise InvalidConfiguration("Operational email sender is invalid")
+    if not recipients or len(recipients) > 10:
+        raise InvalidConfiguration("Operational email requires 1-10 recipients")
+    if (
+        not subject.strip()
+        or len(subject.strip()) > 160
+        or "\n" in subject
+        or "\r" in subject
+    ):
+        raise InvalidConfiguration("Operational email subject is invalid")
+
+    payload: dict[str, object] = {
+        "from": sender.strip(),
+        "to": recipients,
+        "subject": subject.strip(),
+        "text": normalized_text,
+    }
+    if reply_to:
+        if "\n" in reply_to or "\r" in reply_to:
+            raise InvalidConfiguration("Operational email reply-to is invalid")
+        payload["reply_to"] = reply_to.strip()
+
+    response = await _request(
+        transport,
+        "POST",
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": (
+                f"terrasatch-email/{connection_id}/{request_id}"
+            )[:256],
+        },
+        json=payload,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Operational email delivery failed with HTTP {response.status_code}"
+        )
+    try:
+        data = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Operational email provider returned an invalid response"
+        ) from error
+    message_id = str(data.get("id") or "").strip() if isinstance(data, dict) else ""
+    return ProviderOperationResult(
+        external_id=message_id[:255] or None,
+        metadata={
+            "provider": "resend",
+            "recipient_count": len(recipients),
+        },
+    )
+
+
 async def send_teams_message(
     credentials: dict[str, object],
     *,
