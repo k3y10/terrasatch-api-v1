@@ -1453,3 +1453,136 @@ async def test_ogc_runtime_enforces_collection_and_core_query_allowlists(
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stac_runtime_enforces_collection_and_core_search_allowlists(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="STAC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="STAC runtime org",
+            slug=f"stac-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="STAC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        async def fake_public_destination(value):
+            assert value == "https://stac.example.com/api"
+            return value
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.service.validate_public_stac_destination",
+            fake_public_destination,
+        )
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="stac_api",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="STAC imagery",
+            configuration={
+                "base_url": "https://stac.example.com/api",
+                "collection_ids": ["sentinel-2", "landsat.c2"],
+                "max_items": 100,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_id == "stac.example.com"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("public STAC API must not load customer credentials")
+
+        async def fake_query(**kwargs):
+            assert kwargs == {
+                "base_url": "https://stac.example.com/api",
+                "collection_id": "sentinel-2",
+                "limit": 20,
+                "bbox": [-112, 40, -111, 41],
+                "datetime_value": "2026-09-20/2026-09-21",
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "stac.example.com",
+                    "collection_id": "sentinel-2",
+                    "item_count": 0,
+                    "source_item_count": 0,
+                    "truncated": False,
+                    "number_matched": 0,
+                    "number_returned": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_stac_items",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="map.features.query",
+            payload={
+                "collection_id": "sentinel-2",
+                "bbox": [-112, 40, -111, 41],
+                "datetime": "2026-09-20/2026-09-21",
+                "limit": 20,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "stac_api"
+        assert result["metadata"]["collection_id"] == "sentinel-2"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={"collection_id": "private"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="map.features.query",
+                payload={
+                    "collection_id": "sentinel-2",
+                    "query": {"eo:cloud_cover": {"lt": 20}},
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
