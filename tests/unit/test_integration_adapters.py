@@ -11,8 +11,10 @@ from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 from terrasatch.integrations.adapters import (
     ArcGISOAuthAdapter,
+    ConfluenceOAuthAdapter,
     GoogleCalendarOAuthAdapter,
     GoogleDriveOAuthAdapter,
+    JiraOAuthAdapter,
     Microsoft365OAuthAdapter,
     MicrosoftCalendarOAuthAdapter,
     SlackOAuthAdapter,
@@ -827,6 +829,124 @@ async def test_microsoft_calendar_oauth_uses_shared_calendar_scope() -> None:
     result = await adapter.exchange_code(code="ms-calendar-code")
     assert result.account_id == "user-123"
     assert result.credentials["provider"] == "microsoft_calendar"
+
+
+@pytest.mark.asyncio
+async def test_jira_oauth_uses_write_scope_and_discovers_cloud_site() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"jira":{"client_id":"jira-client","client_secret":"jira-secret",'
+            '"redirect_uri":"https://api.example.com/jira/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == JiraOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "jira-access",
+                    "refresh_token": "jira-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access write:jira-work",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url) == JiraOAuthAdapter.resources_endpoint:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                        "name": "Field Ops",
+                        "url": "https://fieldops.atlassian.net",
+                        "scopes": ["write:jira-work"],
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = JiraOAuthAdapter(
+        resolve_provider_app_config(settings, "jira", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="jira-state"))
+    params = parse_qs(authorization.query)
+    assert params["audience"] == ["api.atlassian.com"]
+    assert "write:jira-work" in params["scope"][0]
+    result = await adapter.exchange_code(code="jira-code")
+    assert result.account_label == "Field Ops"
+    assert result.account_id == "1324a887-45db-1bf4-1e99-ef0ff456d421"
+    assert result.credentials["provider"] == "jira"
+
+
+@pytest.mark.asyncio
+async def test_confluence_oauth_uses_page_write_scope() -> None:
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
+        integration_provider_config_json=SecretStr(
+            '{"confluence":{"client_id":"conf-client","client_secret":"conf-secret",'
+            '"redirect_uri":"https://api.example.com/confluence/callback"}}'
+        ),
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == ConfluenceOAuthAdapter.token_endpoint:
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "conf-access",
+                    "refresh_token": "conf-refresh",
+                    "expires_in": 3600,
+                    "scope": "offline_access write:page:confluence",
+                    "token_type": "Bearer",
+                },
+            )
+        if str(request.url) == ConfluenceOAuthAdapter.resources_endpoint:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+                        "name": "Field Ops",
+                        "url": "https://fieldops.atlassian.net",
+                        "scopes": ["write:page:confluence"],
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request {request.method} {request.url}")
+
+    adapter = ConfluenceOAuthAdapter(
+        resolve_provider_app_config(settings, "confluence", required=True),
+        transport=httpx.MockTransport(responder),
+    )
+    authorization = urlparse(adapter.authorization_url(state="conf-state"))
+    params = parse_qs(authorization.query)
+    assert "write:page:confluence" in params["scope"][0]
+    result = await adapter.exchange_code(code="conf-code")
+    assert result.account_id == "1324a887-45db-1bf4-1e99-ef0ff456d421"
+    assert result.credentials["provider"] == "confluence"
+
+
+def test_atlassian_configuration_fixes_project_and_space_targets() -> None:
+    jira: dict[str, object] = {
+        "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+        "project_key": "ops",
+        "issue_type": " Task ",
+    }
+    _validate_configuration("jira", jira)
+    assert jira["project_key"] == "OPS"
+    assert jira["issue_type"] == "Task"
+
+    confluence: dict[str, object] = {
+        "cloud_id": "1324a887-45db-1bf4-1e99-ef0ff456d421",
+        "space_id": "123456",
+        "parent_page_id": "654321",
+    }
+    _validate_configuration("confluence", confluence)
+    assert confluence["space_id"] == "123456"
+    assert confluence["parent_page_id"] == "654321"
 
 
 def test_mapbox_managed_service_requires_fixed_style_allowlist() -> None:
