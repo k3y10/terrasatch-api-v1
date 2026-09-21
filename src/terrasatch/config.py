@@ -5,7 +5,6 @@ from __future__ import annotations
 from base64 import urlsafe_b64decode
 from binascii import Error as BinasciiError
 from email.utils import parseaddr
-from email.utils import parseaddr
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
