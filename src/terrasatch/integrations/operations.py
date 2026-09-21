@@ -664,6 +664,72 @@ async def put_cloudflare_r2_object(
     )
 
 
+async def query_geojson_features(
+    *,
+    endpoint_url: str,
+    max_features: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if not isinstance(max_features, int) or isinstance(max_features, bool):
+        raise InvalidConfiguration("GeoJSON max_features must be an integer")
+    if not 1 <= max_features <= 1000:
+        raise InvalidConfiguration("GeoJSON max_features must be between 1 and 1000")
+
+    endpoint = validate_geojson_url(endpoint_url)
+    if transport is None:
+        await validate_public_geojson_destination(endpoint)
+
+    response = await _request(
+        transport,
+        "GET",
+        endpoint,
+        headers={"Accept": "application/geo+json, application/json"},
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"GeoJSON endpoint query failed with HTTP {response.status_code}"
+        )
+    if len(response.content) > 5_000_000:
+        raise ProviderUnavailable("GeoJSON endpoint response exceeds the 5 MB limit")
+
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("GeoJSON endpoint returned invalid JSON") from error
+    if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
+        raise ProviderUnavailable(
+            "GeoJSON endpoint must return a FeatureCollection"
+        )
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
+        raise ProviderUnavailable("GeoJSON FeatureCollection features must be a list")
+
+    features: list[dict[str, object]] = []
+    for feature in raw_features[:max_features]:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            raise ProviderUnavailable("GeoJSON endpoint returned an invalid feature")
+        features.append(feature)
+
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    bbox = payload.get("bbox")
+    if isinstance(bbox, list):
+        data["bbox"] = bbox
+
+    hostname = urlsplit(endpoint).hostname
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": hostname,
+            "feature_count": len(features),
+            "source_feature_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
+        },
+    )
+
+
 async def _request(
     transport: httpx.AsyncBaseTransport | None,
     method: str,
