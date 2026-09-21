@@ -191,6 +191,7 @@ class IntegrationQueryRequest(BaseModel):
         "data.query",
         "weather.forecast.read",
         "weather.alerts.read",
+        "wildfire.detections.read",
         "avalanche.forecast.read",
     ]
     connection_id: UUID | None = None
