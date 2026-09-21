@@ -43,6 +43,7 @@ from .operations import (
     validate_s3_bucket_name,
     validate_stac_api_base_url,
     validate_stac_collection_id,
+    validate_uac_region,
 )
 
 _SENSITIVE_KEY_PARTS = (
@@ -73,6 +74,9 @@ _ALLOWED_CONFIGURATION_KEYS: dict[str, set[str]] = {
     "ogc_api_features": {"base_url", "collection_ids", "max_features"},
     "stac_api": {"base_url", "collection_ids", "max_items"},
     "nws_forecast": {"max_periods"},
+    "nws_alerts": {"areas", "zones", "allow_point_queries", "max_alerts"},
+    "nasa_firms": {"bounds", "sources", "max_days", "max_detections"},
+    "uac_forecast": {"regions"},
     "snowflake": {"account_host", "warehouse", "database", "schema", "role"},
     "esri_arcgis": {"feature_layer_urls"},
     "arcgis_enterprise_public": {"feature_layer_urls"},
@@ -347,6 +351,140 @@ def _validate_configuration(provider_key: str, configuration: dict[str, object])
             )
         configuration["max_periods"] = max_periods
 
+    if provider_key == "nws_alerts":
+        areas = configuration.get("areas", [])
+        zones = configuration.get("zones", [])
+        allow_point_queries = configuration.get("allow_point_queries", False)
+        max_alerts = configuration.get("max_alerts", 50)
+        if (
+            not isinstance(areas, list)
+            or len(areas) > 25
+            or not all(isinstance(item, str) for item in areas)
+        ):
+            raise InvalidConfiguration("NWS alert areas must be a list of up to 25 codes")
+        normalized_areas: list[str] = []
+        for area in areas:
+            normalized = area.strip().upper()
+            if not re.fullmatch(r"[A-Z]{2}", normalized):
+                raise InvalidConfiguration("NWS alert area code is invalid")
+            normalized_areas.append(normalized)
+        if len(set(normalized_areas)) != len(normalized_areas):
+            raise InvalidConfiguration("NWS alert areas cannot contain duplicates")
+        if (
+            not isinstance(zones, list)
+            or len(zones) > 50
+            or not all(isinstance(item, str) for item in zones)
+        ):
+            raise InvalidConfiguration("NWS alert zones must be a list of up to 50 codes")
+        normalized_zones: list[str] = []
+        for zone in zones:
+            normalized = zone.strip().upper()
+            if not re.fullmatch(r"[A-Z]{3}[0-9]{3}", normalized):
+                raise InvalidConfiguration("NWS alert zone code is invalid")
+            normalized_zones.append(normalized)
+        if len(set(normalized_zones)) != len(normalized_zones):
+            raise InvalidConfiguration("NWS alert zones cannot contain duplicates")
+        if not isinstance(allow_point_queries, bool):
+            raise InvalidConfiguration("NWS allow_point_queries must be boolean")
+        if not normalized_areas and not normalized_zones and not allow_point_queries:
+            raise InvalidConfiguration(
+                "NWS alerts require an approved area, zone, or point queries"
+            )
+        if (
+            not isinstance(max_alerts, int)
+            or isinstance(max_alerts, bool)
+            or not 1 <= max_alerts <= 100
+        ):
+            raise InvalidConfiguration(
+                "NWS max_alerts must be an integer between 1 and 100"
+            )
+        configuration["areas"] = normalized_areas
+        configuration["zones"] = normalized_zones
+        configuration["allow_point_queries"] = allow_point_queries
+        configuration["max_alerts"] = max_alerts
+
+    if provider_key == "nasa_firms":
+        bounds = configuration.get("bounds")
+        sources = configuration.get("sources")
+        max_days = configuration.get("max_days", 1)
+        max_detections = configuration.get("max_detections", 500)
+        if (
+            not isinstance(bounds, list)
+            or len(bounds) != 4
+            or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in bounds
+            )
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS bounds must be [west, south, east, north]"
+            )
+        west, south, east, north = (float(value) for value in bounds)
+        if (
+            not -180 <= west < east <= 180
+            or not -90 <= south < north <= 90
+        ):
+            raise InvalidConfiguration("NASA FIRMS bounds are invalid")
+        configuration["bounds"] = [
+            round(west, 4),
+            round(south, 4),
+            round(east, 4),
+            round(north, 4),
+        ]
+        allowed_sources = {
+            "LANDSAT_NRT",
+            "MODIS_NRT",
+            "VIIRS_NOAA20_NRT",
+            "VIIRS_NOAA21_NRT",
+        }
+        if (
+            not isinstance(sources, list)
+            or not 1 <= len(sources) <= 4
+            or not all(isinstance(item, str) for item in sources)
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS sources must contain between 1 and 4 source IDs"
+            )
+        normalized_sources = [item.strip().upper() for item in sources]
+        if any(item not in allowed_sources for item in normalized_sources):
+            raise InvalidConfiguration("NASA FIRMS source is not supported")
+        if len(set(normalized_sources)) != len(normalized_sources):
+            raise InvalidConfiguration("NASA FIRMS sources cannot contain duplicates")
+        if (
+            not isinstance(max_days, int)
+            or isinstance(max_days, bool)
+            or not 1 <= max_days <= 5
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS max_days must be an integer between 1 and 5"
+            )
+        if (
+            not isinstance(max_detections, int)
+            or isinstance(max_detections, bool)
+            or not 1 <= max_detections <= 2000
+        ):
+            raise InvalidConfiguration(
+                "NASA FIRMS max_detections must be an integer between 1 and 2000"
+            )
+        configuration["sources"] = normalized_sources
+        configuration["max_days"] = max_days
+        configuration["max_detections"] = max_detections
+
+    if provider_key == "uac_forecast":
+        regions = configuration.get("regions")
+        if (
+            not isinstance(regions, list)
+            or not 1 <= len(regions) <= 9
+            or not all(isinstance(item, str) for item in regions)
+        ):
+            raise InvalidConfiguration(
+                "UAC regions must contain between 1 and 9 supported region IDs"
+            )
+        normalized_regions = [validate_uac_region(item) for item in regions]
+        if len(set(normalized_regions)) != len(normalized_regions):
+            raise InvalidConfiguration("UAC regions cannot contain duplicates")
+        configuration["regions"] = normalized_regions
+
     if provider_key == "snowflake":
         account_host = configuration.get("account_host")
         if not isinstance(account_host, str):
@@ -616,7 +754,15 @@ async def create_connection_request(
                             else (
                                 "National Weather Service"
                                 if provider_key == "nws_forecast"
-                                else None
+                                else (
+                                    "National Weather Service Alerts"
+                                    if provider_key == "nws_alerts"
+                                    else (
+                                        "Utah Avalanche Center"
+                                        if provider_key == "uac_forecast"
+                                        else None
+                                    )
+                                )
                             )
                         )
                     )
@@ -640,8 +786,12 @@ async def create_connection_request(
                             if provider_key == "arcgis_enterprise_public"
                             else (
                                 "api.weather.gov"
-                                if provider_key == "nws_forecast"
-                                else None
+                                if provider_key in {"nws_forecast", "nws_alerts"}
+                                else (
+                                    "utahavalanchecenter.org"
+                                    if provider_key == "uac_forecast"
+                                    else None
+                                )
                             )
                         )
                     )

@@ -341,6 +341,80 @@ NWS endpoints remain outside this first provider.
 The provider uses no customer credential record. Normal team/organization audience grants plus the
 `agent:satchy` grant still control forecast access.
 
+## National Weather Service Active Alerts
+
+The NWS Alerts integration is a read-only `weather.alerts.read` provider backed by the official
+`api.weather.gov/alerts/active` service. It exposes current watches, warnings, advisories, and
+other active CAP-derived NWS products; it does not expose the seven-day alert-history endpoint.
+
+A team or organization administrator may approve up to 25 two-letter NWS area codes and up to 50
+six-character UGC county/forecast-zone codes. Administrators may also explicitly allow point
+queries. Runtime callers select exactly one approved area, one approved zone/county code, or a
+latitude/longitude point when point queries are enabled. No arbitrary URL, historical-query switch,
+or free-form NWS filter is accepted.
+
+NWS documents an important geolocation distinction: querying a forecast-zone UGC does not
+necessarily include county-based products, while querying a county UGC can include county alerts
+and associated zone alerts. Point queries are appropriate when the desired question is which active
+alerts affect one precise location.
+
+Responses are requested as GeoJSON from the fixed `api.weather.gov` host using TerraSatch's NWS
+User-Agent, streamed through a 5 MB ceiling, and capped to an administrator-configured 1-100 alerts.
+TerraSatch preserves the original NWS alert feature objects and CAP-derived properties at the
+integration boundary. NWS recommends alert consumers avoid polling the service more often than once
+every 30 seconds; this adapter performs on-demand reads and does not create its own polling loop.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant control alert access.
+
+## NASA FIRMS
+
+NASA FIRMS is a read-only `wildfire.detections.read` provider for near-real-time satellite
+active-fire detections. It uses the official FIRMS Area API and an organization-owned NASA MAP_KEY.
+The MAP_KEY is stored only in TerraSatch's encrypted integration credential record and is never
+stored in connection configuration. NASA currently applies MAP_KEY transaction limits, so keeping
+the key organization-owned also isolates provider quota between TerraSatch customers.
+
+Administrators configure one approved geographic envelope, one or more supported near-real-time
+sources, a maximum 1-5 day range, and a maximum 1-2000 detections returned per request. Runtime
+callers may query the full approved envelope or a smaller bounding box entirely inside it. Runtime
+callers cannot expand beyond the approved envelope, select an unapproved sensor product, request
+historical dates, or provide an arbitrary FIRMS URL.
+
+The initial source allowlist is `VIIRS_NOAA20_NRT`, `VIIRS_NOAA21_NRT`, `LANDSAT_NRT`, and
+`MODIS_NRT`. Suomi-NPP is intentionally not included in the initial allowlist because NASA has
+announced cessation of that data product on November 1, 2026.
+
+FIRMS CSV detections are converted to GeoJSON point features while preserving the returned sensor
+attributes. Responses are streamed through an 8 MB ceiling and then capped to the configured
+detection limit. Network exceptions are re-raised without the underlying request URL so the
+path-embedded MAP_KEY cannot leak through an HTTP exception chain.
+
+A FIRMS detection is a satellite observation, not an authoritative fire incident or fire perimeter.
+TerraSatch keeps FIRMS separate from managed incident/perimeter providers such as WFIGS/NIFC so
+Satchy can reason about source type and provenance instead of treating hotspot detections as
+confirmed incident geometry.
+
+## Utah Avalanche Center
+
+The Utah Avalanche Center integration is a read-only `avalanche.forecast.read` provider backed by
+UAC's documented daily forecast JSON endpoints. It requires no customer API key. TerraSatch sends a
+dedicated User-Agent and uses only the fixed `utahavalanchecenter.org` host.
+
+A team or organization administrator approves one or more documented UAC forecast regions:
+`logan`, `ogden`, `uintas`, `salt-lake`, `provo`, `skyline`, `moab`, `abajos`, and
+`southwest`. Runtime callers may select only one of those approved regions. If a connection has
+exactly one approved region, TerraSatch can select it automatically.
+
+Forecast reads call only `/forecast/<region>/json`, do not accept arbitrary URLs or query
+parameters, keep redirects disabled, and stream the response through a 2 MB hard ceiling.
+TerraSatch preserves the returned UAC JSON as source forecast data instead of rewriting the danger
+rose or forecast fields at the integration boundary. Satchy can interpret that source later while
+the original provider response remains distinguishable from AI interpretation.
+
+The provider uses no customer credential record. Normal team/organization audience grants plus the
+`agent:satchy` grant control forecast access.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -404,6 +478,9 @@ keeping customer credentials out of browser state:
 - `map.features.query`: approved ArcGIS Online and public ArcGIS Enterprise layers, CalTopo Team maps, fixed public GeoJSON feeds, approved OGC API Features collections, and approved STAC collections.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `weather.forecast.read`: official National Weather Service point forecasts through api.weather.gov.
+- `weather.alerts.read`: official active NWS watches, warnings, advisories, and alerts.
+- `wildfire.detections.read`: bounded NASA FIRMS near-real-time satellite fire detections.
+- `avalanche.forecast.read`: official Utah Avalanche Center daily forecasts for approved Utah regions.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
 
 Every provider output requires a caller-supplied UUID request ID. TerraSatch creates a durable pending delivery record before contacting the provider, stores only a content hash/size plus safe response metadata, and returns the existing delivery for a repeated request ID. This avoids silently retrying a communication that may already have reached an external system.

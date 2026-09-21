@@ -2269,3 +2269,397 @@ async def test_confluence_runtime_uses_document_capability_and_fixed_space(
         assert delivery.external_id == "998877"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_uac_forecast_runtime_is_credential_free_and_region_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="UAC runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="UAC runtime org",
+            slug=f"uac-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="UAC Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="uac_forecast",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="UAC forecasts",
+            configuration={"regions": ["salt-lake", "uintas"]},
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_label == "Utah Avalanche Center"
+        assert connection.provider_account_id == "utahavalanchecenter.org"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("UAC forecast must not load customer credentials")
+
+        async def fake_forecast(**kwargs):
+            assert kwargs == {"region": "salt-lake"}
+            return ProviderQueryResult(
+                data={"forecast": {"bottom_line": "Test"}},
+                metadata={
+                    "source_host": "utahavalanchecenter.org",
+                    "region": "salt-lake",
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_uac_forecast",
+            fake_forecast,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="avalanche.forecast.read",
+            payload={"region": "salt-lake"},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "uac_forecast"
+        assert result["metadata"]["region"] == "salt-lake"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="avalanche.forecast.read",
+                payload={"region": "moab"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="avalanche.forecast.read",
+                payload={
+                    "region": "salt-lake",
+                    "url": "https://example.com/forecast",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_nws_alert_runtime_is_credential_free_and_selector_bounded(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="NWS alerts runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="NWS alerts runtime org",
+            slug=f"nws-alerts-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="NWS Alerts Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = await create_connection_request(
+            session,
+            organization_id=organization.id,
+            user_id=admin.id,
+            role=MembershipRole.ADMIN,
+            provider_key="nws_alerts",
+            scope=IntegrationScope.ORGANIZATION,
+            team_id=None,
+            display_name="NWS active alerts",
+            configuration={
+                "areas": ["UT"],
+                "zones": ["UTC035"],
+                "allow_point_queries": True,
+                "max_alerts": 20,
+            },
+        )
+        await session.commit()
+
+        assert connection.status == IntegrationStatus.CONNECTED.value
+        assert connection.provider_account_label == "National Weather Service Alerts"
+        assert connection.provider_account_id == "api.weather.gov"
+
+        async def unexpected_credentials(*args, **kwargs):
+            raise AssertionError("NWS alerts must not load customer credentials")
+
+        async def fake_alerts(**kwargs):
+            assert kwargs == {
+                "area": "UT",
+                "zone": None,
+                "latitude": None,
+                "longitude": None,
+                "max_alerts": 5,
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "api.weather.gov",
+                    "selector_type": "area",
+                    "selector_value": "UT",
+                    "alert_count": 0,
+                    "source_alert_count": 0,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            unexpected_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_nws_alerts",
+            fake_alerts,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="weather.alerts.read",
+            payload={"area": "ut", "limit": 5},
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nws_alerts"
+        assert result["metadata"]["selector_value"] == "UT"
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "CO"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "UT", "url": "https://example.com/alerts"},
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="exactly one"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="weather.alerts.read",
+                payload={"area": "UT", "zone": "UTC035"},
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_firms_runtime_enforces_approved_bounds_source_and_limits(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="FIRMS runtime account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="FIRMS runtime org",
+            slug=f"firms-runtime-{uuid4().hex[:8]}",
+        )
+        admin = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="FIRMS Admin",
+            enabled=True,
+        )
+        session.add_all([organization, admin])
+        await session.flush()
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="nasa_firms",
+            scope_type="organization",
+            created_by_user_id=admin.id,
+            display_name="NASA FIRMS",
+            status=IntegrationStatus.CONNECTED.value,
+            configuration={
+                "bounds": [-114.0, 37.0, -109.0, 42.0],
+                "sources": ["VIIRS_NOAA21_NRT", "LANDSAT_NRT"],
+                "max_days": 3,
+                "max_detections": 750,
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+        session.add_all(
+            [
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="organization",
+                    subject_id=str(organization.id),
+                    capabilities=["wildfire.detections.read"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+                IntegrationGrant(
+                    organization_id=organization.id,
+                    connection_id=connection.id,
+                    subject_type="agent",
+                    subject_id="satchy",
+                    capabilities=["wildfire.detections.read"],
+                    created_by_user_id=admin.id,
+                    enabled=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+        async def fake_credentials(*args, **kwargs):
+            return {"map_key": "firms-secret-key"}, object()
+
+        async def fake_query(credentials, **kwargs):
+            assert credentials == {"map_key": "firms-secret-key"}
+            assert kwargs == {
+                "bounds": [-113.0, 38.0, -110.0, 41.0],
+                "source": "VIIRS_NOAA21_NRT",
+                "days": 2,
+                "max_detections": 100,
+            }
+            return ProviderQueryResult(
+                data={"type": "FeatureCollection", "features": []},
+                metadata={
+                    "source_host": "firms.modaps.eosdis.nasa.gov",
+                    "source": "VIIRS_NOAA21_NRT",
+                    "bounds": [-113.0, 38.0, -110.0, 41.0],
+                    "day_range": 2,
+                    "detection_count": 0,
+                    "source_detection_count": 0,
+                    "truncated": False,
+                },
+            )
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.active_credentials",
+            fake_credentials,
+        )
+        monkeypatch.setattr(
+            "terrasatch.integrations.runtime.query_firms_detections",
+            fake_query,
+        )
+
+        result = await query(
+            session,
+            Settings(),
+            organization_id=organization.id,
+            user_id=admin.id,
+            capability="wildfire.detections.read",
+            payload={
+                "bounds": [-113, 38, -110, 41],
+                "source": "viirs_noaa21_nrt",
+                "days": 2,
+                "limit": 100,
+            },
+            connection_id=connection.id,
+        )
+        assert result["provider"] == "nasa_firms"
+        assert result["metadata"]["source"] == "VIIRS_NOAA21_NRT"
+
+        with pytest.raises(InvalidConfiguration, match="operating envelope"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "bounds": [-115, 38, -110, 41],
+                    "source": "VIIRS_NOAA21_NRT",
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="not approved"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "source": "MODIS_NRT",
+                },
+                connection_id=connection.id,
+            )
+
+        with pytest.raises(InvalidConfiguration, match="unsupported"):
+            await query(
+                session,
+                Settings(),
+                organization_id=organization.id,
+                user_id=admin.id,
+                capability="wildfire.detections.read",
+                payload={
+                    "source": "VIIRS_NOAA21_NRT",
+                    "url": "https://example.com/fires.csv",
+                },
+                connection_id=connection.id,
+            )
+
+    await engine.dispose()

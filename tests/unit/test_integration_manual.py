@@ -458,3 +458,90 @@ async def test_aws_s3_credentials_are_encrypted_and_connection_metadata_is_safe(
         assert "aws-secret" not in str(connected.configuration)
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_firms_map_key_is_encrypted_and_never_stored_in_configuration(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as database:
+        await database.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii"))
+    )
+
+    async with factory() as session:
+        account = Account(name="FIRMS integration account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="FIRMS integration org",
+            slug=f"firms-integration-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="FIRMS Admin",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+
+        connection = IntegrationConnection(
+            organization_id=organization.id,
+            provider="nasa_firms",
+            scope_type="organization",
+            created_by_user_id=user.id,
+            display_name="NASA FIRMS",
+            status=IntegrationStatus.REQUESTED.value,
+            configuration={
+                "bounds": [-114.0, 37.0, -109.0, 42.0],
+                "sources": ["VIIRS_NOAA21_NRT"],
+                "max_days": 2,
+                "max_detections": 500,
+            },
+            enabled=True,
+        )
+        session.add(connection)
+        await session.flush()
+
+        async def fake_probe(provider, credentials, configuration):
+            assert provider == "nasa_firms"
+            assert credentials == {"map_key": "firms-secret-key"}
+            assert configuration["sources"] == ["VIIRS_NOAA21_NRT"]
+            return "NASA FIRMS", "firms.modaps.eosdis.nasa.gov"
+
+        monkeypatch.setattr(
+            "terrasatch.integrations.manual_service.probe_manual_credentials",
+            fake_probe,
+        )
+
+        connected = await bind_manual_credentials(
+            session,
+            settings,
+            organization_id=organization.id,
+            user_id=user.id,
+            role=MembershipRole.ADMIN,
+            connection_id=connection.id,
+            values={"map_key": "firms-secret-key"},
+        )
+        await session.commit()
+
+        credential = await session.scalar(
+            select(IntegrationCredential).where(
+                IntegrationCredential.connection_id == connection.id
+            )
+        )
+        assert credential is not None
+        assert "firms-secret-key" not in credential.encrypted_payload
+        assert decrypt_payload(settings, credential.encrypted_payload) == {
+            "map_key": "firms-secret-key"
+        }
+        assert "firms-secret-key" not in str(connected.configuration)
+        assert connected.status == IntegrationStatus.CONNECTED.value
+        assert connected.provider_account_label == "NASA FIRMS"
+        assert connected.provider_account_id == "firms.modaps.eosdis.nasa.gov"
+
+    await engine.dispose()
