@@ -18,6 +18,7 @@ from .models import IntegrationConnection, IntegrationCredential, IntegrationSta
 from .operations import (
     query_caltopo_map,
     query_caltopo_team,
+    probe_cloudflare_r2_bucket,
     query_snowflake,
     validate_generic_webhook_url,
     validate_public_webhook_destination,
@@ -27,6 +28,7 @@ from .service import get_connection_for_management
 
 MANUAL_CREDENTIAL_PROVIDERS = {
     "caltopo",
+    "cloudflare_r2",
     "microsoft_teams",
     "snowflake",
     "webhook",
@@ -71,6 +73,22 @@ async def probe_manual_credentials(
                 since=int(datetime.now(UTC).timestamp() * 1000) - 60_000,
             )
         return f"CalTopo Team {team_id}", team_id
+
+    if provider == "cloudflare_r2":
+        endpoint_url = configuration.get("endpoint_url")
+        bucket = configuration.get("bucket")
+        if not isinstance(endpoint_url, str) or not isinstance(bucket, str):
+            raise InvalidConfiguration("Cloudflare R2 configuration is missing")
+        result = await probe_cloudflare_r2_bucket(
+            credentials,
+            endpoint_url=endpoint_url,
+            bucket=bucket,
+        )
+        host = result.metadata.get("endpoint_host")
+        return (
+            f"Cloudflare R2 · {bucket}",
+            str(host) if host else bucket,
+        )
 
     if provider == "microsoft_teams":
         raw_url = credentials.get("webhook_url")
@@ -180,6 +198,24 @@ async def bind_manual_credentials(
                 "programmatic_access_token",
                 max_length=8192,
             )
+        }
+    elif connection.provider == "cloudflare_r2":
+        expected = {"access_key_id", "secret_access_key"}
+        if set(values) != expected:
+            raise InvalidConfiguration(
+                "Cloudflare R2 credentials require access_key_id and secret_access_key"
+            )
+        credential_payload = {
+            "access_key_id": _required_string(
+                values,
+                "access_key_id",
+                max_length=255,
+            ),
+            "secret_access_key": _required_string(
+                values,
+                "secret_access_key",
+                max_length=4096,
+            ),
         }
     elif connection.provider == "microsoft_teams":
         expected = {"webhook_url"}
