@@ -22,6 +22,7 @@ from terrasatch.integrations.operations import (
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
+    query_firms_detections,
     query_geojson_features,
     query_nws_alerts,
     query_nws_forecast,
@@ -37,6 +38,7 @@ from terrasatch.integrations.operations import (
     send_webhook_notification,
     validate_aws_region,
     validate_generic_webhook_url,
+    validate_firms_bounds,
     validate_geojson_url,
     validate_nws_forecast_url,
     validate_ogc_api_base_url,
@@ -1325,4 +1327,77 @@ async def test_nws_active_alerts_require_one_valid_selector() -> None:
         await query_nws_alerts(
             area="UTAH",
             max_alerts=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_firms_area_query_converts_csv_to_bounded_geojson() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "firms.modaps.eosdis.nasa.gov"
+        assert "/api/area/csv/test-map-key/VIIRS_NOAA21_NRT/" in request.url.path
+        assert request.url.path.endswith("/2")
+        return httpx.Response(
+            200,
+            text=(
+                "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp\n"
+                "40.6001,-111.7002,2026-09-21,1845,N21,VIIRS,n,12.5\n"
+                "40.7001,-111.8002,2026-09-21,1850,N21,VIIRS,h,15.2\n"
+            ),
+        )
+
+    result = await query_firms_detections(
+        {"map_key": "test-map-key"},
+        bounds=[-114, 37, -109, 42],
+        source="VIIRS_NOAA21_NRT",
+        days=2,
+        max_detections=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.data["type"] == "FeatureCollection"
+    assert len(result.data["features"]) == 1
+    assert result.data["features"][0]["geometry"] == {
+        "type": "Point",
+        "coordinates": [-111.7002, 40.6001],
+    }
+    assert result.data["features"][0]["properties"]["frp"] == "12.5"
+    assert result.metadata == {
+        "source_host": "firms.modaps.eosdis.nasa.gov",
+        "source": "VIIRS_NOAA21_NRT",
+        "bounds": [-114.0, 37.0, -109.0, 42.0],
+        "day_range": 2,
+        "detection_count": 1,
+        "source_detection_count": 2,
+        "truncated": True,
+    }
+
+
+def test_firms_bounds_and_source_are_strictly_validated() -> None:
+    assert validate_firms_bounds([-114, 37, -109, 42]) == (
+        -114.0,
+        37.0,
+        -109.0,
+        42.0,
+    )
+    with pytest.raises(InvalidConfiguration, match="bounds"):
+        validate_firms_bounds([-109, 37, -114, 42])
+
+
+@pytest.mark.asyncio
+async def test_firms_rejects_unsupported_source_and_bad_key() -> None:
+    with pytest.raises(InvalidConfiguration, match="source"):
+        await query_firms_detections(
+            {"map_key": "test-map-key"},
+            bounds=[-114, 37, -109, 42],
+            source="VIIRS_SNPP_NRT",
+            days=1,
+            max_detections=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="MAP_KEY"):
+        await query_firms_detections(
+            {"map_key": "bad key"},
+            bounds=[-114, 37, -109, 42],
+            source="VIIRS_NOAA21_NRT",
+            days=1,
+            max_detections=10,
         )
