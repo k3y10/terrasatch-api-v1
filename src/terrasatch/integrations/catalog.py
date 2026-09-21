@@ -95,6 +95,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "webhook",
     "cloudflare_r2",
     "aws_s3",
+    "email",
     "snowflake",
     "caltopo",
 }
@@ -164,6 +165,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["notification.send"],
         "description": (
             "Signed outbound notifications to an organization-controlled HTTPS endpoint."
+        ),
+    },
+    "email": {
+        "key": "email",
+        "name": "Email",
+        "category": "communications",
+        "auth": "platform",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["notification.send"],
+        "description": (
+            "Approved operational email to administrator-configured recipients."
         ),
     },
     "cloudflare_r2": {
@@ -323,6 +336,13 @@ def provider_catalog(
             and settings is not None
             and settings.integration_secret_store_is_configured
         )
+        platform_supported = support_status == "supported" and auth_type == "platform"
+        platform_ready = bool(
+            platform_supported
+            and settings is not None
+            and provider_key == "email"
+            and settings.integration_email_is_configured
+        )
 
         if support_status == "managed":
             connect_status = "managed"
@@ -334,6 +354,14 @@ def provider_catalog(
             runtime_ready = False
         elif support_status == "coming_soon":
             connect_status = "coming_soon"
+            setup_status = "planned"
+            runtime_ready = False
+        elif platform_ready:
+            connect_status = "available"
+            setup_status = "available"
+            runtime_ready = True
+        elif platform_supported:
+            connect_status = "needs_configuration"
             setup_status = "planned"
             runtime_ready = False
         elif manual_ready:
