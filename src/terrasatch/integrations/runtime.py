@@ -32,6 +32,7 @@ from .operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_caltopo_team,
+    query_firms_detections,
     query_geojson_features,
     query_nws_alerts,
     query_nws_forecast,
@@ -46,6 +47,7 @@ from .operations import (
     send_teams_message,
     send_webhook_notification,
     validate_arcgis_feature_layer_url,
+    validate_firms_bounds,
     validate_public_arcgis_feature_layer_url,
 )
 from .provider_config import resolve_provider_secret_fields
@@ -825,6 +827,81 @@ async def query(
                 latitude=latitude,
                 longitude=longitude,
                 max_periods=requested_periods,
+            )
+
+        elif (
+            capability == "wildfire.detections.read"
+            and connection.provider == "nasa_firms"
+        ):
+            configuration = dict(connection.configuration or {})
+            approved_bounds = configuration.get("bounds")
+            allowed_sources = configuration.get("sources")
+            max_days = configuration.get("max_days", 1)
+            max_detections = configuration.get("max_detections", 500)
+            if (
+                not isinstance(approved_bounds, list)
+                or not isinstance(allowed_sources, list)
+                or not all(isinstance(item, str) for item in allowed_sources)
+                or not isinstance(max_days, int)
+                or not isinstance(max_detections, int)
+            ):
+                raise InvalidConfiguration("Stored NASA FIRMS configuration is invalid")
+
+            allowed_keys = {"bounds", "source", "days", "limit"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "NASA FIRMS received unsupported query parameters"
+                )
+            approved = validate_firms_bounds(approved_bounds)
+            requested_bounds = payload.get("bounds", list(approved))
+            requested = validate_firms_bounds(requested_bounds)
+            if not (
+                approved[0] <= requested[0]
+                and approved[1] <= requested[1]
+                and requested[2] <= approved[2]
+                and requested[3] <= approved[3]
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS bounds exceed the approved operating envelope"
+                )
+
+            source = payload.get("source")
+            if source is None and len(allowed_sources) == 1:
+                source = allowed_sources[0]
+            if not isinstance(source, str):
+                raise InvalidConfiguration(
+                    "NASA FIRMS requires source when multiple sources are approved"
+                )
+            source = source.strip().upper()
+            if source not in allowed_sources:
+                raise InvalidConfiguration(
+                    "NASA FIRMS source is not approved for this connection"
+                )
+
+            days = payload.get("days", max_days)
+            limit = payload.get("limit", max_detections)
+            if (
+                not isinstance(days, int)
+                or isinstance(days, bool)
+                or not 1 <= days <= max_days
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS days must be between 1 and the configured max_days"
+                )
+            if (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or not 1 <= limit <= max_detections
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS limit must be between 1 and the configured max_detections"
+                )
+            result = await query_firms_detections(
+                credentials,
+                bounds=list(requested),
+                source=source,
+                days=days,
+                max_detections=limit,
             )
 
         elif (
