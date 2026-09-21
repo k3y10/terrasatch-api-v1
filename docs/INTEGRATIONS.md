@@ -141,6 +141,23 @@ Cloudflare recommends creating credentials with Object Read & Write access and s
 specific bucket TerraSatch should use. R2 jurisdiction-specific endpoints are supported because they
 remain under the same Cloudflare R2 S3 hostname suffix.
 
+## Amazon S3
+
+Amazon S3 uses the same provider-neutral `document.create` capability as Drive, OneDrive, and R2.
+Team or organization administrators configure a standard AWS Region, bucket, and optional object
+prefix. Access key ID and secret access key are stored only in encrypted integration credentials;
+temporary credentials may also include an encrypted session token.
+
+TerraSatch uses AWS Signature Version 4 against the standard regional virtual-hosted S3 endpoint
+`https://<bucket>.s3.<region>.amazonaws.com`. Connection setup performs `HeadBucket`; approved
+exports use `PutObject`. The initial adapter intentionally supports general-purpose regional buckets
+only, not S3 Express directory buckets, access-point ARNs, or customer-defined endpoints. Bucket names
+are limited to the DNS-safe subset needed for virtual-hosted HTTPS requests.
+
+The adapter keeps the same approved text/JSON/CSV/Markdown MIME types and 5 MB boundary as the
+document runtime. For long-lived credentials, use a dedicated least-privilege IAM principal scoped to
+the intended bucket/prefix. Temporary STS-style credentials are supported through `session_token`.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -198,7 +215,7 @@ Connected or TerraSatch-managed providers currently expose these server-side cap
 keeping customer credentials out of browser state:
 
 - `notification.send`: Slack, Microsoft Teams Workflows, and generic signed HTTPS webhooks.
-- `document.create`: Google Drive, Microsoft OneDrive, and Cloudflare R2 object storage.
+- `document.create`: Google Drive, Microsoft OneDrive, Cloudflare R2, and Amazon S3.
 - `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
 - `map.style.read`: approved TerraSatch-managed Mapbox styles.
