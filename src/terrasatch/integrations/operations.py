@@ -14,7 +14,7 @@ import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlsplit
 from uuid import UUID
 
