@@ -94,6 +94,7 @@ _SUPPORTED_PROVIDER_KEYS = {
     "microsoft_teams",
     "webhook",
     "cloudflare_r2",
+    "aws_s3",
     "snowflake",
     "caltopo",
 }
@@ -175,6 +176,18 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["document.create"],
         "description": (
             "Create approved reports and files in an organization-controlled R2 bucket."
+        ),
+    },
+    "aws_s3": {
+        "key": "aws_s3",
+        "name": "Amazon S3",
+        "category": "storage",
+        "auth": "service_account",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["document.create"],
+        "description": (
+            "Create approved reports and files in a standard regional Amazon S3 bucket."
         ),
     },
     "snowflake": {
