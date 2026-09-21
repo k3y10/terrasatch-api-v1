@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import re
 import secrets
@@ -12,12 +13,14 @@ import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 import httpx
 
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
 
 _SLACK_WEBHOOK_HOST = "hooks.slack.com"
+_TEAMS_WEBHOOK_HOST_SUFFIXES = (".logic.azure.com", ".api.powerplatform.com")
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
 _ALLOWED_DRIVE_MIME_TYPES = {
     "application/json",
@@ -61,6 +64,71 @@ def validate_arcgis_feature_layer_url(value: str) -> str:
         raise InvalidConfiguration(
             "ArcGIS feature layer must be an HTTPS ArcGIS Online FeatureServer layer URL"
         )
+    return normalized
+
+
+def _validate_https_webhook_url(
+    value: str,
+    *,
+    label: str,
+    allowed_host_suffixes: tuple[str, ...] | None = None,
+) -> str:
+    normalized = value.strip()
+    parsed = urlsplit(normalized)
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidConfiguration(f"{label} webhook URL has an invalid port") from error
+
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or port not in {None, 443}
+    ):
+        raise InvalidConfiguration(
+            f"{label} webhook must be an HTTPS URL without embedded credentials or fragments"
+        )
+
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise InvalidConfiguration(f"{label} webhook must use a DNS hostname")
+
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+    ):
+        raise InvalidConfiguration(f"{label} webhook destination is not allowed")
+
+    if allowed_host_suffixes is not None and not any(
+        hostname.endswith(suffix) for suffix in allowed_host_suffixes
+    ):
+        raise InvalidConfiguration(f"{label} webhook destination is not allowed")
+
+    return normalized
+
+
+def validate_generic_webhook_url(value: str) -> str:
+    return _validate_https_webhook_url(value, label="Generic")
+
+
+def validate_teams_workflow_url(value: str) -> str:
+    normalized = _validate_https_webhook_url(
+        value,
+        label="Microsoft Teams",
+        allowed_host_suffixes=_TEAMS_WEBHOOK_HOST_SUFFIXES,
+    )
+    parsed = urlsplit(normalized)
+    if "/workflows/" not in parsed.path or "/triggers/" not in parsed.path:
+        raise InvalidConfiguration("Microsoft Teams Workflows webhook path is invalid")
     return normalized
 
 
@@ -125,6 +193,132 @@ async def send_slack_message(
     return ProviderOperationResult(
         external_id=str(incoming.get("channel_id") or "") or None,
         metadata={key: value for key, value in metadata.items() if value},
+    )
+
+
+async def send_teams_message(
+    credentials: dict[str, object],
+    *,
+    text: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    normalized = text.strip()
+    if not normalized:
+        raise InvalidConfiguration("Microsoft Teams message cannot be empty")
+    if len(normalized) > 4000:
+        raise InvalidConfiguration("Microsoft Teams message is limited to 4000 characters")
+
+    raw_url = credentials.get("webhook_url")
+    if not isinstance(raw_url, str) or not raw_url:
+        raise ProviderUnavailable("Microsoft Teams Workflows webhook is unavailable")
+    url = validate_teams_workflow_url(raw_url)
+
+    payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "contentUrl": None,
+                "content": {
+                    "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.2",
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": normalized,
+                            "wrap": True,
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    response = await _request(
+        transport,
+        "POST",
+        url,
+        json=payload,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Microsoft Teams webhook delivery failed with HTTP {response.status_code}"
+        )
+    return ProviderOperationResult(
+        external_id=response.headers.get("x-ms-workflow-run-id"),
+        metadata={
+            "destination_host": urlsplit(url).hostname,
+            "status_code": response.status_code,
+        },
+    )
+
+
+async def send_webhook_notification(
+    credentials: dict[str, object],
+    *,
+    text: str,
+    request_id: UUID,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderOperationResult:
+    normalized = text.strip()
+    if not normalized:
+        raise InvalidConfiguration("Webhook notification cannot be empty")
+    if len(normalized) > 4000:
+        raise InvalidConfiguration("Webhook notification is limited to 4000 characters")
+
+    raw_url = credentials.get("webhook_url")
+    if not isinstance(raw_url, str) or not raw_url:
+        raise ProviderUnavailable("Webhook URL is unavailable")
+    url = validate_generic_webhook_url(raw_url)
+
+    payload = {
+        "type": "terrasatch.notification",
+        "version": "1",
+        "request_id": str(request_id),
+        "text": normalized,
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Idempotency-Key": str(request_id),
+        "X-TerraSatch-Event": "notification.send",
+    }
+    signing_secret = credentials.get("signing_secret")
+    if signing_secret is not None:
+        if not isinstance(signing_secret, str) or not signing_secret:
+            raise InvalidConfiguration("Stored webhook signing secret is invalid")
+        timestamp = str(int(time.time()))
+        signature_payload = timestamp.encode() + b"." + body
+        signature = hmac.new(
+            signing_secret.encode(),
+            signature_payload,
+            hashlib.sha256,
+        ).hexdigest()
+        headers["X-TerraSatch-Timestamp"] = timestamp
+        headers["X-TerraSatch-Signature"] = f"sha256={signature}"
+
+    response = await _request(
+        transport,
+        "POST",
+        url,
+        content=body,
+        headers=headers,
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Webhook delivery failed with HTTP {response.status_code}"
+        )
+    external_id = response.headers.get("x-request-id") or response.headers.get(
+        "x-correlation-id"
+    )
+    return ProviderOperationResult(
+        external_id=external_id,
+        metadata={
+            "destination_host": urlsplit(url).hostname,
+            "status_code": response.status_code,
+            "signed": signing_secret is not None,
+        },
     )
 
 

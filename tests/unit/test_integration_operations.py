@@ -2,6 +2,7 @@
 
 import base64
 import json
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -15,6 +16,10 @@ from terrasatch.integrations.operations import (
     query_snowflake,
     read_mapbox_style,
     send_slack_message,
+    send_teams_message,
+    send_webhook_notification,
+    validate_generic_webhook_url,
+    validate_teams_workflow_url,
 )
 
 
@@ -51,6 +56,79 @@ async def test_slack_webhook_rejects_untrusted_destination() -> None:
             },
             text="Do not send",
         )
+
+
+@pytest.mark.asyncio
+async def test_teams_workflows_webhook_uses_adaptive_card_payload() -> None:
+    url = (
+        "https://prod-01.westus.logic.azure.com/workflows/"
+        "abc/triggers/manual/paths/invoke?api-version=2016-10-01&sig=test"
+    )
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == url
+        payload = json.loads(request.content)
+        assert payload["type"] == "message"
+        card = payload["attachments"][0]["content"]
+        assert card["type"] == "AdaptiveCard"
+        assert card["body"][0]["text"] == "Field update"
+        return httpx.Response(202, headers={"x-ms-workflow-run-id": "run-123"})
+
+    result = await send_teams_message(
+        {"webhook_url": url},
+        text="Field update",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "run-123"
+    assert result.metadata["status_code"] == 202
+
+
+def test_teams_workflows_webhook_rejects_non_microsoft_host() -> None:
+    with pytest.raises(InvalidConfiguration, match="destination"):
+        validate_teams_workflow_url(
+            "https://example.com/workflows/abc/triggers/manual/paths/invoke?sig=test"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generic_webhook_signs_payload_and_sends_idempotency_key() -> None:
+    request_id = uuid4()
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload == {
+            "request_id": str(request_id),
+            "text": "Field update",
+            "type": "terrasatch.notification",
+            "version": "1",
+        }
+        assert request.headers["Idempotency-Key"] == str(request_id)
+        assert request.headers["X-TerraSatch-Event"] == "notification.send"
+        assert request.headers["X-TerraSatch-Signature"].startswith("sha256=")
+        assert request.headers["X-TerraSatch-Timestamp"]
+        return httpx.Response(204, headers={"x-request-id": "receiver-1"})
+
+    result = await send_webhook_notification(
+        {
+            "webhook_url": "https://ops.example.com/terrasatch/events",
+            "signing_secret": "shared-secret",
+        },
+        text="Field update",
+        request_id=request_id,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.external_id == "receiver-1"
+    assert result.metadata["signed"] is True
+
+
+def test_generic_webhook_rejects_local_and_ip_destinations() -> None:
+    for url in (
+        "https://localhost/hook",
+        "https://127.0.0.1/hook",
+        "https://service.internal/hook",
+    ):
+        with pytest.raises(InvalidConfiguration):
+            validate_generic_webhook_url(url)
 
 
 @pytest.mark.asyncio

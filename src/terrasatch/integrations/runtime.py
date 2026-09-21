@@ -29,6 +29,8 @@ from .operations import (
     query_snowflake,
     read_mapbox_style,
     send_slack_message,
+    send_teams_message,
+    send_webhook_notification,
     validate_arcgis_feature_layer_url,
 )
 from .provider_config import resolve_provider_secret_fields
@@ -256,6 +258,14 @@ async def execute(
         )
         if capability == "notification.send" and connection.provider == "slack":
             result = await send_slack_message(credentials, text=text)
+        elif capability == "notification.send" and connection.provider == "microsoft_teams":
+            result = await send_teams_message(credentials, text=text)
+        elif capability == "notification.send" and connection.provider == "webhook":
+            result = await send_webhook_notification(
+                credentials,
+                text=text,
+                request_id=request_id,
+            )
         elif capability == "document.create" and connection.provider == "google_drive":
             folder_id = dict(connection.configuration or {}).get("folder_id")
             if folder_id is not None and not isinstance(folder_id, str):

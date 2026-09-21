@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,10 +15,21 @@ from terrasatch.identity.models import MembershipRole
 
 from .crypto import encrypt_payload
 from .models import IntegrationConnection, IntegrationCredential, IntegrationStatus
-from .operations import query_caltopo_map, query_caltopo_team, query_snowflake
+from .operations import (
+    query_caltopo_map,
+    query_caltopo_team,
+    query_snowflake,
+    validate_generic_webhook_url,
+    validate_teams_workflow_url,
+)
 from .service import get_connection_for_management
 
-MANUAL_CREDENTIAL_PROVIDERS = {"caltopo", "snowflake"}
+MANUAL_CREDENTIAL_PROVIDERS = {
+    "caltopo",
+    "microsoft_teams",
+    "snowflake",
+    "webhook",
+}
 
 
 def _required_string(
@@ -58,6 +70,22 @@ async def probe_manual_credentials(
                 since=int(datetime.now(UTC).timestamp() * 1000) - 60_000,
             )
         return f"CalTopo Team {team_id}", team_id
+
+    if provider == "microsoft_teams":
+        raw_url = credentials.get("webhook_url")
+        if not isinstance(raw_url, str):
+            raise InvalidConfiguration("Microsoft Teams webhook credential is missing")
+        url = validate_teams_workflow_url(raw_url)
+        host = urlsplit(url).hostname
+        return "Microsoft Teams Workflows", host
+
+    if provider == "webhook":
+        raw_url = credentials.get("webhook_url")
+        if not isinstance(raw_url, str):
+            raise InvalidConfiguration("Webhook credential is missing")
+        url = validate_generic_webhook_url(raw_url)
+        host = urlsplit(url).hostname
+        return f"Webhook · {host}", host
 
     if provider == "snowflake":
         host = configuration.get("account_host")
@@ -134,7 +162,7 @@ async def bind_manual_credentials(
                 max_length=4096,
             ),
         }
-    else:
+    elif connection.provider == "snowflake":
         expected = {"programmatic_access_token"}
         if set(values) != expected:
             raise InvalidConfiguration(
@@ -147,6 +175,30 @@ async def bind_manual_credentials(
                 max_length=8192,
             )
         }
+    elif connection.provider == "microsoft_teams":
+        expected = {"webhook_url"}
+        if set(values) != expected:
+            raise InvalidConfiguration(
+                "Microsoft Teams credentials require webhook_url"
+            )
+        credential_payload = {
+            "webhook_url": _required_string(values, "webhook_url", max_length=8192)
+        }
+    else:
+        supplied = set(values)
+        if supplied not in ({"webhook_url"}, {"webhook_url", "signing_secret"}):
+            raise InvalidConfiguration(
+                "Webhook credentials require webhook_url and optional signing_secret"
+            )
+        credential_payload = {
+            "webhook_url": _required_string(values, "webhook_url", max_length=8192)
+        }
+        if "signing_secret" in values:
+            credential_payload["signing_secret"] = _required_string(
+                values,
+                "signing_secret",
+                max_length=4096,
+            )
 
     label, account_id = await probe_manual_credentials(
         connection.provider,

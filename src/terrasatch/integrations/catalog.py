@@ -91,6 +91,8 @@ _SUPPORTED_PROVIDER_KEYS = {
     "slack",
     "esri_arcgis",
     "microsoft_365",
+    "microsoft_teams",
+    "webhook",
     "snowflake",
     "caltopo",
 }
@@ -138,6 +140,28 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["notification.send"],
         "description": (
             "Approved operational notifications to an explicitly selected Slack destination."
+        ),
+    },
+    "microsoft_teams": {
+        "key": "microsoft_teams",
+        "name": "Microsoft Teams",
+        "category": "communications",
+        "auth": "webhook_url",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["notification.send"],
+        "description": "Approved notifications through a Microsoft Teams Workflows webhook.",
+    },
+    "webhook": {
+        "key": "webhook",
+        "name": "Webhook",
+        "category": "automation",
+        "auth": "webhook_url",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["notification.send"],
+        "description": (
+            "Signed outbound notifications to an organization-controlled HTTPS endpoint."
         ),
     },
     "snowflake": {
@@ -264,7 +288,10 @@ def provider_catalog(
                 required_fields={"access_token", "username", "style_ids"},
             )
         )
-        manual_supported = support_status == "supported" and auth_type == "service_account"
+        manual_supported = (
+            support_status == "supported"
+            and auth_type in {"service_account", "webhook_url"}
+        )
         manual_ready = bool(
             manual_supported
             and settings is not None

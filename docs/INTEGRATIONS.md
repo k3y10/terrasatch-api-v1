@@ -21,9 +21,10 @@ refresh tokens, webhook URLs, and account credentials are never stored in this b
 encrypted per connection in `integration_credentials`.
 
 Provider secrets are never returned to the browser or stored in `integration_connections.configuration`.
-OAuth credentials are obtained by the API callback. CalTopo service-account credentials and Snowflake
-PATs are submitted once through the protected credential setup endpoint for providers that do not
-offer the same OAuth experience. All customer secrets are immediately encrypted with Fernet and
+OAuth credentials are obtained by the API callback. CalTopo service-account credentials, Snowflake
+PATs, Microsoft Teams Workflows webhook URLs, and generic webhook secrets are submitted once through
+the protected credential setup endpoint for providers that do not offer the same OAuth experience.
+All customer secrets are immediately encrypted with Fernet and
 stored in `integration_credentials`. The connection table holds only an opaque `credential_ref`
 and safe provider account metadata.
 
@@ -95,6 +96,34 @@ and `Files.ReadWrite`. The first supported capability is `document.create`, impl
 file upload to the connected user's OneDrive. Team and organization OneDrive/SharePoint routing is
 not advertised yet; the initial connection scope is intentionally personal.
 
+## Microsoft Teams
+
+Teams notifications use the current Microsoft **Workflows** webhook model, not the retired Microsoft
+365/Office 365 connector webhook. In Teams, create a workflow from **Workflows** using the
+**When a Teams webhook request is received** trigger (for example, the **Send webhook alerts to a
+channel** template), configure the destination channel/chat, and copy the generated HTTPS callback
+URL into TerraSatch through the protected credential endpoint as `webhook_url`.
+
+The current TerraSatch adapter supports Workflows configured for callback-URL authorization without
+a separate bearer token. The URL is encrypted at rest and never returned after credential submission.
+TerraSatch accepts current Microsoft callback hosts under `*.logic.azure.com` and
+`*.api.powerplatform.com`, including newer scale-unit callback paths, and sends an Adaptive Card
+payload through the provider-neutral `notification.send` capability. The existing human approval,
+audience grant, `agent:satchy` grant, and durable idempotency boundary all remain in force.
+
+## Generic HTTPS webhooks
+
+Organization and team administrators can connect an HTTPS webhook as a provider-neutral
+`notification.send` destination. The destination URL is treated as a credential and encrypted at
+rest; it is never stored in connection configuration. TerraSatch rejects IP-literal, localhost,
+`.local`, and `.internal` destinations and never follows redirects.
+
+A generic webhook receives a compact JSON envelope with `type`, `version`, `request_id`, and
+`text`. TerraSatch also sends `Idempotency-Key` and `X-TerraSatch-Event` headers. If the
+connection is configured with an optional `signing_secret`, TerraSatch adds
+`X-TerraSatch-Timestamp` and an HMAC-SHA256 `X-TerraSatch-Signature` over
+`<timestamp>.<raw-body>`. Receivers should verify the signature and reject stale timestamps.
+
 ## Snowflake
 
 Snowflake is organization-scoped and uses a customer-created Programmatic Access Token (PAT). The
@@ -151,7 +180,7 @@ instead of being exposed as connectable.
 Connected or TerraSatch-managed providers currently expose these server-side capabilities while
 keeping customer credentials out of browser state:
 
-- `notification.send`: Slack, through the OAuth-selected incoming webhook destination.
+- `notification.send`: Slack, Microsoft Teams Workflows, and generic signed HTTPS webhooks.
 - `document.create`: Google Drive and Microsoft OneDrive.
 - `map.features.query`: approved ArcGIS Online layers and approved CalTopo Team maps.
 - `data.query`: one read-only Snowflake SELECT statement through the SQL API.
