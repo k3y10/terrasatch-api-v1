@@ -130,6 +130,9 @@ def test_manual_provider_requires_encrypted_credential_store() -> None:
     assert with_store["nws_alerts"]["connect_status"] == "available"
     assert with_store["nws_alerts"]["runtime_ready"] is True
     assert with_store["nws_alerts"]["can_connect"] is True
+    assert with_store["nasa_firms"]["connect_status"] == "available"
+    assert with_store["nasa_firms"]["runtime_ready"] is True
+    assert with_store["nasa_firms"]["can_connect"] is True
     assert with_store["uac_forecast"]["connect_status"] == "available"
     assert with_store["uac_forecast"]["runtime_ready"] is True
     assert with_store["uac_forecast"]["can_connect"] is True
@@ -397,6 +400,39 @@ def test_nws_alert_configuration_normalizes_and_bounds_selectors() -> None:
         )
 
 
+def test_firms_configuration_bounds_sources_and_limits() -> None:
+    configuration: dict[str, object] = {
+        "bounds": [-114, 37, -109, 42],
+        "sources": ["viirs_noaa21_nrt", "landsat_nrt"],
+        "max_days": 3,
+        "max_detections": 750,
+    }
+    _validate_configuration("nasa_firms", configuration)
+    assert configuration == {
+        "bounds": [-114.0, 37.0, -109.0, 42.0],
+        "sources": ["VIIRS_NOAA21_NRT", "LANDSAT_NRT"],
+        "max_days": 3,
+        "max_detections": 750,
+    }
+
+    with pytest.raises(InvalidConfiguration, match="source"):
+        _validate_configuration(
+            "nasa_firms",
+            {
+                "bounds": [-114, 37, -109, 42],
+                "sources": ["VIIRS_SNPP_NRT"],
+            },
+        )
+    with pytest.raises(InvalidConfiguration, match="bounds"):
+        _validate_configuration(
+            "nasa_firms",
+            {
+                "bounds": [-109, 37, -114, 42],
+                "sources": ["VIIRS_NOAA21_NRT"],
+            },
+        )
+
+
 def test_uac_configuration_normalizes_and_allowlists_regions() -> None:
     configuration: dict[str, object] = {
         "regions": ["Salt-Lake", "uintas", "moab"],
@@ -504,6 +540,11 @@ def test_provider_catalog_labels_runtime_capabilities_for_people() -> None:
         for detail in catalog["nws_alerts"]["capability_details"]
     }
     assert alert_labels["weather.alerts.read"] == "Read active weather alerts"
+    firms_labels = {
+        detail["key"]: detail["label"]
+        for detail in catalog["nasa_firms"]["capability_details"]
+    }
+    assert firms_labels["wildfire.detections.read"] == "Read active fire detections"
     uac_labels = {
         detail["key"]: detail["label"]
         for detail in catalog["uac_forecast"]["capability_details"]
