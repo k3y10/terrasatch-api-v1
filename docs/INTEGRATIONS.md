@@ -371,10 +371,18 @@ discovery, or token-management permissions.
 
 ## Provider access boundaries
 
-Garmin remains marked **partner required** because the Garmin Connect Developer Program requires
-business approval before production API access. onX Backcountry, Gaia GPS, and AllTrails remain
-**coming soon** rather than pretending unsupported public APIs exist. Their catalog entries remain
-visible so customers can see the intended stack without being offered a broken Connect button.
+Garmin remains marked **partner required**, but the intended TerraSatch integration is now
+specifically Garmin inReach Portal Connect rather than the consumer fitness/activity APIs. IPC
+Outbound is designed for professional and enterprise inReach customers and pushes device events to
+an HTTPS web service. TerraSatch has a prepared receive path that can authenticate a tenant-specific
+static header token, validate an optional IMEI allowlist, and feed accepted message/location events
+into the canonical Transmission → Transcript → TerraEngine → OperationalEvent pipeline. The
+catalog remains partner-gated until TerraSatch has the required Garmin program access and a real
+customer tenant is available for acceptance testing.
+
+onX Backcountry, Gaia GPS, and AllTrails remain **coming soon** rather than pretending unsupported
+public APIs exist. Their catalog entries remain visible so customers can see the intended stack
+without being offered a broken Connect button.
 
 ## Lifecycle
 
