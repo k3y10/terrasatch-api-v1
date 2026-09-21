@@ -10,7 +10,7 @@ This checklist tracks the API/backend repository. Field-side hardware discovery 
 | 1. Backend foundation | completed | Python 3.12, FastAPI, structured logging, PostgreSQL, Redis, Docker/Compose, Alembic, worker heartbeat, health checks, request IDs, and release smoke checks. |
 | 2. Multi-tenant core | in progress | Accounts, organizations, sites, teams, users, memberships, tenant-derived bearer auth, hashed API keys, scopes, browser administration, and organization member portal are live. |
 | 3. External application platform | in progress | CORS, service credentials, browser sessions, tenant-scoped REST, authenticated WebSockets, superadmin, and organization portal exist. Application-specific credentials/origins and browser token exchange remain. |
-| 4. Plugin interfaces | in progress | `IntelligenceProvider` protocol and provider-neutral TerraEngine exist. Speech-to-text, generalized input-source, storage, billing, and plugin registry work remain. |
+| 4. Plugin interfaces | in progress | `IntelligenceProvider` protocol, provider-neutral TerraEngine, and generalized Garmin/mobile field-input adapters exist. Speech-to-text, generalized binary-media storage, billing, and plugin registry work remain. |
 | 5. Agent and radio models | in progress | Agent, Channel, Callsign, Transmission, Transcript, OperationalEvent, EdgeDevice, EdgePairing, remote radio policy, and Satchy AI-channel configuration exist. Richer rules/source/profile models remain. |
 | 6. Simulator | completed | Simulator feeds the same canonical ingest → transcript → TerraEngine → event → PostgreSQL → Redis path as REST/Edge ingestion. |
 | 7. Real audio / STT | not started | WAV/microphone ingestion, buffering, VAD, segmentation, and SpeechToTextProvider implementations remain. |
@@ -23,7 +23,7 @@ This checklist tracks the API/backend repository. Field-side hardware discovery 
 | 14. Usage and billing | not started | Plans, entitlements, usage, billing adapters, and subscription enforcement remain. |
 | 15. Security, retention, audit | in progress | API-key hashing, scrypt browser passwords, CSRF, tenant authorization, explicit CORS, secure sessions, TLS, provider-gated TX policy, and onboarding capacity guardrails exist. Request-rate limiting, durable audit, retention, cleanup, and full security review remain. |
 | 16. Deployment | in progress | Oracle deployment, Docker/Compose, Caddy/TLS, release script, revision verification, and public readiness checks exist. Backup/restore, reboot persistence, reserved-IP hardening, and load-tested capacity tuning remain. |
-| 17. Live field path | in progress | Production Edge pairing, heartbeat, hardware sync, text ingestion, transcript creation, and structured TerraEngine event extraction have been validated. Physical RF → demodulated audio → STT → canonical ingest remains. |
+| 17. Live field path | in progress | Production Edge pairing, heartbeat, hardware sync, text ingestion, transcript creation, and structured TerraEngine event extraction have been validated. Garmin inReach IPC Outbound and authenticated mobile observation adapters now target the same canonical ingest path; live Garmin acceptance, mobile media upload/offline sync, and physical RF → demodulated audio → STT remain. |
 
 ## Production validation
 
@@ -54,7 +54,7 @@ This checklist tracks the API/backend repository. Field-side hardware discovery 
 ## Canonical processing path
 
 ```text
-Simulator / reviewed Edge text / future STT
+Simulator / reviewed Edge text / Garmin inReach / TerraSatch Mobile / future STT
   → Transmission
   → Transcript
   → TerraEngine
