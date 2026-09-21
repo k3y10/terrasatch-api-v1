@@ -37,8 +37,8 @@ from terrasatch.brand import (
 )
 from terrasatch.config import Environment, Settings, get_settings
 from terrasatch.edge.api import router as edge_router
-from terrasatch.field_inputs.api import router as field_input_router
 from terrasatch.errors import TerraSatchError
+from terrasatch.field_inputs.api import router as field_input_router
 from terrasatch.landing_v3 import build_landing_page
 from terrasatch.network.status import get_public_network_status
 from terrasatch.observability.health import check_readiness, liveness
