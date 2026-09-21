@@ -60,7 +60,9 @@ connections. The provider exposes `calendar.event.create`.
 Personal connections may use the primary calendar. Team and organization connections must configure
 an explicit `calendar_id`, preventing a shared workflow from silently writing into the authorizing
 member's personal primary calendar. Runtime events use a provider-neutral title, offset-aware ISO
-start/end timestamps, optional description, and optional location.
+start/end timestamps, optional description, and optional location. Configure provider key
+`google_calendar` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/google_calendar/callback`.
 
 ## Outlook Calendar
 
@@ -71,7 +73,8 @@ events only in calendars the signed-in member already has permission to edit. Th
 
 Personal connections may use the primary calendar. Team and organization connections must configure
 an explicit `calendar_id`. TerraSatch converts offset-aware timestamps to UTC before sending the
-event to Microsoft Graph.
+event to Microsoft Graph. Configure provider key `microsoft_calendar` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/microsoft_calendar/callback`.
 
 ## Jira
 
@@ -81,7 +84,8 @@ one issue type in administrator-controlled configuration. The provider exposes `
 
 Runtime callers supply only a title and optional description. TerraSatch builds a basic Jira issue
 using Atlassian Document Format for the description; callers cannot override the cloud site, project,
-issue type, REST path, transition, JQL, or attachments.
+issue type, REST path, transition, JQL, or attachments. Configure provider key `jira` with the
+callback `https://api.terrasatch.com/api/v1/workspace/integrations/oauth/jira/callback`.
 
 ## Confluence
 
@@ -92,7 +96,9 @@ Confluence uses a separate Atlassian Cloud OAuth 2.0 (3LO) connection with `offl
 Confluence intentionally reuses TerraSatch's `document.create` capability so approved reports and
 handoffs can be delivered to a knowledge base without a second report abstraction. Text and Markdown
 content is escaped before being placed in Confluence's storage representation. Runtime callers
-cannot select another site, space, parent page, or arbitrary Confluence endpoint.
+cannot select another site, space, parent page, or arbitrary Confluence endpoint. Configure
+provider key `confluence` with the callback
+`https://api.terrasatch.com/api/v1/workspace/integrations/oauth/confluence/callback`.
 
 ## Slack
 
