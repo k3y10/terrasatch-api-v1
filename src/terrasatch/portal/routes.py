@@ -570,13 +570,16 @@ async def portal_edge_device(
             enabled=None,
         ),
     )
+    detail = device_status_payload(device)
+    detail["telemetry"] = getattr(device, "telemetry", {}) or {}
+    detail["remote_config"] = getattr(device, "remote_config", {}) or {}
     return HTMLResponse(
         render_portal_edge_device(
             display_name=str(request.session.get("portal_display_name") or "TerraSatch User"),
             role=selected.role.value,
             organization_id=str(selected.organization_id),
             organization_name=selected.organization_name,
-            device=device_status_payload(device),
+            device=detail,
             sites=sites,
             manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
             csrf_token=issue_csrf_token(request.session),
@@ -613,8 +616,19 @@ async def portal_edge_device_update(
             detail="Organization admin or owner access is required to manage Edge devices",
         )
 
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Edge device name cannot be empty",
+        )
+    if enabled not in {"true", "false"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Edge enabled state",
+        )
     payload = EdgeDeviceUpdateRequest(
-        name=name.strip(),
+        name=normalized_name,
         site_id=site_id,
         enabled=enabled == "true",
     )
