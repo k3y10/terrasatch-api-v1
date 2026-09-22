@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 
 from terrasatch.brand import SATCHY_ASSET_URL
@@ -102,6 +103,8 @@ def render_portal(
     summary: dict[str, int],
     billing: dict[str, object],
     billing_manage_allowed: bool,
+    edge_troubleshoot_allowed: bool,
+    edge_manage_allowed: bool,
     csrf_token: str,
 ) -> str:
     options = "".join(
@@ -121,15 +124,26 @@ def render_portal(
         )
         age = device.get("age_seconds")
         age_label = "never" if age is None else f"{age}s" if int(age) < 60 else f"{int(age) // 60}m"
+        device_id = str(device.get("id") or "")
+        version = str(device.get("agent_version") or "unknown")
+        platform = " ".join(
+            part for part in (str(device.get("platform") or "").strip(), str(device.get("architecture") or "").strip()) if part
+        ) or "unknown platform"
+        inspect = (
+            f'<a class="inspect-link" href="/portal/edge/{_attr(device_id)}?organization={_attr(selected_organization)}">Inspect</a>'
+            if edge_troubleshoot_allowed and device_id
+            else '<span class="view-only">View only</span>'
+        )
         rows.append(
             f'<tr><td><span class="dot {health}"></span>{health.upper()}<small>{escape(age_label)}</small></td>'
             f"<td><strong>{escape(str(device.get('name') or 'Edge'))}</strong><small>{escape(str(device.get('hostname') or ''))}</small></td>"
+            f"<td><strong>{escape(version)}</strong><small>{escape(platform)}</small></td>"
             f"<td><strong>{escape(str(device.get('primary_hardware') or device.get('hardware') or '—'))}</strong><small>{escape(str(device.get('provider') or 'unknown'))}</small></td>"
-            f'<td><b class="good">RX {rx}</b></td><td><b class="warn">TX {tx}</b></td><td>{escape(str(device.get("mode") or "IDLE"))}</td></tr>'
+            f'<td><b class="good">RX {rx}</b></td><td><b class="warn">TX {tx}</b></td><td>{escape(str(device.get("mode") or "IDLE"))}</td><td>{inspect}</td></tr>'
         )
     table = (
         "".join(rows)
-        or '<tr><td colspan="6" class="empty">No registered Edge devices for this organization.</td></tr>'
+        or '<tr><td colspan="8" class="empty">No registered Edge devices for this organization.</td></tr>'
     )
     attention = summary.get("attention", 0)
     billing_html = _billing_panel(
@@ -138,7 +152,86 @@ def render_portal(
         selected_organization=selected_organization,
         csrf_token=csrf_token,
     )
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(selected_name)} · TerraSatch</title>{_styles()}</head><body><div class="shell"><header><a class="brand" href="/"><img src="{escape(SATCHY_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>FIELD WORKSPACE</b></span></a><div class="who"><strong>{escape(display_name)}</strong><span>{escape(email)} · {escape(role.upper())}</span></div><form method="post" action="/portal/logout"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><button class="ghost">Sign out</button></form></header><main><section class="headline"><div><h1>{escape(selected_name)}</h1><p>Your connected organization, Edge devices, radio capabilities, billing, and current field status in one place.</p></div><form method="get" action="/portal"><label>Organization<select name="organization" onchange="this.form.submit()">{options}</select></label></form></section><section class="metrics"><div><span>ONLINE</span><b class="good">{summary.get("online", 0)} / {summary.get("total", 0)}</b></div><div><span>SITES</span><b>{summary.get("sites", len(sites))}</b></div><div><span>RX CAPABLE</span><b class="good">{summary.get("rx_capable", 0)}</b></div><div><span>TX CAPABLE</span><b class="warn">{summary.get("tx_capable", 0)}</b></div><div><span>ATTENTION</span><b class="{"warn" if attention else "good"}">{attention}</b></div></section>{billing_html}<section class="panel"><div class="panel-head"><div><span>REGISTERED EDGE FLEET</span><small>{len(sites)} site(s) visible to this membership</small></div><a href="/">Radio console</a></div><div class="table-wrap"><table><thead><tr><th>Health</th><th>Device</th><th>Radio hardware</th><th>Receive</th><th>Transmit</th><th>Mode</th></tr></thead><tbody>{table}</tbody></table></div></section><section class="policy"><strong>ROLE · {escape(role.upper())}</strong><span>Organization membership controls what this portal can see. Billing changes require organization admin/owner access. Radio transmit capability remains hardware/provider-gated and operator-controlled.</span></section></main></div></body></html>'''
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(selected_name)} · TerraSatch</title>{_styles()}</head><body><div class="shell"><header><a class="brand" href="/"><img src="{escape(SATCHY_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>FIELD WORKSPACE</b></span></a><div class="who"><strong>{escape(display_name)}</strong><span>{escape(email)} · {escape(role.upper())}</span></div><form method="post" action="/portal/logout"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><button class="ghost">Sign out</button></form></header><main><section class="headline"><div><h1>{escape(selected_name)}</h1><p>Your connected organization, Edge devices, radio capabilities, billing, and current field status in one place.</p></div><form method="get" action="/portal"><label>Organization<select name="organization" onchange="this.form.submit()">{options}</select></label></form></section><section class="metrics"><div><span>ONLINE</span><b class="good">{summary.get("online", 0)} / {summary.get("total", 0)}</b></div><div><span>SITES</span><b>{summary.get("sites", len(sites))}</b></div><div><span>RX CAPABLE</span><b class="good">{summary.get("rx_capable", 0)}</b></div><div><span>TX CAPABLE</span><b class="warn">{summary.get("tx_capable", 0)}</b></div><div><span>ATTENTION</span><b class="{"warn" if attention else "good"}">{attention}</b></div></section>{billing_html}<section class="panel"><div class="panel-head"><div><span>REGISTERED EDGE FLEET</span><small>{len(sites)} site(s) visible to this membership</small></div><a href="/">Radio console</a></div><div class="table-wrap"><table><thead><tr><th>Health</th><th>Device</th><th>Edge / platform</th><th>Radio hardware</th><th>Receive</th><th>Transmit</th><th>Mode</th><th>Tools</th></tr></thead><tbody>{table}</tbody></table></div></section><section class="policy"><strong>ROLE · {escape(role.upper())}</strong><span>Organization membership controls what this portal can see. {"Edge diagnostics are available to operators and above. " if edge_troubleshoot_allowed else ""}{"Device name, site assignment, and enabled state can be managed by organization admins/owners. " if edge_manage_allowed else ""}Billing changes require organization admin/owner access. Radio transmit capability remains hardware/provider-gated and operator-controlled.</span></section></main></div></body></html>'''
+
+
+def _pretty_json(value: object) -> str:
+    return escape(json.dumps(value or {}, indent=2, sort_keys=True, default=str))
+
+
+def render_portal_edge_device(
+    *,
+    display_name: str,
+    role: str,
+    organization_id: str,
+    organization_name: str,
+    device: dict[str, object],
+    sites: list[object],
+    manage_allowed: bool,
+    csrf_token: str,
+) -> str:
+    """Render the organization-scoped Edge troubleshooting surface."""
+
+    health = escape(str(device.get("health") or "never"))
+    capabilities = device.get("capabilities") or []
+    capability_html = "".join(f"<li><code>{escape(str(item))}</code></li>" for item in capabilities)
+    if not capability_html:
+        capability_html = "<li class='muted'>No capabilities reported</li>"
+
+    site_options = []
+    current_site = str(device.get("site_id") or "")
+    for site in sites:
+        site_id = str(getattr(site, "id", ""))
+        site_name = str(getattr(site, "name", site_id or "Site"))
+        selected = " selected" if site_id == current_site else ""
+        site_options.append(
+            f'<option value="{_attr(site_id)}"{selected}>{escape(site_name)}</option>'
+        )
+
+    management = (
+        f'''<section class="edge-card edge-manage"><div class="edge-card-head"><span>ADMIN / OWNER</span><h2>Device management</h2></div>
+        <form method="post" action="/portal/edge/{_attr(device.get("id") or "")}">
+          <input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">
+          <input type="hidden" name="organization" value="{_attr(organization_id)}">
+          <label>Device name<input name="name" maxlength="255" required value="{_attr(device.get("name") or "Edge")}"></label>
+          <label>Assigned site<select name="site_id" required>{''.join(site_options)}</select></label>
+          <label>Device state<select name="enabled"><option value="true"{" selected" if device.get("enabled") else ""}>Enabled</option><option value="false"{" selected" if not device.get("enabled") else ""}>Disabled</option></select></label>
+          <button type="submit">Save device settings</button>
+        </form>
+        <p class="muted">This does not enable RF transmit. TX remains provider-, capability-, policy-, and approval-gated.</p></section>'''
+        if manage_allowed
+        else '''<section class="edge-card"><div class="edge-card-head"><span>MANAGEMENT</span><h2>Operator troubleshooting</h2></div><p class="muted">You can inspect health, hardware, telemetry, capabilities and the effective remote policy. Organization Admin/Owner access is required to rename, move, enable or disable this Edge.</p></section>'''
+    )
+
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(str(device.get("name") or "Edge"))} · TerraSatch</title>{_styles()}<style>
+    .edge-back{{color:var(--orange);text-decoration:none;font:10px var(--mono)}}.edge-title{{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;margin-bottom:16px}}.edge-title h1{{margin:4px 0 0}}.edge-role{{color:var(--muted);font:9px var(--mono)}}.edge-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}.edge-card{{border:1px solid var(--line);background:rgba(16,21,25,.94);border-radius:10px;padding:16px;min-width:0}}.edge-card-head span{{color:var(--orange);font:8px var(--mono);letter-spacing:.11em}}.edge-card-head h2{{margin:4px 0 12px;font-size:17px}}.edge-kv{{display:grid;grid-template-columns:140px 1fr;gap:7px 14px;margin:0}}.edge-kv dt{{color:var(--muted);font:9px var(--mono)}}.edge-kv dd{{margin:0;overflow-wrap:anywhere}}.edge-state{{display:inline-flex;align-items:center;gap:7px}}.edge-state .dot{{margin:0}}.edge-card pre{{overflow:auto;max-height:320px;background:#080b0d;border:1px solid var(--line);padding:12px;border-radius:7px;font:10px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}}.edge-card ul{{margin:0;padding-left:18px}}.edge-manage form{{display:grid;grid-template-columns:2fr 1.3fr 1fr auto;gap:10px;align-items:end}}.edge-manage label{{display:grid;gap:5px;color:var(--muted);font:9px var(--mono)}}.edge-manage button{{height:38px;border-color:rgba(244,122,32,.45);background:rgba(244,122,32,.12);color:#ffad59}}.muted{{color:var(--muted)}}.inspect-link{{color:var(--orange);text-decoration:none;font:9px var(--mono)}}.view-only{{color:var(--muted);font:9px var(--mono)}}@media(max-width:900px){{.edge-grid{{grid-template-columns:1fr}}.edge-manage form{{grid-template-columns:1fr}}.edge-title{{align-items:flex-start;flex-direction:column}}}}
+    </style></head><body><div class="shell"><header><a class="brand" href="/portal?organization={_attr(organization_id)}"><img src="{escape(SATCHY_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>EDGE DIAGNOSTICS</b></span></a><div class="who"><strong>{escape(display_name)}</strong><span>{escape(organization_name)} · {escape(role.upper())}</span></div></header><main>
+    <a class="edge-back" href="/portal?organization={_attr(organization_id)}">← Back to fleet</a>
+    <section class="edge-title"><div><p class="edge-role">{escape(organization_name)} · ROLE {escape(role.upper())}</p><h1>{escape(str(device.get("name") or "Edge"))}</h1><p class="muted">{escape(str(device.get("hostname") or "No hostname reported"))}</p></div><strong class="edge-state"><span class="dot {health}"></span>{health.upper()}</strong></section>
+    <div class="edge-grid">
+      <section class="edge-card"><div class="edge-card-head"><span>IDENTITY</span><h2>Runtime and assignment</h2></div><dl class="edge-kv">
+        <dt>Edge version</dt><dd>{escape(str(device.get("agent_version") or "unknown"))}</dd>
+        <dt>Platform</dt><dd>{escape(str(device.get("platform") or "unknown"))} · {escape(str(device.get("architecture") or "unknown"))}</dd>
+        <dt>Device ID</dt><dd><code>{escape(str(device.get("id") or ""))}</code></dd>
+        <dt>Site ID</dt><dd><code>{escape(current_site)}</code></dd>
+        <dt>Enabled</dt><dd>{'YES' if device.get("enabled") else 'NO'}</dd>
+        <dt>Last heartbeat</dt><dd>{escape(str(device.get("last_seen_at") or "never"))}</dd>
+      </dl></section>
+      <section class="edge-card"><div class="edge-card-head"><span>RADIO</span><h2>Capability state</h2></div><dl class="edge-kv">
+        <dt>Primary hardware</dt><dd>{escape(str(device.get("primary_hardware") or "No radio hardware reported"))}</dd>
+        <dt>Provider</dt><dd>{escape(str(device.get("provider") or "none"))}</dd>
+        <dt>Mode</dt><dd>{escape(str(device.get("mode") or "IDLE"))}</dd>
+        <dt>Receive</dt><dd>{'ENABLED' if device.get("rx_enabled") else 'READY' if device.get("rx_supported") else 'N/A'}</dd>
+        <dt>Transmit</dt><dd>{'ARMED' if device.get("tx_enabled") else 'READY' if device.get("tx_supported") else 'N/A'}</dd>
+      </dl><h3>Reported capabilities</h3><ul>{capability_html}</ul></section>
+      <section class="edge-card"><div class="edge-card-head"><span>HARDWARE</span><h2>Full reported inventory</h2></div><pre>{_pretty_json(device.get("hardware_inventory"))}</pre></section>
+      <section class="edge-card"><div class="edge-card-head"><span>TELEMETRY</span><h2>Latest heartbeat telemetry</h2></div><pre>{_pretty_json(device.get("telemetry"))}</pre></section>
+      <section class="edge-card"><div class="edge-card-head"><span>REMOTE POLICY</span><h2>Effective Edge configuration</h2></div><pre>{_pretty_json(device.get("remote_config"))}</pre></section>
+      <section class="edge-card"><div class="edge-card-head"><span>SATCHY</span><h2>AI channel binding</h2></div><pre>{_pretty_json(device.get("ai_channel"))}</pre></section>
+    </div>{management}
+    </main></div></body></html>'''
+
+
 
 
 def _styles() -> str:
