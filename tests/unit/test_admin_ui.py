@@ -77,6 +77,7 @@ def test_dashboard_exposes_real_admin_commands_satchy_and_live_edge_health() -> 
     assert "CAPABILITY-GATED RADIO" in html
     assert "arbitrary OS shell" in html
     assert "Registered device health" in html
+    assert "Edge / platform" in html
     assert "Heartbeat-backed state" in html
     assert "ONLINE" in html
     assert "Test Radio" in html
