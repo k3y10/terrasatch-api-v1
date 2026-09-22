@@ -112,6 +112,8 @@ def test_operator_portal_renders_edge_inspect_without_admin_controls() -> None:
     assert "Latest heartbeat telemetry" in html
     assert "Operator troubleshooting" in html
     assert "Save device settings" not in html
+    assert "listening" in html
+    assert "receive_enabled" in html
 
 
 def test_admin_portal_renders_bounded_edge_management_controls() -> None:
