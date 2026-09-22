@@ -22,9 +22,14 @@ The user record now has an optional scrypt password hash for local browser authe
 
 ## Current authorization boundary
 
-The portal is intentionally observation-first. All member roles are restricted to organizations where an enabled membership exists. The current portal exposes fleet health, sites, primary radio hardware, RX/TX capability state, and listening health. It does not expose the superadmin command terminal or destructive controls.
+All member roles are restricted to organizations where an enabled membership exists. Edge access follows the existing role hierarchy:
 
-The persisted role is available for future per-action authorization when customer write workflows are enabled. Until then, high-risk configuration and tenant administration remain in the superadmin console.
+- `viewer` — read-only organization and fleet summary.
+- `operator` — viewer access plus organization-scoped Edge diagnostics: runtime version/platform, heartbeat state, hardware inventory, capabilities, telemetry, effective remote policy, and Satchy channel binding.
+- `admin` / `owner` — operator access plus bounded Edge lifecycle management: rename the device, change its assigned site, and enable/disable the registered Edge.
+- TerraSatch superadmin — global/root operations across organizations, API keys, pairing administration, radio policy, and other platform controls.
+
+Portal Edge management deliberately does not grant RF transmit authority. TX remains hardware/provider-capability gated, policy gated, and operator/human-approval controlled. Pairing approval remains in the superadmin flow until portal-user approval can be recorded with complete audit attribution.
 
 ## Multiple devices
 
