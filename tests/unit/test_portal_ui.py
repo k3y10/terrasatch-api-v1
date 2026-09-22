@@ -57,6 +57,8 @@ def test_portal_renders_membership_role_and_multiple_edge_devices() -> None:
         csrf_token="csrf",
         billing={},
         billing_manage_allowed=False,
+        edge_troubleshoot_allowed=True,
+        edge_manage_allowed=False,
     )
     assert "/assets/satchy.png" in html
 
