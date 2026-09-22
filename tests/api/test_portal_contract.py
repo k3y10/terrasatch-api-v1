@@ -77,3 +77,15 @@ async def test_portal_account_recovery_pages_are_available() -> None:
     assert "Create a new password" in reset.text
     assert 'id="reset-token"' in reset.text
 
+
+
+@pytest.mark.asyncio
+async def test_portal_edge_diagnostics_requires_member_session() -> None:
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/portal/edge/00000000-0000-0000-0000-000000000001")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Portal login required"
