@@ -98,7 +98,12 @@ def upgrade() -> None:
         sa.Column("edge_command_id", sa.Uuid(), nullable=True),
         sa.Column("objective", sa.Text(), nullable=False),
         sa.Column("mission_type", sa.String(length=100), nullable=False),
-        sa.Column("required_capabilities", sa.JSON(), server_default=sa.text("'[]'"), nullable=False),
+        sa.Column(
+            "required_capabilities",
+            sa.JSON(),
+            server_default=sa.text("'[]'"),
+            nullable=False,
+        ),
         sa.Column("target", sa.JSON(), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("parameters", sa.JSON(), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("risk_level", sa.String(length=32), server_default="moderate", nullable=False),
