@@ -111,6 +111,8 @@ def device_status_payload(
         "hardware_count": hardware_count,
         "hardware_inventory": getattr(device, "hardware_inventory", []) or [],
         "capabilities": getattr(device, "capabilities", []) or [],
+        "remote_config": getattr(device, "remote_config", {}) or {},
+        "telemetry": getattr(device, "telemetry", {}) or {},
         "rx_supported": rx_supported,
         "tx_supported": tx_supported,
         "rx_enabled": rx_enabled,
