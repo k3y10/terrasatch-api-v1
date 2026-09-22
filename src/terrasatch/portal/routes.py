@@ -39,6 +39,7 @@ from terrasatch.identity.access import (
 )
 from terrasatch.identity.models import MembershipRole
 from terrasatch.identity.recovery import create_password_reset_intent, reset_password
+from terrasatch.masterdata.service import write_audit_log
 from terrasatch.organizations.service import list_sites
 from terrasatch.portal.ui import (
     render_portal,
@@ -632,15 +633,46 @@ async def portal_edge_device_update(
         site_id=site_id,
         enabled=enabled == "true",
     )
-    await _run_database(
-        settings,
-        lambda session: update_device(
+    async def manage_device(session: AsyncSession):
+        current = await get_device(
+            session,
+            organization_id=selected.organization_id,
+            device_id=device_id,
+        )
+        before = {
+            "name": current.name,
+            "site_id": str(current.site_id),
+            "enabled": bool(current.enabled),
+        }
+        updated = await update_device(
             session,
             organization_id=selected.organization_id,
             device_id=device_id,
             payload=payload,
-        ),
-    )
+        )
+        after = {
+            "name": updated.name,
+            "site_id": str(updated.site_id),
+            "enabled": bool(updated.enabled),
+        }
+        await write_audit_log(
+            session,
+            organization_id=selected.organization_id,
+            actor_type="portal_user",
+            actor_id=str(user_id),
+            action="edge_device.update",
+            target_type="edge_device",
+            target_id=str(device_id),
+            request_id=getattr(request.state, "request_id", None),
+            details={
+                "role": selected.role.value,
+                "before": before,
+                "after": after,
+            },
+        )
+        return updated
+
+    await _run_database(settings, manage_device)
     return RedirectResponse(
         f"/portal/edge/{device_id}?organization={selected.organization_id}",
         status_code=status.HTTP_303_SEE_OTHER,
