@@ -36,6 +36,7 @@ def _fleet_row(device: object) -> str:
         f"<td><span class='fleet-health {health}'><i></i>{health.upper()}</span>"
         f"<small class='block'>{escape(_age_label(payload['age_seconds']))}</small></td>"
         f"<td><strong>{escape(str(payload['name']))}</strong><small class='block'>{escape(str(payload.get('hostname') or ''))}</small></td>"
+        f"<td><strong>{escape(str(payload.get('agent_version') or 'unknown'))}</strong><small class='block'>{escape(str(payload.get('platform') or 'unknown'))} · {escape(str(payload.get('architecture') or 'unknown'))}</small></td>"
         f"<td>{escape(str(payload['hardware']))}</td>"
         f"<td><span class='radio-cap {'supported' if payload['rx_supported'] else 'missing'}'>RX {rx}</span></td>"
         f"<td><span class='radio-cap {'armed' if payload['tx_enabled'] else 'supported' if payload['tx_supported'] else 'missing'}'>TX {tx}</span></td>"
@@ -51,12 +52,12 @@ def render_dashboard(**kwargs: object) -> str:
 
     fleet_rows = "".join(_fleet_row(device) for device in devices)
     if not fleet_rows:
-        fleet_rows = "<tr><td colspan='7' class='dim'>Select an organization, pair an Edge device, then run a heartbeat to populate live health and capabilities.</td></tr>"
+        fleet_rows = "<tr><td colspan='8' class='dim'>Select an organization, pair an Edge device, then run a heartbeat to populate live health and capabilities.</td></tr>"
 
     fleet_section = f"""<section id="fleet" class="console-section"><div class="section-heading"><div><small>// EDGE FLEET</small><h2>Registered device health</h2></div><span class="section-index">03</span></div>
 <div class="radio-note"><strong>Heartbeat-backed state.</strong> A registered Edge updates <code>last_seen_at</code>, hardware inventory and RX/TX capabilities whenever it sends <code>/api/v1/edge/heartbeat</code>. Online/stale/offline colors come from heartbeat age, not branding.</div>
 <div class="fleet-summary" id="fleet-summary-line"><span><i class="fleet-dot online"></i>online ≤ 2m</span><span><i class="fleet-dot stale"></i>stale ≤ 15m</span><span><i class="fleet-dot offline"></i>offline &gt; 15m</span><span><i class="fleet-dot never"></i>never reported</span></div>
-<div class="table-wrap"><table><thead><tr><th>Health</th><th>Device</th><th>Hardware / provider</th><th>Receive</th><th>Transmit</th><th>Mode</th><th>Reported capabilities</th></tr></thead><tbody id="edge-fleet-body">{fleet_rows}</tbody></table></div></section>"""
+<div class="table-wrap"><table><thead><tr><th>Health</th><th>Device</th><th>Edge / platform</th><th>Hardware / provider</th><th>Receive</th><th>Transmit</th><th>Mode</th><th>Reported capabilities</th></tr></thead><tbody id="edge-fleet-body">{fleet_rows}</tbody></table></div></section>"""
 
     rows: list[str] = []
     for device in devices:
