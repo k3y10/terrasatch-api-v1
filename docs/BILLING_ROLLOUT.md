@@ -8,8 +8,8 @@ Do not merge, promote, enable live billing, or modify Stripe under the current p
 
 | Plan | Public monthly price | Checkout | Planned lookup key |
 | --- | --- | --- | --- |
-| Individual | $24 | 30-day card-required trial, when enabled | `terrasatch_individual_monthly_v2` |
-| Team | $399 | 30-day card-required trial, when enabled | `terrasatch_team_monthly_v2` |
+| Individual | $24 | 14-day payment-method-required trial, when enabled | `terrasatch_individual_monthly_v2` |
+| Team | $399 | 14-day payment-method-required trial, when enabled | `terrasatch_team_monthly_v2` |
 | Operations | From $1,999 | Sales/scoped only | None |
 | Enterprise | Custom | Sales/scoped only | None |
 
@@ -83,8 +83,8 @@ Do not describe the webhook as end-to-end accepted until the Oracle staging proc
 Oracle staging did not contain a TerraSatch Stripe test API key. Instead of copying or exposing an account secret, isolated staging now uses Stripe-hosted sandbox Payment Links while production retains the server-side Stripe API/HMAC design.
 
 Sandbox Payment Links:
-- Individual: `plink_1UH5n8PwzxCRGRdhckplOIz0`, $24/month, 30-day trial.
-- Team: `plink_1UH5nAPwzxCRGRdhTJE7crl5`, $399/month, 30-day trial.
+- Individual: `plink_1UJTVMPwzxCRGRdhzpdBiKN7`, $24/month, 14-day trial.
+- Team: `plink_1UJTVNPwzxCRGRdhoMTBEZRx`, $399/month, 14-day trial.
 - Both redirect to the isolated staging success URL with `{CHECKOUT_SESSION_ID}`.
 - TerraSatch appends a non-sensitive signup UUID using Stripe's supported `client_reference_id` URL parameter and locks the signup email with `locked_prefilled_email`.
 - Payment Link metadata and subscription metadata are restricted to `product=terrasatch`, `billing_version=v2`, `environment=staging`, the expected plan code, and monthly cadence.
