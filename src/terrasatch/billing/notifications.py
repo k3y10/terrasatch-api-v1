@@ -303,7 +303,7 @@ def build_billing_email(
                 subject,
                 (
                     f"<p>Hi {name},</p>"
-                    "<p>Your 30-day TerraSatch trial is active.</p>"
+                    "<p>Your 14-day TerraSatch trial is active.</p>"
                     f"<p>{'<br>'.join(details)}</p>"
                     f"{activation}"
                     "<p>Stripe securely manages your payment method. "
