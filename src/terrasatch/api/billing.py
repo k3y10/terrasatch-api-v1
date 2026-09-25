@@ -30,6 +30,7 @@ from terrasatch.billing.schemas import (
     CheckoutRequest,
     CheckoutSessionResponse,
     CheckoutStatusResponse,
+    CryptoInvoiceSubscriptionResponse,
     CustomerPortalResponse,
     EmailProviderWebhookResponse,
     SubscriptionResponse,
@@ -41,6 +42,7 @@ from terrasatch.billing.service import (
     get_stripe_customer_id,
     get_subscription_for_organization,
     mark_checkout_created,
+    mark_invoice_subscription_created,
     process_verified_event,
     public_plans,
     recover_pending_activation_token_for_checkout,
@@ -261,6 +263,77 @@ async def post_billing_checkout(
         trial_days=plan.trial_days,
         recurring_amount_cents=recurring_amount,
     )
+
+
+async def _create_crypto_invoice_subscription(
+    *,
+    payload: CheckoutRequest,
+    request: Request,
+) -> CryptoInvoiceSubscriptionResponse:
+    settings: Settings = request.app.state.settings
+    plan = get_plan(payload.plan_code)
+    recurring_amount = plan.amount_cents(payload.billing_interval)
+    if not plan.self_service or recurring_amount is None:
+        raise InvalidConfiguration("The selected plan is not available for self-service billing")
+    if not settings.billing_is_configured:
+        raise ProviderUnavailable("Billing activation and provider configuration is incomplete")
+    if settings.stripe_secret_key is None:
+        raise ProviderUnavailable(
+            "Crypto invoice subscriptions require a server-side Stripe restricted test key"
+        )
+
+    await enforce_checkout_rate_limit(
+        settings,
+        client_host=request.client.host if request.client is not None else None,
+        email=payload.email,
+    )
+    signup = await _run_database(
+        settings,
+        lambda session: create_signup(session, payload=payload, settings=settings),
+    )
+    stripe = _gateway(settings)
+    result = await stripe.create_crypto_invoice_subscription(
+        signup_id=str(signup.id),
+        email=signup.email,
+        display_name=signup.display_name,
+        plan=plan,
+        interval=payload.billing_interval,
+        days_until_due=settings.billing_crypto_invoice_days_until_due,
+    )
+    await _run_database(
+        settings,
+        lambda session: mark_invoice_subscription_created(
+            session,
+            signup_id=signup.id,
+            stripe_customer_id=result.customer_id,
+        ),
+    )
+    return CryptoInvoiceSubscriptionResponse(
+        signup_id=signup.id,
+        stripe_subscription_id=result.subscription_id,
+        stripe_customer_id=result.customer_id,
+        status=result.status,
+        plan_code=payload.plan_code,
+        billing_interval=payload.billing_interval,
+        trial_days=plan.trial_days,
+        trial_ends_at=result.trial_end,
+        recurring_amount_cents=recurring_amount,
+        invoice_payment_window_days=result.days_until_due,
+    )
+
+
+@router.post(
+    "/crypto-subscription",
+    response_model=CryptoInvoiceSubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_crypto_invoice_subscription(
+    payload: CheckoutRequest,
+    request: Request,
+) -> CryptoInvoiceSubscriptionResponse:
+    """Create a 14-day send-invoice subscription payable with eligible stablecoins."""
+
+    return await _create_crypto_invoice_subscription(payload=payload, request=request)
 
 
 @router.get("/checkout/status", response_model=CheckoutStatusResponse)
@@ -594,6 +667,20 @@ async def post_staging_billing_checkout(
     """Create an isolated staging Checkout using the configured sandbox provider."""
 
     return await post_billing_checkout(payload=payload, request=request)
+
+
+@staging_router.post(
+    "/crypto-subscription",
+    response_model=CryptoInvoiceSubscriptionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_staging_crypto_invoice_subscription(
+    payload: CheckoutRequest,
+    request: Request,
+) -> CryptoInvoiceSubscriptionResponse:
+    """Create a sandbox send-invoice subscription for customer-approved crypto invoices."""
+
+    return await _create_crypto_invoice_subscription(payload=payload, request=request)
 
 
 @staging_router.get("/checkout/status", response_model=CheckoutStatusResponse)
