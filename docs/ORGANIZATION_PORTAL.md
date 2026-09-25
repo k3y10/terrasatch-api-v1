@@ -55,3 +55,7 @@ A TerraSatch superadmin session continues to see the global fleet across all org
 Passwords are never stored in plaintext. `/admin/members` hashes submitted passwords with the same fixed-cost scrypt implementation used for the bootstrap administrator. A superadmin can reset an existing user's password by submitting the same email again.
 
 Use HTTPS in production and share temporary credentials out-of-band.
+
+## Beta workspace overview
+
+The connected customer portal displays organization-scoped subscription limits, API entitlement, device reporting state, and administrator permissions. Restricted or unknown managed billing state takes precedence over plan inclusion. Pilot access without self-service entitlements is labeled for administrator confirmation. Limits are not remaining usage, device reporting does not assert every capability is enabled, and development cards do not grant access. Refresh the dashboard after changing billing or device configuration.
