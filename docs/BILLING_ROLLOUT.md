@@ -194,3 +194,19 @@ Do not use `onboarding@resend.dev`, test-domain senders, or unverified From addr
 
 After configuration, rerun the standard staging bootstrap. Its safety summary now
 reports direct Resend and delivery-reconciliation readiness independently.
+
+
+## Stablecoin invoice subscriptions — September 25, 2026
+
+TerraSatch supports a non-custodial, non-private-preview recurring crypto path through Stripe Billing:
+
+- `POST /api/v1/billing/crypto-subscription` creates the same TerraSatch signup intent used by card Checkout.
+- The API creates a Stripe Customer and a normal recurring Subscription with `collection_method=send_invoice`.
+- The subscription uses the same server-owned v2 Price lookup key, a 14-day trial, and TerraSatch `signup_id`, plan, interval, environment, and `payment_rail=crypto_invoice` metadata.
+- Stripe generates recurring hosted invoices. Eligible customers can choose Crypto/stablecoins on the invoice and approve each payment from their wallet.
+- This path does **not** pretend to perform silent recurring wallet debits. Automatic off-session stablecoin withdrawal remains dependent on Stripe's separate recurring-stablecoin capability/private preview.
+- The existing `customer.subscription.*` and `invoice.*` webhook pipeline remains the source of truth for workspace provisioning and service access. A subscription that passes its invoice due date becomes `past_due`, so TerraSatch's existing grace/restricted entitlement behavior applies without a second billing state machine.
+- The default crypto invoice payment window is three days and is configurable through `TERRASATCH_BILLING_CRYPTO_INVOICE_DAYS_UNTIL_DUE`.
+- Staging requires a server-side restricted Stripe test key for this route. Static Payment Links remain available for ordinary sandbox Checkout, but cannot create this send-invoice subscription on behalf of the API.
+
+Do not enable Stripe Tax automatically until TerraSatch has the applicable tax registration(s). Stablecoin is a payment method; taxability follows the underlying TerraSatch product and customer jurisdiction.
