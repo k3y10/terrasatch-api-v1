@@ -76,7 +76,7 @@ async def test_plan_catalog_is_public_and_hides_stripe_ids() -> None:
     payload = response.json()
     assert [plan["code"] for plan in payload] == ["field", "team", "operations", "enterprise"]
     assert payload[1]["recommended"] is True
-    assert payload[1]["trial_days"] == 30
+    assert payload[1]["trial_days"] == 14
     assert payload[1]["monthly_amount_cents"] == 39_900
     serialized = response.text.casefold()
     assert "lookup_key" not in serialized
@@ -252,3 +252,20 @@ async def test_resend_webhook_routes_are_scoped_and_disabled_without_secret() ->
         )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_crypto_subscription_stays_disabled_until_validated(monkeypatch) -> None:
+    def must_not_create_provider(*args, **kwargs):
+        raise AssertionError("Disabled crypto must not contact Stripe")
+
+    monkeypatch.setattr("terrasatch.api.billing._gateway", must_not_create_provider)
+    transport = httpx.ASGITransport(app=create_app(make_settings()))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/v1/billing/crypto-subscription", json={
+            "display_name": "Test Operator", "email": "operator@example.com",
+            "organization_name": "Test Operations", "plan_code": "field",
+            "billing_interval": "monthly",
+        })
+    assert response.status_code == 503
+    assert "not enabled" in response.text

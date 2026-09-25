@@ -210,3 +210,7 @@ TerraSatch supports a non-custodial, non-private-preview recurring crypto path t
 - Staging requires a server-side restricted Stripe test key for this route. Static Payment Links remain available for ordinary sandbox Checkout, but cannot create this send-invoice subscription on behalf of the API.
 
 Do not enable Stripe Tax automatically until TerraSatch has the applicable tax registration(s). Stablecoin is a payment method; taxability follows the underlying TerraSatch product and customer jurisdiction.
+
+### Stablecoin rollout gate
+
+`TERRASATCH_BILLING_CRYPTO_INVOICE_ENABLED` defaults to false. Keep it disabled until the account supports stablecoin invoice payment and a sandbox run verifies signup, activation email, hosted invoice payment, renewal, overdue access restriction, and duplicate webhooks. The website must not advertise crypto checkout as available before this gate and the deployment are validated. The gateway does not implement automatic wallet debits. Trial emails use the subscription's actual end date so existing 30-day trials are not relabeled as 14-day trials.

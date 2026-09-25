@@ -271,6 +271,8 @@ async def _create_crypto_invoice_subscription(
     request: Request,
 ) -> CryptoInvoiceSubscriptionResponse:
     settings: Settings = request.app.state.settings
+    if not settings.billing_crypto_invoice_enabled:
+        raise ProviderUnavailable("Stablecoin invoice billing is not enabled for this deployment")
     plan = get_plan(payload.plan_code)
     recurring_amount = plan.amount_cents(payload.billing_interval)
     if not plan.self_service or recurring_amount is None:
