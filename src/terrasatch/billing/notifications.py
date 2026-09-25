@@ -303,11 +303,11 @@ def build_billing_email(
                 subject,
                 (
                     f"<p>Hi {name},</p>"
-                    "<p>Your 30-day TerraSatch trial is active.</p>"
+                    "<p>Your TerraSatch beta trial is active.</p>"
                     f"<p>{'<br>'.join(details)}</p>"
                     f"{activation}"
-                    "<p>Stripe securely manages your payment method. "
-                    "TerraSatch does not store card data.</p>"
+                    "<p>Stripe securely manages billing and payment collection. "
+                    "TerraSatch does not store card or wallet credentials.</p>"
                 ),
             ),
         )
@@ -380,7 +380,8 @@ def build_billing_email(
                     "<p>We could not process the latest payment for "
                     f"<strong>{organization}</strong>.</p>"
                     f"{grace_html}"
-                    "<p>Please update the payment method from your TerraSatch "
+                    "<p>Please resolve the outstanding invoice or update billing "
+                    "from your TerraSatch "
                     "organization portal.</p>"
                 ),
             ),

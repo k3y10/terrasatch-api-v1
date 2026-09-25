@@ -122,7 +122,7 @@ def test_trial_started_message_contains_activation_and_no_card_claims() -> None:
     assert "Your TerraSatch trial is active" == message.subject
     assert "Activate your account" in message.text
     assert "https://example.com/activate#token=test" in message.text
-    assert "does not store card data" in message.html
+    assert "does not store card or wallet credentials" in message.html
 
 def test_account_recovery_and_confirmation_messages() -> None:
     activation = build_billing_email(

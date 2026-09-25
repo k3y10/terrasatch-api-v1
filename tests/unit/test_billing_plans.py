@@ -20,7 +20,7 @@ def test_public_subscription_prices_are_stable() -> None:
     assert site.amount_cents(BillingInterval.MONTHLY) == 199_900
     assert site.amount_cents(BillingInterval.ANNUAL) is None
     assert enterprise.amount_cents(BillingInterval.ANNUAL) is None
-    assert {individual.trial_days, team.trial_days} == {30}
+    assert {individual.trial_days, team.trial_days} == {14}
     assert site.trial_days == 0
     assert enterprise.trial_days == 0
 

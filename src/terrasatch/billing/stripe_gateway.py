@@ -44,6 +44,16 @@ class StripeCheckoutResult:
     price_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class StripeInvoiceSubscriptionResult:
+    subscription_id: str
+    customer_id: str
+    status: str
+    trial_end: datetime | None
+    price_id: str
+    days_until_due: int
+
+
 class StripeGateway:
     """Small Stripe REST adapter using the API's existing HTTP client dependency."""
 
@@ -189,6 +199,101 @@ class StripeGateway:
             url=session_url,
             expires_at=checkout_expires_at,
             price_id=price_id,
+        )
+
+    async def create_crypto_invoice_subscription(
+        self,
+        *,
+        signup_id: str,
+        email: str,
+        display_name: str,
+        plan: PlanDefinition,
+        interval: BillingInterval,
+        days_until_due: int = 3,
+    ) -> StripeInvoiceSubscriptionResult:
+        """Create a trial subscription whose recurring invoices can be paid with crypto.
+
+        Stablecoin invoice payment is a supported Stripe Billing path. Automatic
+        off-session wallet debits remain a separate Stripe capability, so this
+        flow intentionally uses collection_method=send_invoice and lets the
+        customer approve each hosted invoice payment.
+        """
+
+        if not self.settings.billing_is_configured:
+            raise ProviderUnavailable("Billing activation and email configuration is incomplete")
+        if days_until_due < 1 or days_until_due > 30:
+            raise InvalidConfiguration("Invoice payment window must be between 1 and 30 days")
+
+        price_id = await self.resolve_price_id(plan, interval)
+        metadata = {
+            "product": "terrasatch",
+            "billing_version": "v2",
+            "signup_id": signup_id,
+            "plan_code": plan.code.value,
+            "billing_interval": interval.value,
+            "payment_rail": "crypto_invoice",
+            "environment": self.settings.environment.value,
+        }
+
+        customer_data = {
+            "email": email,
+            "name": display_name,
+        }
+        for key, value in metadata.items():
+            customer_data[f"metadata[{key}]"] = value
+
+        customer = await self._request_json(
+            "POST",
+            "/customers",
+            data=customer_data,
+            idempotency_key=f"terrasatch-crypto-customer-{signup_id}",
+        )
+        customer_id = str(customer.get("id") or "")
+        if not customer_id.startswith("cus_"):
+            raise ProviderUnavailable("Stripe customer creation returned an invalid customer")
+
+        data = {
+            "customer": customer_id,
+            "items[0][price]": price_id,
+            "items[0][quantity]": "1",
+            "collection_method": "send_invoice",
+            "days_until_due": str(days_until_due),
+            "trial_period_days": str(plan.trial_days),
+            "trial_settings[end_behavior][missing_payment_method]": "create_invoice",
+            "description": (
+                "TerraSatch subscription. Stripe sends each recurring invoice; "
+                "eligible customers can select Crypto on the hosted invoice."
+            ),
+        }
+        for key, value in metadata.items():
+            data[f"metadata[{key}]"] = value
+
+        subscription = await self._request_json(
+            "POST",
+            "/subscriptions",
+            data=data,
+            idempotency_key=f"terrasatch-crypto-subscription-{signup_id}",
+        )
+        subscription_id = str(subscription.get("id") or "")
+        status_value = str(subscription.get("status") or "")
+        if not subscription_id.startswith("sub_") or not status_value:
+            raise ProviderUnavailable("Stripe subscription creation returned an invalid subscription")
+
+        trial_end_value = subscription.get("trial_end")
+        trial_end = None
+        if trial_end_value not in (None, ""):
+            try:
+                trial_end = datetime.fromtimestamp(int(trial_end_value), tz=UTC)
+            except (TypeError, ValueError, OSError) as error:
+                raise ProviderUnavailable("Stripe subscription returned an invalid trial end") from error
+
+        return StripeInvoiceSubscriptionResult(
+            subscription_id=subscription_id,
+            customer_id=customer_id,
+            status=status_value,
+            trial_end=trial_end,
+            price_id=price_id,
+            days_until_due=days_until_due,
         )
 
     async def retrieve_checkout(self, session_id: str) -> dict[str, Any]:
