@@ -152,7 +152,7 @@ async def post_billing_checkout(
     payload: CheckoutRequest,
     request: Request,
 ) -> CheckoutSessionResponse:
-    """Create a 30-day subscription trial in Stripe Checkout without trusting price IDs."""
+    """Create a 14-day subscription trial in Stripe Checkout without trusting price IDs."""
 
     settings: Settings = request.app.state.settings
     plan = get_plan(payload.plan_code)
