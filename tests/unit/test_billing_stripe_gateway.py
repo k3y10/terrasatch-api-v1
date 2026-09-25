@@ -87,7 +87,7 @@ async def test_checkout_uses_lookup_price_and_server_owned_subscription_metadata
     assert data["mode"] == "subscription"
     assert data["line_items[0][price]"] == "price_field_monthly_test"
     assert data["payment_method_collection"] == "always"
-    assert data["subscription_data[trial_period_days]"] == "30"
+    assert data["subscription_data[trial_period_days]"] == "14"
     assert data["metadata[product]"] == "terrasatch"
     assert data["metadata[billing_version]"] == "v2"
     assert data["subscription_data[metadata][billing_version]"] == "v2"
