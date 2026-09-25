@@ -232,6 +232,7 @@ class StripeGateway:
             "plan_code": plan.code.value,
             "billing_interval": interval.value,
             "payment_rail": "crypto_invoice",
+            "environment": self.settings.environment.value,
         }
 
         customer_data = {
