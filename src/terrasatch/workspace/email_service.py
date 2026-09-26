@@ -330,6 +330,84 @@ async def mark_workspace_email_read(
         await session.flush()
 
 
+async def get_workspace_attachment(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    user: User,
+    role: MembershipRole,
+    email_id: UUID,
+    attachment_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, str]:
+    """Return a fresh provider-signed download URL after workspace authorization."""
+
+    message = await get_workspace_email(
+        session,
+        user=user,
+        role=role,
+        email_id=email_id,
+    )
+    clean_attachment_id = attachment_id.strip()
+    stored_attachment = next(
+        (
+            item
+            for item in (message.attachments or [])
+            if isinstance(item, dict)
+            and str(item.get("id") or "") == clean_attachment_id
+        ),
+        None,
+    )
+    if stored_attachment is None:
+        raise ResourceNotFound("Email attachment was not found")
+    if message.direction != "inbound":
+        raise ResourceNotFound("Email attachment was not found")
+    if settings.resend_api_key is None:
+        raise ProviderUnavailable("Resend API key is unavailable")
+
+    headers = {
+        "Authorization": f"Bearer {settings.resend_api_key.get_secret_value()}",
+        "Accept": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, transport=transport) as client:
+            response = await client.get(
+                (
+                    "https://api.resend.com/emails/receiving/"
+                    f"{message.provider_email_id}/attachments/{clean_attachment_id}"
+                ),
+                headers=headers,
+            )
+        response.raise_for_status()
+        raw = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise ProviderUnavailable("Resend attachment retrieval failed") from error
+
+    payload = raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("Resend attachment response is invalid")
+    if str(payload.get("id") or "") != clean_attachment_id:
+        raise ProviderUnavailable("Resend attachment response did not match the requested file")
+    download_url = str(payload.get("download_url") or "").strip()
+    if not download_url.startswith("https://"):
+        raise ProviderUnavailable("Resend attachment download URL is invalid")
+    return {
+        "id": clean_attachment_id,
+        "filename": str(
+            payload.get("filename")
+            or stored_attachment.get("filename")
+            or "attachment"
+        ),
+        "content_type": str(
+            payload.get("content_type")
+            or stored_attachment.get("content_type")
+            or "application/octet-stream"
+        ),
+        "download_url": download_url,
+        "expires_at": str(payload.get("expires_at") or ""),
+    }
+
+
 async def _post_resend_email(
     settings: Settings,
     *,
@@ -476,6 +554,8 @@ async def reply_to_workspace_email(
         role=role,
         email_id=email_id,
     )
+    if original.direction != "inbound":
+        raise InvalidConfiguration("Only inbound email can be replied to")
     sender = normalize_email_address(original.received_for)
     if sender not in sendable_mailboxes(user, role):
         raise InvalidConfiguration("This mailbox is view-only for your account")
