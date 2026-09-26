@@ -23,6 +23,7 @@ from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.service import list_devices
 from terrasatch.errors import TerraSatchError
+from terrasatch.identity.access import authenticate_user, establish_browser_identity
 from terrasatch.masterdata.service import resolve_organization_id, write_audit_log
 from terrasatch.observability.quality import build_quality_report
 from terrasatch.organizations.service import (
@@ -51,6 +52,14 @@ def _is_authenticated(request: Request) -> bool:
 
 def _redirect_to_login() -> RedirectResponse:
     return RedirectResponse("/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _admin_actor_id(request: Request, settings: Settings) -> str:
+    return str(
+        request.session.get("portal_email")
+        or settings.admin_email
+        or "legacy-bootstrap-admin"
+    )
 
 
 def _require_authenticated(request: Request, settings: Settings) -> None:
@@ -220,7 +229,7 @@ async def admin_command(
             session,
             organization_id=organization_id,
             actor_type="admin_session",
-            actor_id=settings.admin_email,
+            actor_id=_admin_actor_id(request, settings),
             action="admin.command",
             target_type="operation",
             target_id=command.strip().split(maxsplit=1)[0] if command.strip() else None,
@@ -269,17 +278,32 @@ async def admin_login(
     settings: Settings = request.app.state.settings
     _enabled(settings)
     _verify_csrf(request, csrf_token)
+    user = await _run_database(
+        settings,
+        lambda session: authenticate_user(session, email=email, password=password),
+    )
+    if user is not None and user.is_superadmin:
+        establish_browser_identity(request.session, user)
+        issue_csrf_token(request.session)
+        return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Backwards-compatible break-glass path while deployments migrate the old
+    # environment-backed admin credential into a database-backed User.
     expected_hash = settings.admin_password_hash
-    if (
-        email.casefold() != (settings.admin_email or "").casefold()
-        or expected_hash is None
-        or not verify_admin_password(password, expected_hash.get_secret_value())
-    ):
+    legacy_ok = (
+        email.casefold() == (settings.admin_email or "").casefold()
+        and expected_hash is not None
+        and verify_admin_password(password, expected_hash.get_secret_value())
+    )
+    if not legacy_ok:
         return HTMLResponse(
             render_login(issue_csrf_token(request.session), failed=True), status_code=401
         )
+
     request.session.clear()
     request.session["admin_authenticated"] = True
+    request.session["portal_email"] = email.strip().casefold()
+    request.session["admin_identity_source"] = "legacy_bootstrap"
     issue_csrf_token(request.session)
     return RedirectResponse("/admin", status_code=status.HTTP_303_SEE_OTHER)
 
