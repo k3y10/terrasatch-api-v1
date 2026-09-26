@@ -7,8 +7,8 @@ mail server.
 
 ```text
 sender
-  -> terrasatch.com MX
-  -> Resend inbound
+  -> TerraSatch receiving/forwarding DNS
+  -> Resend Receiving Emails
   -> existing signed Resend webhook
   -> TerraSatch API
   -> PostgreSQL workspace email tables
@@ -22,22 +22,34 @@ POST https://api.terrasatch.com/api/v1/billing/resend/webhook
 ```
 
 The same Svix verification used for delivery and bounce events protects `email.received`.
-Do not create a second production webhook unless a separate signing secret is also configured.
+The webhook should retain the current delivery events and add `email.received`.
+
+Resend's current API exposes a received message at:
+
+```text
+GET /emails/receiving/{email_id}
+```
+
+The signed webhook provides `data.email_id`; TerraSatch verifies the webhook before retrieving
+and storing the complete message.
 
 ## Access policy
 
 - Only authenticated TerraSatch users whose account email is under `@terrasatch.com` can open the
   email workspace.
 - Owners and admins may view the internal TerraSatch inbox.
-- Operators may view their own mailbox.
-- A personal mailbox such as `keaton@terrasatch.com` or `ericka@terrasatch.com` should use
-  that same address on the person's portal user account so personal access resolves cleanly.
-- `ops@terrasatch.com` is a shared send/receive identity and does not need to be a login account.
-- Operators, admins, and owners may send from their own mailbox.
-- Admins and owners may also send from the shared `ops@terrasatch.com` mailbox.
+- Other internal members see mail addressed to their own portal account.
+- A personal mailbox should use the same address on the person's portal user account so personal
+  access resolves cleanly.
+- `ops@terrasatch.com` is a shared send identity for admins/owners and does not need to be a login
+  account.
+- Internal users may send from their own mailbox.
+- Admins and owners may also send from `ops@terrasatch.com`.
 - A user cannot send as another person's mailbox.
 - Incoming HTML is stored for archival fidelity, but the server-rendered portal displays escaped
   plain text. This avoids rendering untrusted email HTML in the workspace.
+- Attachment metadata is stored. Attachment-byte download is intentionally not exposed in this
+  first pass.
 
 ## Deploy
 
@@ -50,47 +62,50 @@ bash deploy/release-oracle.sh
 The release applies Alembic migrations, so production must reach migration
 `0022_workspace_email` before inbound delivery is enabled.
 
-Do not enable DNS first. Deploy and verify the API route/database before changing MX.
+Do not enable receiving DNS first. Deploy and verify the API route/database before changing mail
+routing.
 
 ## Resend
 
 The existing production Resend webhook should add the `email.received` event while retaining its
 current endpoint and signing secret.
 
-The API already requires the Resend API key because an inbound webhook contains metadata only; the
-handler retrieves the full received message from Resend before committing it to PostgreSQL.
+Required server-side settings remain:
 
-## DNS
+- `TERRASATCH_RESEND_API_KEY`
+- `TERRASATCH_RESEND_WEBHOOK_SECRET`
 
-After the deployment and webhook are verified, enable Resend inbound routing for the root domain.
-The record prepared during setup was:
+The API key is needed because the inbound webhook is used as the signed notification/correlation
+event and TerraSatch retrieves the complete received message from Resend before committing it to
+PostgreSQL.
 
-```text
-Type:     MX
-Host:     @
-Target:   inbound-smtp.us-east-1.amazonaws.com
-Priority: 10
-TTL:      30 minutes
-```
+## Receiving domain / DNS
 
-Before saving, confirm there is no existing production MX provider that must continue receiving
-mail. Changing the root MX changes inbound delivery for all `@terrasatch.com` addresses.
+Configure Receiving Emails in the Resend dashboard and use the exact DNS records Resend shows for
+the selected receiving setup.
+
+Do **not** hard-code or blindly replace the root `terrasatch.com` MX records. If another mailbox
+provider already receives TerraSatch email, replacing its MX records would redirect mail for every
+`@terrasatch.com` address. Preserve the existing provider and use its forwarding/custom-domain
+path when appropriate.
+
+The repository intentionally does not encode an account-specific MX target because the correct
+records must come from the active Resend receiving-domain configuration.
 
 ## Acceptance
 
-After DNS propagates:
+After deployment and receiving configuration:
 
-1. Send a test message from an external mailbox to `keaton@terrasatch.com`.
+1. Send a test message from an external mailbox to an internal TerraSatch mailbox.
 2. Confirm Resend records an `email.received` event and the webhook returns 2xx.
 3. Open `/portal/email` and verify the message, subject, sender, plain-text body, and attachment
    metadata are present.
-4. Reply from the workspace and verify the recipient receives the message from
-   `keaton@terrasatch.com`.
-5. Open an attached test file from the message and confirm TerraSatch authorizes the request before
-   redirecting to Resend's fresh signed download URL.
-6. Repeat inbound delivery for `ericka@terrasatch.com` and `ops@terrasatch.com`.
-7. Verify an internal user cannot send as another person's mailbox.
-8. Verify an external/customer workspace account cannot open the internal email workspace.
+4. Reply from the workspace and verify the recipient receives the response from the selected
+   TerraSatch mailbox.
+5. Repeat inbound delivery for another internal personal mailbox if applicable.
+6. Verify an internal user cannot send as another person's mailbox.
+7. Verify an external/customer workspace account cannot open the internal email workspace.
+8. Replay the Resend webhook and confirm the message is not duplicated.
 
 Resend remains the delivery/receiving provider; PostgreSQL is the durable workspace copy used by
 TerraSatch.
