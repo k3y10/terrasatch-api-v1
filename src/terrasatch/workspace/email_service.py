@@ -134,6 +134,117 @@ async def visible_mailboxes(
     return sorted(permissions)
 
 
+def mailbox_label(address: str) -> str:
+    normalized = normalize_email_address(address)
+    labels = {
+        BILLING_MAILBOX: "Billing",
+        SUPPORT_MAILBOX: "Support",
+        OPS_MAILBOX: "Operations",
+        LEGAL_MAILBOX: "Legal",
+    }
+    return labels.get(normalized, normalized.split("@", 1)[0].replace(".", " ").title())
+
+
+def _can_manage_mailbox(
+    actor: User,
+    role: MembershipRole,
+    mailbox: str,
+) -> bool:
+    own = normalize_email_address(actor.email)
+    if mailbox == own:
+        return True
+    return mailbox in _SHARED_MAILBOXES and role == MembershipRole.OWNER
+
+
+async def set_mailbox_delegate(
+    session: AsyncSession,
+    *,
+    actor: User,
+    role: MembershipRole,
+    mailbox: str,
+    delegate: User,
+    can_send: bool,
+) -> WorkspaceEmailDelegate:
+    """Create or update explicit mailbox access without broadening organization roles."""
+
+    normalized = normalize_email_address(mailbox)
+    if not normalized.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
+        raise InvalidConfiguration("Delegated mailbox must use the TerraSatch email domain")
+    if not _can_manage_mailbox(actor, role, normalized):
+        raise InvalidConfiguration("You are not allowed to manage this mailbox")
+    if not is_internal_workspace_user(delegate):
+        raise InvalidConfiguration("Mailbox delegates must use an internal TerraSatch account")
+    if normalized == BILLING_MAILBOX:
+        can_send = False
+
+    existing = await session.scalar(
+        select(WorkspaceEmailDelegate).where(
+            WorkspaceEmailDelegate.mailbox_address == normalized,
+            WorkspaceEmailDelegate.user_id == delegate.id,
+        )
+    )
+    if existing is None:
+        existing = WorkspaceEmailDelegate(
+            mailbox_address=normalized,
+            user_id=delegate.id,
+            can_send=can_send,
+            created_by_user_id=actor.id,
+        )
+        session.add(existing)
+    else:
+        existing.can_send = can_send
+        existing.created_by_user_id = actor.id
+    await session.flush()
+    return existing
+
+
+async def remove_mailbox_delegate(
+    session: AsyncSession,
+    *,
+    actor: User,
+    role: MembershipRole,
+    mailbox: str,
+    delegate: User,
+) -> bool:
+    """Remove one explicit mailbox delegation."""
+
+    normalized = normalize_email_address(mailbox)
+    if not _can_manage_mailbox(actor, role, normalized):
+        raise InvalidConfiguration("You are not allowed to manage this mailbox")
+    existing = await session.scalar(
+        select(WorkspaceEmailDelegate).where(
+            WorkspaceEmailDelegate.mailbox_address == normalized,
+            WorkspaceEmailDelegate.user_id == delegate.id,
+        )
+    )
+    if existing is None:
+        return False
+    await session.delete(existing)
+    await session.flush()
+    return True
+
+
+async def list_mailbox_delegates(
+    session: AsyncSession,
+    *,
+    actor: User,
+    role: MembershipRole,
+    mailbox: str,
+) -> list[WorkspaceEmailDelegate]:
+    """List explicit delegates only when the actor can manage the mailbox."""
+
+    normalized = normalize_email_address(mailbox)
+    if not _can_manage_mailbox(actor, role, normalized):
+        raise InvalidConfiguration("You are not allowed to manage this mailbox")
+    return list(
+        await session.scalars(
+            select(WorkspaceEmailDelegate)
+            .where(WorkspaceEmailDelegate.mailbox_address == normalized)
+            .order_by(WorkspaceEmailDelegate.created_at)
+        )
+    )
+
+
 def _string_list(value: object) -> list[str]:
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
