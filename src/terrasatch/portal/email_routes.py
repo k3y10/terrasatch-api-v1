@@ -16,6 +16,7 @@ from terrasatch.identity.models import User
 from terrasatch.portal.email_ui import render_email_detail, render_email_inbox
 from terrasatch.portal.routes import _enabled, _require_user, _verify_csrf
 from terrasatch.workspace.email_service import (
+    get_workspace_attachment,
     get_workspace_email,
     is_internal_workspace_user,
     list_workspace_emails,
@@ -120,6 +121,35 @@ async def portal_email_detail(
             reply_allowed=reply_allowed,
             csrf_token=issue_csrf_token(request.session),
         ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get(
+    "/portal/email/{email_id}/attachments/{attachment_id}",
+    include_in_schema=False,
+    response_model=None,
+)
+async def portal_email_attachment(
+    email_id: UUID,
+    attachment_id: str,
+    request: Request,
+    organization: str = "",
+) -> RedirectResponse:
+    user, membership = await _email_context(request, organization)
+    factory = create_session_factory(request.app.state.settings)
+    async with factory() as session:
+        attachment = await get_workspace_attachment(
+            session,
+            request.app.state.settings,
+            user=user,
+            role=membership.role,
+            email_id=email_id,
+            attachment_id=attachment_id,
+        )
+    return RedirectResponse(
+        attachment["download_url"],
+        status_code=status.HTTP_302_FOUND,
         headers={"Cache-Control": "no-store"},
     )
 
