@@ -8,22 +8,27 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import select
 
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.database.session import create_session_factory
 from terrasatch.identity.access import get_user_organization_access, list_user_access
-from terrasatch.identity.models import User
+from terrasatch.identity.models import Membership, User
 from terrasatch.portal.email_ui import render_email_detail, render_email_inbox
 from terrasatch.portal.routes import _enabled, _require_user, _verify_csrf
 from terrasatch.workspace.email_service import (
     get_workspace_attachment,
     get_workspace_email,
     is_internal_workspace_user,
+    list_mailbox_delegates,
     list_workspace_emails,
+    manageable_mailboxes,
     mark_workspace_email_read,
+    remove_mailbox_delegate,
     reply_to_workspace_email,
     send_workspace_email,
     sendable_mailboxes,
+    set_mailbox_delegate,
 )
 
 router = APIRouter(tags=["portal-email"])
@@ -82,15 +87,134 @@ async def portal_email_inbox(
             user=user,
             role=membership.role,
         )
+        managed_mailboxes = manageable_mailboxes(user, membership.role)
+        member_rows = list(
+            await session.scalars(
+                select(User)
+                .join(Membership, Membership.user_id == User.id)
+                .where(
+                    Membership.organization_id == membership.organization_id,
+                    Membership.enabled.is_(True),
+                    User.enabled.is_(True),
+                    User.email.ilike("%@terrasatch.com"),
+                )
+                .order_by(User.display_name, User.email)
+            )
+        )
+        delegates: dict[str, list[dict[str, object]]] = {}
+        for mailbox in managed_mailboxes:
+            rows = await list_mailbox_delegates(
+                session,
+                actor=user,
+                role=membership.role,
+                mailbox=mailbox,
+            )
+            delegate_users = {item.id: item for item in member_rows}
+            delegates[mailbox] = [
+                {
+                    "email": delegate_users[row.user_id].email
+                    if row.user_id in delegate_users
+                    else str(row.user_id),
+                    "can_send": bool(row.can_send),
+                }
+                for row in rows
+            ]
     return HTMLResponse(
         render_email_inbox(
             organization_id=str(membership.organization_id),
             organization_name=membership.organization_name,
             messages=messages,
             senders=senders,
+            manageable_mailboxes=managed_mailboxes,
+            organization_members=[
+                {"email": item.email, "display_name": item.display_name}
+                for item in member_rows
+            ],
+            delegates=delegates,
             csrf_token=issue_csrf_token(request.session),
         ),
         headers={"Cache-Control": "no-store"},
+    )
+
+
+
+
+
+@router.post("/portal/email/access/delegate", include_in_schema=False, response_model=None)
+async def portal_email_delegate(
+    request: Request,
+    organization: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+    mailbox: Annotated[str, Form()],
+    delegate_email: Annotated[str, Form()],
+    can_send: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    _verify_csrf(request, csrf_token)
+    actor, membership = await _email_context(request, organization)
+    factory = create_session_factory(request.app.state.settings)
+    async with factory() as session:
+        delegate = await session.scalar(
+            select(User)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                Membership.organization_id == membership.organization_id,
+                Membership.enabled.is_(True),
+                User.enabled.is_(True),
+                User.email == delegate_email.strip().casefold(),
+            )
+        )
+        if delegate is None:
+            raise HTTPException(status_code=404, detail="Internal delegate was not found")
+        await set_mailbox_delegate(
+            session,
+            actor=actor,
+            role=membership.role,
+            mailbox=mailbox,
+            delegate=delegate,
+            can_send=can_send == "on",
+        )
+        await session.commit()
+    return RedirectResponse(
+        f"/portal/email?organization={membership.organization_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/portal/email/access/revoke", include_in_schema=False, response_model=None)
+async def portal_email_delegate_revoke(
+    request: Request,
+    organization: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+    mailbox: Annotated[str, Form()],
+    delegate_email: Annotated[str, Form()],
+) -> RedirectResponse:
+    _verify_csrf(request, csrf_token)
+    actor, membership = await _email_context(request, organization)
+    factory = create_session_factory(request.app.state.settings)
+    async with factory() as session:
+        delegate = await session.scalar(
+            select(User)
+            .join(Membership, Membership.user_id == User.id)
+            .where(
+                Membership.organization_id == membership.organization_id,
+                Membership.enabled.is_(True),
+                User.enabled.is_(True),
+                User.email == delegate_email.strip().casefold(),
+            )
+        )
+        if delegate is None:
+            raise HTTPException(status_code=404, detail="Internal delegate was not found")
+        await remove_mailbox_delegate(
+            session,
+            actor=actor,
+            role=membership.role,
+            mailbox=mailbox,
+            delegate=delegate,
+        )
+        await session.commit()
+    return RedirectResponse(
+        f"/portal/email?organization={membership.organization_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
