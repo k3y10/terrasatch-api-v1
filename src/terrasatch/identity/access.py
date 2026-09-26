@@ -265,7 +265,6 @@ async def create_or_update_organization_member(
     return user, membership
 
 
-
 async def migrate_legacy_admin_identity(
     session: AsyncSession,
     *,
