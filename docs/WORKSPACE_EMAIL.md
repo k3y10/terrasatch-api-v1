@@ -108,6 +108,19 @@ path when appropriate.
 The repository intentionally does not encode an account-specific MX target because the correct
 records must come from the active Resend receiving-domain configuration.
 
+
+### Mail-provider coexistence
+
+The TerraSatch workspace is an application inbox, not an IMAP server. If `@terrasatch.com` is
+already hosted by Google Workspace, Microsoft 365, or another mailbox provider, keep that provider
+as the root MX and forward the required addresses into Resend/TerraSatch. This preserves ordinary
+mail-client access while giving TerraSatch a durable application copy for Satchy/workspace
+workflows.
+
+Only move the root MX to Resend if TerraSatch intentionally wants the application to become the
+primary receiver for every `@terrasatch.com` mailbox. Personal executive addresses should not be
+made dependent on an MX cutover merely to enable the workspace inbox.
+
 ## Acceptance
 
 After deployment and receiving configuration:
