@@ -27,6 +27,9 @@ def render_email_inbox(
     organization_name: str,
     messages: list[dict[str, object]],
     senders: list[str],
+    manageable_mailboxes: list[str],
+    organization_members: list[dict[str, str]],
+    delegates: dict[str, list[dict[str, object]]],
     csrf_token: str,
 ) -> str:
     rows = []
@@ -52,7 +55,59 @@ def render_email_inbox(
     compose = ""
     if sender_options:
         compose = f'''<section class="panel"><div class="panel-head"><span>COMPOSE</span><small>Sent through the verified TerraSatch Resend domain</small></div><form class="compose" method="post" action="/portal/email/compose"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label>From<select name="sender">{sender_options}</select></label><label>To<input type="email" name="recipient" required></label><label class="wide">Subject<input name="subject" maxlength="500" required></label><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send email</button></div></form></section>'''
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email · TerraSatch</title>{_styles()}</head><body>{_header(organization_name)}<main><section class="top"><div><h1>Email</h1><p>Inbound and human-sent TerraSatch messages in the field workspace.</p></div><a href="/portal?organization={quote(organization_id)}">Back to workspace</a></section>{compose}<section class="panel"><div class="panel-head"><span>INBOX</span><small>{len(messages)} message(s)</small></div><div class="table-wrap"><table><thead><tr><th>STATE</th><th>SUBJECT</th><th>FROM</th><th>MAILBOX</th><th>TIME</th></tr></thead><tbody>{table}</tbody></table></div></section></main></body></html>'''
+
+    access_sections: list[str] = []
+    member_options = "".join(
+        f'<option value="{_attr(member.get("email") or "")}">'
+        f'{escape(str(member.get("display_name") or member.get("email") or ""))}'
+        f' · {escape(str(member.get("email") or ""))}</option>'
+        for member in organization_members
+        if member.get("email")
+    )
+    for mailbox in manageable_mailboxes:
+        mailbox_delegates = delegates.get(mailbox, [])
+        delegate_rows = "".join(
+            (
+                '<div style="display:flex;justify-content:space-between;gap:12px;'
+                'align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">'
+                f'<span>{escape(str(item.get("email") or ""))}'
+                f' <small style="color:var(--muted)">'
+                f'{"view + send" if item.get("can_send") else "view only"}</small></span>'
+                '<form method="post" action="/portal/email/access/revoke">'
+                f'<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
+                f'<input type="hidden" name="organization" value="{_attr(organization_id)}">'
+                f'<input type="hidden" name="mailbox" value="{_attr(mailbox)}">'
+                f'<input type="hidden" name="delegate_email" value="{_attr(item.get("email") or "")}">'
+                '<button type="submit">Revoke</button></form></div>'
+            )
+            for item in mailbox_delegates
+        ) or '<div class="preview">No explicit delegates.</div>'
+        send_toggle = (
+            '<span class="preview">Billing access is view-only; manual sending remains disabled.</span>'
+            if mailbox.casefold() == "billing@terrasatch.com"
+            else '<label style="display:flex;align-items:center;gap:7px"><input style="width:auto" type="checkbox" name="can_send">Allow send</label>'
+        )
+        access_sections.append(
+            '<div style="padding:14px;border-bottom:1px solid var(--line)">'
+            f'<strong>{escape(mailbox)}</strong>{delegate_rows}'
+            '<form class="compose" method="post" action="/portal/email/access/delegate">'
+            f'<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
+            f'<input type="hidden" name="organization" value="{_attr(organization_id)}">'
+            f'<input type="hidden" name="mailbox" value="{_attr(mailbox)}">'
+            f'<label>Delegate<select name="delegate_email" required>{member_options}</select></label>'
+            f'<div style="display:flex;align-items:end">{send_toggle}</div>'
+            '<div class="wide"><button type="submit">Save access</button></div></form></div>'
+        )
+    access_panel = ""
+    if access_sections:
+        access_panel = (
+            '<section class="panel"><div class="panel-head"><span>MAILBOX ACCESS</span>'
+            '<small>Personal mail stays private unless explicitly delegated</small></div>'
+            + "".join(access_sections)
+            + "</section>"
+        )
+
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email · TerraSatch</title>{_styles()}</head><body>{_header(organization_name)}<main><section class="top"><div><h1>Email</h1><p>Inbound and human-sent TerraSatch messages in the field workspace.</p></div><a href="/portal?organization={quote(organization_id)}">Back to workspace</a></section>{compose}<section class="panel"><div class="panel-head"><span>INBOX</span><small>{len(messages)} message(s)</small></div><div class="table-wrap"><table><thead><tr><th>STATE</th><th>SUBJECT</th><th>FROM</th><th>MAILBOX</th><th>TIME</th></tr></thead><tbody>{table}</tbody></table></div></section>{access_panel}</main></body></html>'''
 
 
 def render_email_detail(
