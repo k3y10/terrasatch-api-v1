@@ -200,7 +200,10 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
         )
         await session.commit()
         assert row.direction == "outbound"
-        assert sent_payload["from"] == "ops@terrasatch.com"
+        assert sent_payload["from"] == "TerraSatch Operations <ops@terrasatch.com>"
+        assert "html" in sent_payload
+        assert "LISTEN. WATCH. LEARN. ADAPT." in str(sent_payload["text"])
+        assert "terrasatch.com" in str(sent_payload["html"])
 
         with pytest.raises(InvalidConfiguration):
             await send_workspace_email(
@@ -218,6 +221,8 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
 
         stored = await session.get(WorkspaceEmailMessage, row.id)
         assert stored is not None
+        assert stored.html_body is not None
+        assert "TerraSatch Operations" in stored.html_body
 
     await engine.dispose()
 
