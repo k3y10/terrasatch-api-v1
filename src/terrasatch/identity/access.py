@@ -265,19 +265,19 @@ async def create_or_update_organization_member(
     return user, membership
 
 
-async def migrate_legacy_admin_identity(
+async def promote_superadmin_identity(
     session: AsyncSession,
     *,
     organization_id: UUID,
     email: str,
     display_name: str,
-    legacy_password_hash: str,
+    password_hash: str,
     settings: Settings | None = None,
 ) -> tuple[User, Membership]:
-    """Promote one database-backed identity using the legacy admin password hash.
+    """Promote one database-backed identity to platform superadmin + organization owner.
 
-    This is a one-way compatibility bridge for deployments moving from the
-    environment-backed superadmin credential to the normal User identity.
+    The supplied password hash may come from the legacy bootstrap credential or
+    from a newly chosen password. Plaintext credentials are never persisted.
     """
 
     organization = await session.get(Organization, organization_id)
@@ -291,7 +291,7 @@ async def migrate_legacy_admin_identity(
     if not normalized_name:
         raise InvalidConfiguration("Superadmin display name is required")
     try:
-        algorithm, n_value, r_value, p_value, _salt, _digest = legacy_password_hash.split("$")
+        algorithm, n_value, r_value, p_value, _salt, _digest = password_hash.split("$")
         valid_hash = algorithm == "scrypt" and (
             int(n_value),
             int(r_value),
@@ -334,7 +334,7 @@ async def migrate_legacy_admin_identity(
         user = User(
             email=normalized_email,
             display_name=normalized_name,
-            password_hash=legacy_password_hash,
+            password_hash=password_hash,
             credential_version=1,
             is_superadmin=True,
             enabled=True,
@@ -343,7 +343,7 @@ async def migrate_legacy_admin_identity(
         await session.flush()
     else:
         user.display_name = normalized_name
-        user.password_hash = legacy_password_hash
+        user.password_hash = password_hash
         user.credential_version += 1
         user.is_superadmin = True
         user.enabled = True
