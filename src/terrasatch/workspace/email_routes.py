@@ -5,16 +5,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-from terrasatch.billing.resend_webhook import verify_resend_webhook
 from terrasatch.database.session import create_session_factory
-from terrasatch.errors import InvalidConfiguration
 from terrasatch.workspace.email_service import (
     get_workspace_email,
-    ingest_resend_received_email,
     is_internal_workspace_user,
     list_workspace_emails,
     mark_workspace_email_read,
@@ -37,51 +34,6 @@ class ComposeEmail(BaseModel):
 class ReplyEmail(BaseModel):
     request_id: UUID
     text: str = Field(min_length=1, max_length=20_000)
-
-
-@router.post("/email/resend/webhook")
-async def resend_inbound_email_webhook(request: Request) -> dict[str, object]:
-    """Persist complete inbound messages only after verifying Resend's Svix signature."""
-
-    settings = request.app.state.settings
-    if settings.resend_webhook_secret is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    raw_payload = await request.body()
-    if len(raw_payload) > 64_000:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Webhook payload is too large",
-        )
-    try:
-        event, webhook_id = verify_resend_webhook(
-            raw_payload=raw_payload,
-            headers=request.headers,
-            secret=settings.resend_webhook_secret,
-        )
-    except InvalidConfiguration as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Resend webhook",
-        ) from error
-
-    async with create_session_factory(settings)() as session:
-        try:
-            result = await ingest_resend_received_email(
-                session,
-                settings,
-                event=event,
-                webhook_id=webhook_id,
-            )
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-    return {
-        "matched": result.matched,
-        "duplicate": result.duplicate,
-        "event_type": result.event_type,
-        "email_id": str(result.email_id) if result.email_id else None,
-    }
 
 
 @router.get("/organizations/{organization_id}/email")
