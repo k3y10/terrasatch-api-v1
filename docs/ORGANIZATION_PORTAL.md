@@ -51,16 +51,17 @@ A database-backed superadmin uses the same signed browser session across `/porta
 
 The deployment setting `TERRASATCH_ADMIN_SESSION_SECRET` remains required because it signs browser sessions. `TERRASATCH_ADMIN_EMAIL` and `TERRASATCH_ADMIN_PASSWORD_HASH` are retained only as legacy bootstrap / break-glass credentials while older deployments migrate.
 
-Use the one-time migration command to copy the existing legacy admin password hash into a canonical User without revealing or retyping the password:
+Use the one-time migration command to create the canonical founder User. If the legacy admin password is known, the existing hash can be reused without revealing it. If it is not known, add `--new-password` and TerraSatch will prompt securely for one new password:
 
 ```bash
 terrasatch admin migrate-identity \
   --email keaton@terrasatch.com \
   --display-name Keaton \
-  --organization <organization-id-or-slug>
+  --organization <organization-id-or-slug> \
+  --new-password
 ```
 
-The migrated user is enabled, marked `is_superadmin=true`, and assigned the selected organization's `owner` role.
+The resulting user is enabled, marked `is_superadmin=true`, and assigned the selected organization's `owner` role. The same password then works for `/portal`, `/portal/email`, and `/admin`.
 
 ## Password handling
 
