@@ -1,4 +1,5 @@
 """Resend-backed email receiving, workspace visibility, and human replies."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -8,12 +9,12 @@ from email.utils import parseaddr
 from uuid import UUID
 
 import httpx
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable, ResourceNotFound
-from terrasatch.identity.models import Membership, MembershipRole, User
+from terrasatch.identity.models import MembershipRole, User
 from terrasatch.workspace.email_models import WorkspaceEmailMessage, WorkspaceEmailRead
 
 TERRASATCH_EMAIL_DOMAIN = "terrasatch.com"
