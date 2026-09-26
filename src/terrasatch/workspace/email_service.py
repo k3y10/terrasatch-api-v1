@@ -125,10 +125,8 @@ def _parse_time(value: object) -> datetime:
 
 
 def _received_for(payload: dict[str, object], event_data: dict[str, object]) -> str:
-    direct = payload.get("received_for")
     candidates: list[str] = []
-    if isinstance(direct, str):
-        candidates.append(direct)
+    candidates.extend(_string_list(payload.get("received_for")))
     candidates.extend(_string_list(payload.get("to")))
     candidates.extend(_string_list(event_data.get("to")))
     for candidate in candidates:
