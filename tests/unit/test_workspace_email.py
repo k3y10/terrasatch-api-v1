@@ -15,6 +15,7 @@ from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
+from terrasatch.portal.email_ui import render_email_inbox
 from terrasatch.workspace.email_models import WorkspaceEmailMessage
 from terrasatch.workspace.email_service import (
     BILLING_MAILBOX,
@@ -374,3 +375,43 @@ async def test_billing_mailbox_is_human_view_only_even_for_owner() -> None:
             )
 
     await engine.dispose()
+
+
+
+def test_email_inbox_renders_mailbox_access_panel() -> None:
+    html = render_email_inbox(
+        organization_id=str(uuid4()),
+        organization_name="TerraSatch",
+        messages=[],
+        senders=["keaton@terrasatch.com", OPS_MAILBOX],
+        manageable_mailboxes=[
+            "keaton@terrasatch.com",
+            BILLING_MAILBOX,
+            LEGAL_MAILBOX,
+        ],
+        organization_members=[
+            {
+                "email": "ericka@terrasatch.com",
+                "display_name": "Ericka",
+            }
+        ],
+        delegates={
+            "keaton@terrasatch.com": [
+                {
+                    "email": "ericka@terrasatch.com",
+                    "can_send": False,
+                }
+            ],
+            BILLING_MAILBOX: [],
+            LEGAL_MAILBOX: [],
+        },
+        csrf_token="csrf-test",
+    )
+
+    assert "MAILBOX ACCESS" in html
+    assert "keaton@terrasatch.com" in html
+    assert "ericka@terrasatch.com" in html
+    assert "view only" in html
+    assert "Billing access is view-only" in html
+    assert "/portal/email/access/delegate" in html
+    assert "/portal/email/access/revoke" in html
