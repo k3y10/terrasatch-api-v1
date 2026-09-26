@@ -291,12 +291,17 @@ async def migrate_legacy_admin_identity(
         raise InvalidConfiguration("A valid superadmin email is required")
     if not normalized_name:
         raise InvalidConfiguration("Superadmin display name is required")
-    if not verify_admin_password("__probe__", legacy_password_hash):
-        # verify_admin_password returning False does not distinguish a valid hash
-        # from a wrong password, so validate the stored representation structurally.
-        parts = legacy_password_hash.split("$")
-        if len(parts) != 6 or parts[0] != "scrypt":
-            raise InvalidConfiguration("Legacy admin password hash is invalid")
+    try:
+        algorithm, n_value, r_value, p_value, _salt, _digest = legacy_password_hash.split("$")
+        valid_hash = algorithm == "scrypt" and (
+            int(n_value),
+            int(r_value),
+            int(p_value),
+        ) == (16_384, 8, 1)
+    except (TypeError, ValueError):
+        valid_hash = False
+    if not valid_hash:
+        raise InvalidConfiguration("Legacy admin password hash is invalid")
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
     membership = None
