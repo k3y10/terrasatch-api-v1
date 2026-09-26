@@ -73,9 +73,14 @@ def render_email_detail(
     attachment_html = ""
     if attachments:
         items = "".join(
-            f"<li>{escape(str(item.get('filename') or 'attachment'))} · {escape(str(item.get('content_type') or 'file'))}</li>"
+            (
+                f'<li><a href="/portal/email/{_attr(getattr(message, "id"))}/attachments/'
+                f'{_attr(item.get("id") or "")}?organization={quote(organization_id)}">'
+                f'{escape(str(item.get("filename") or "attachment"))}</a>'
+                f' · {escape(str(item.get("content_type") or "file"))}</li>'
+            )
             for item in attachments
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("id")
         )
         attachment_html = f'<div class="attachments"><strong>Attachments</strong><ul>{items}</ul></div>'
     reply = ""
