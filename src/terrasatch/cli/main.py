@@ -22,7 +22,7 @@ from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
-from terrasatch.identity.access import migrate_legacy_admin_identity
+from terrasatch.identity.access import promote_superadmin_identity
 from terrasatch.main import create_app
 from terrasatch.observability.health import check_readiness
 from terrasatch.organizations.service import (
@@ -330,25 +330,47 @@ def admin_migrate_identity(
         str,
         typer.Option("--display-name", help="Human display name."),
     ] = "TerraSatch Founder",
+    new_password: Annotated[
+        bool,
+        typer.Option(
+            "--new-password",
+            help="Prompt for a new unified password instead of reusing the legacy admin hash.",
+        ),
+    ] = False,
 ) -> None:
-    """Migrate the legacy admin credential into one normal superadmin User identity."""
+    """Create the canonical database-backed superadmin User identity."""
 
     settings = _load_settings()
-    if settings.admin_password_hash is None:
+    password_hash: str | None = None
+    if new_password:
+        password = getpass.getpass("New unified password (12+ characters): ")
+        confirmation = getpass.getpass("Confirm unified password: ")
+        if password != confirmation:
+            typer.echo("Passwords do not match.", err=True)
+            raise typer.Exit(code=1)
+        try:
+            password_hash = hash_admin_password(password)
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1) from error
+    elif settings.admin_password_hash is not None:
+        password_hash = settings.admin_password_hash.get_secret_value()
+
+    if password_hash is None:
         typer.echo(
-            "Legacy TERRASATCH_ADMIN_PASSWORD_HASH is required for this one-time migration.",
+            "No legacy admin password hash is available; rerun with --new-password.",
             err=True,
         )
         raise typer.Exit(code=1)
 
     async def operation(session: AsyncSession, active_settings: Settings):
         selected = await resolve_organization(session, organization)
-        return await migrate_legacy_admin_identity(
+        return await promote_superadmin_identity(
             session,
             organization_id=selected.id,
             email=email,
             display_name=display_name,
-            legacy_password_hash=active_settings.admin_password_hash.get_secret_value(),
+            password_hash=password_hash,
             settings=active_settings,
         )
 
@@ -358,8 +380,8 @@ def admin_migrate_identity(
         f"(superadmin={user.is_superadmin}, organization_role={membership.role.value})."
     )
     typer.echo(
-        "The legacy admin email/password hash may remain temporarily as break-glass "
-        "credentials, but normal /admin and /portal access now use this User."
+        "Normal /admin and /portal access now use this User. Legacy bootstrap "
+        "credentials may remain temporarily for break-glass recovery."
     )
 
 
