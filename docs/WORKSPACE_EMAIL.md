@@ -30,6 +30,9 @@ Do not create a second production webhook unless a separate signing secret is al
   email workspace.
 - Owners and admins may view the internal TerraSatch inbox.
 - Operators may view their own mailbox.
+- A personal mailbox such as `keaton@terrasatch.com` or `ericka@terrasatch.com` should use
+  that same address on the person's portal user account so personal access resolves cleanly.
+- `ops@terrasatch.com` is a shared send/receive identity and does not need to be a login account.
 - Operators, admins, and owners may send from their own mailbox.
 - Admins and owners may also send from the shared `ops@terrasatch.com` mailbox.
 - A user cannot send as another person's mailbox.
@@ -83,9 +86,11 @@ After DNS propagates:
    metadata are present.
 4. Reply from the workspace and verify the recipient receives the message from
    `keaton@terrasatch.com`.
-5. Repeat inbound delivery for `ericka@terrasatch.com` and `ops@terrasatch.com`.
-6. Verify an internal user cannot send as another person's mailbox.
-7. Verify an external/customer workspace account cannot open the internal email workspace.
+5. Open an attached test file from the message and confirm TerraSatch authorizes the request before
+   redirecting to Resend's fresh signed download URL.
+6. Repeat inbound delivery for `ericka@terrasatch.com` and `ops@terrasatch.com`.
+7. Verify an internal user cannot send as another person's mailbox.
+8. Verify an external/customer workspace account cannot open the internal email workspace.
 
 Resend remains the delivery/receiving provider; PostgreSQL is the durable workspace copy used by
 TerraSatch.
