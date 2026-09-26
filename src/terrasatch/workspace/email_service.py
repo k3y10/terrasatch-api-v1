@@ -51,7 +51,10 @@ def sendable_mailboxes(user: User, role: MembershipRole) -> list[str]:
     """Return mailboxes this human may explicitly send as."""
 
     own = normalize_email_address(user.email)
-    if not own.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
+    if (
+        not own.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}")
+        or role == MembershipRole.VIEWER
+    ):
         return []
     senders = [own]
     if role in {MembershipRole.ADMIN, MembershipRole.OWNER}:
@@ -476,7 +479,12 @@ async def reply_to_workspace_email(
     sender = normalize_email_address(original.received_for)
     if sender not in sendable_mailboxes(user, role):
         raise InvalidConfiguration("This mailbox is view-only for your account")
-    recipient = normalize_email_address(original.from_address)
+    reply_target = (
+        original.reply_to[0]
+        if original.reply_to
+        else original.from_address
+    )
+    recipient = normalize_email_address(reply_target)
     if not recipient:
         raise InvalidConfiguration("The original sender address is invalid")
     subject = original.subject.strip()
