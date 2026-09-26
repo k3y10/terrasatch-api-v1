@@ -48,8 +48,8 @@ and storing the complete message.
 - A user cannot send as another person's mailbox.
 - Incoming HTML is stored for archival fidelity, but the server-rendered portal displays escaped
   plain text. This avoids rendering untrusted email HTML in the workspace.
-- Attachment metadata is stored. Attachment-byte download is intentionally not exposed in this
-  first pass.
+- Attachment metadata is stored, and authorized workspace users can open attachments through a
+  TerraSatch route that retrieves a fresh Resend signed download URL after access checks.
 
 ## Deploy
 
@@ -100,12 +100,14 @@ After deployment and receiving configuration:
 2. Confirm Resend records an `email.received` event and the webhook returns 2xx.
 3. Open `/portal/email` and verify the message, subject, sender, plain-text body, and attachment
    metadata are present.
-4. Reply from the workspace and verify the recipient receives the response from the selected
+4. Open a test attachment and confirm TerraSatch authorizes the request before redirecting to the
+   fresh Resend signed download URL.
+5. Reply from the workspace and verify the recipient receives the response from the selected
    TerraSatch mailbox.
-5. Repeat inbound delivery for another internal personal mailbox if applicable.
-6. Verify an internal user cannot send as another person's mailbox.
-7. Verify an external/customer workspace account cannot open the internal email workspace.
-8. Replay the Resend webhook and confirm the message is not duplicated.
+6. Repeat inbound delivery for another internal personal mailbox if applicable.
+7. Verify an internal user cannot send as another person's mailbox.
+8. Verify an external/customer workspace account cannot open the internal email workspace.
+9. Replay the Resend webhook and confirm the message is not duplicated.
 
 Resend remains the delivery/receiving provider; PostgreSQL is the durable workspace copy used by
 TerraSatch.
