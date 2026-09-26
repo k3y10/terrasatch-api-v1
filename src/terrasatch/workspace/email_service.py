@@ -460,6 +460,7 @@ async def list_workspace_emails(
         )
     )
     payloads: list[dict[str, object]] = []
+    sendable = set(await sendable_mailboxes(session, user=user, role=role))
     for row in rows:
         body = row.text_body or ""
         preview = " ".join(body.split())[:220]
@@ -475,8 +476,7 @@ async def list_workspace_emails(
                 "received_at": row.received_at,
                 "attachment_count": len(row.attachments or []),
                 "read": row.id in read_ids,
-                "reply_allowed": row.received_for
-                in await sendable_mailboxes(session, user=user, role=role),
+                "reply_allowed": row.received_for in sendable,
             }
         )
     return payloads
