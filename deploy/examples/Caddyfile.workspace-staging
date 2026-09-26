@@ -30,6 +30,11 @@ staging-api.terrasatch.com {
         reverse_proxy 127.0.0.1:8012
     }
 
+    @admin path /admin /admin/*
+    handle @admin {
+        reverse_proxy 127.0.0.1:8012
+    }
+
     @brand_assets path /assets/*
     handle @brand_assets {
         reverse_proxy 127.0.0.1:8012
