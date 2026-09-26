@@ -59,6 +59,7 @@ async def test_resend_received_email_is_persisted_once_and_visible_to_internal_a
 
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/emails/receiving/email_inbound_1"
+            assert request.headers["Authorization"] == "Bearer re_receiving_test"
             return httpx.Response(
                 200,
                 json={
@@ -84,6 +85,7 @@ async def test_resend_received_email_is_persisted_once_and_visible_to_internal_a
         settings = Settings(
             environment="local",
             resend_api_key=SecretStr("re_test"),
+            resend_receiving_api_key=SecretStr("re_receiving_test"),
         )
         event = {
             "type": "email.received",
@@ -126,6 +128,7 @@ async def test_resend_received_email_is_persisted_once_and_visible_to_internal_a
         assert messages[0]["subject"] == "Field test follow-up"
 
         def attachment_handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["Authorization"] == "Bearer re_receiving_test"
             assert (
                 request.url.path
                 == "/emails/receiving/email_inbound_1/attachments/attachment_1"

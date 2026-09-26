@@ -1,5 +1,13 @@
 # Workspace Email
 
+Receiving and attachment retrieval require a Resend key with Full access. A
+send-only key cannot retrieve incoming email, even when DNS and the webhook are
+verified. Set `TERRASATCH_RESEND_RECEIVING_API_KEY` in the server-only environment
+to use a separate receiving key while retaining the restricted outbound key in
+`TERRASATCH_RESEND_API_KEY`. If the separate key is absent, receiving retains the
+existing API-key fallback for deployments already using a Full access key.
+Never place either key in browser code, logs, source control, or public previews.
+
 TerraSatch email is integrated into the existing Field Workspace instead of running a separate
 mail server.
 

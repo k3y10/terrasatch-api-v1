@@ -129,6 +129,14 @@ class Settings(BaseSettings):
             "RESEND_API_KEY",
         ),
     )
+    # Receiving requires Resend Full access; outbound may retain its send-only key.
+    resend_receiving_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "resend_receiving_api_key",
+            "TERRASATCH_RESEND_RECEIVING_API_KEY",
+        ),
+    )
     resend_webhook_secret: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -199,6 +207,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "resend_api_key",
+        "resend_receiving_api_key",
         "resend_webhook_secret",
         "stripe_secret_key",
         "stripe_webhook_secret",

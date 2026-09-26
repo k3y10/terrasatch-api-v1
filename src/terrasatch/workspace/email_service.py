@@ -372,11 +372,12 @@ async def ingest_resend_received_email(
     if existing is not None:
         return InboundEmailResult(True, True, event_type, existing.id)
 
-    if settings.resend_api_key is None:
+    receiving_key = settings.resend_receiving_api_key or settings.resend_api_key
+    if receiving_key is None:
         raise ProviderUnavailable("Resend API key is unavailable for inbound email retrieval")
 
     headers = {
-        "Authorization": f"Bearer {settings.resend_api_key.get_secret_value()}",
+        "Authorization": f"Bearer {receiving_key.get_secret_value()}",
         "Accept": "application/json",
     }
     try:
@@ -573,11 +574,12 @@ async def get_workspace_attachment(
         raise ResourceNotFound("Email attachment was not found")
     if message.direction != "inbound":
         raise ResourceNotFound("Email attachment was not found")
-    if settings.resend_api_key is None:
+    receiving_key = settings.resend_receiving_api_key or settings.resend_api_key
+    if receiving_key is None:
         raise ProviderUnavailable("Resend API key is unavailable")
 
     headers = {
-        "Authorization": f"Bearer {settings.resend_api_key.get_secret_value()}",
+        "Authorization": f"Bearer {receiving_key.get_secret_value()}",
         "Accept": "application/json",
     }
     try:
@@ -631,7 +633,8 @@ async def _post_resend_email(
     thread_message_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[str, str | None]:
-    if settings.resend_api_key is None:
+    receiving_key = settings.resend_receiving_api_key or settings.resend_api_key
+    if receiving_key is None:
         raise ProviderUnavailable("Resend API key is unavailable")
     clean_subject = subject.strip()
     clean_text = text.strip()
@@ -655,7 +658,7 @@ async def _post_resend_email(
             "References": thread_message_id,
         }
     headers = {
-        "Authorization": f"Bearer {settings.resend_api_key.get_secret_value()}",
+        "Authorization": f"Bearer {receiving_key.get_secret_value()}",
         "Content-Type": "application/json",
         "Idempotency-Key": f"terrasatch-workspace-email/{request_id}"[:256],
     }
