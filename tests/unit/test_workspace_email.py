@@ -1,4 +1,5 @@
 """Workspace email ingestion, visibility, and sending safety."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
