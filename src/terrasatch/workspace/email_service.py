@@ -15,10 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.config import Settings
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable, ResourceNotFound
 from terrasatch.identity.models import MembershipRole, User
-from terrasatch.workspace.email_models import WorkspaceEmailMessage, WorkspaceEmailRead
+from terrasatch.workspace.email_models import (
+    WorkspaceEmailDelegate,
+    WorkspaceEmailMessage,
+    WorkspaceEmailRead,
+)
 
 TERRASATCH_EMAIL_DOMAIN = "terrasatch.com"
-_SHARED_SENDERS = {f"ops@{TERRASATCH_EMAIL_DOMAIN}"}
+OPS_MAILBOX = f"ops@{TERRASATCH_EMAIL_DOMAIN}"
+SUPPORT_MAILBOX = f"support@{TERRASATCH_EMAIL_DOMAIN}"
+LEGAL_MAILBOX = f"legal@{TERRASATCH_EMAIL_DOMAIN}"
+BILLING_MAILBOX = f"billing@{TERRASATCH_EMAIL_DOMAIN}"
+_SHARED_MAILBOXES = {OPS_MAILBOX, SUPPORT_MAILBOX, LEGAL_MAILBOX, BILLING_MAILBOX}
 _MAX_TEXT_BODY = 2_000_000
 _MAX_HTML_BODY = 4_000_000
 
@@ -47,19 +55,83 @@ def is_internal_workspace_user(user: User) -> bool:
     return is_terrasatch_address(user.email)
 
 
-def sendable_mailboxes(user: User, role: MembershipRole) -> list[str]:
-    """Return mailboxes this human may explicitly send as."""
+def _base_mailbox_permissions(
+    user: User,
+    role: MembershipRole,
+) -> dict[str, bool]:
+    """Return policy-granted mailbox visibility mapped to send permission."""
 
     own = normalize_email_address(user.email)
-    if (
-        not own.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}")
-        or role == MembershipRole.VIEWER
-    ):
-        return []
-    senders = [own]
-    if role in {MembershipRole.ADMIN, MembershipRole.OWNER}:
-        senders.extend(sorted(_SHARED_SENDERS - {own}))
-    return senders
+    if not own.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
+        return {}
+
+    permissions: dict[str, bool] = {
+        own: role != MembershipRole.VIEWER,
+    }
+    if role in {MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.OPERATOR}:
+        permissions[SUPPORT_MAILBOX] = True
+    if role in {MembershipRole.OWNER, MembershipRole.ADMIN}:
+        permissions[OPS_MAILBOX] = True
+        permissions[BILLING_MAILBOX] = False
+    if role == MembershipRole.OWNER:
+        permissions[LEGAL_MAILBOX] = True
+    return permissions
+
+
+async def mailbox_permissions(
+    session: AsyncSession,
+    *,
+    user: User,
+    role: MembershipRole,
+) -> dict[str, bool]:
+    """Resolve policy plus explicit per-user delegation for internal mailboxes."""
+
+    permissions = _base_mailbox_permissions(user, role)
+    if not is_internal_workspace_user(user):
+        return permissions
+
+    delegated = list(
+        await session.scalars(
+            select(WorkspaceEmailDelegate).where(
+                WorkspaceEmailDelegate.user_id == user.id
+            )
+        )
+    )
+    for item in delegated:
+        mailbox = normalize_email_address(item.mailbox_address)
+        if not mailbox.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
+            continue
+        can_send = bool(item.can_send)
+        if mailbox == BILLING_MAILBOX:
+            can_send = False
+        permissions[mailbox] = permissions.get(mailbox, False) or can_send
+        if mailbox not in permissions:
+            permissions[mailbox] = can_send
+    return permissions
+
+
+async def sendable_mailboxes(
+    session: AsyncSession,
+    *,
+    user: User,
+    role: MembershipRole,
+) -> list[str]:
+    """Return mailboxes this human may explicitly send as."""
+
+    permissions = await mailbox_permissions(session, user=user, role=role)
+    return sorted(mailbox for mailbox, can_send in permissions.items() if can_send)
+
+
+async def visible_mailboxes(
+    session: AsyncSession,
+    *,
+    user: User,
+    role: MembershipRole,
+) -> list[str]:
+    """Return every mailbox this human may read."""
+
+    permissions = await mailbox_permissions(session, user=user, role=role)
+    return sorted(permissions)
 
 
 def _string_list(value: object) -> list[str]:
