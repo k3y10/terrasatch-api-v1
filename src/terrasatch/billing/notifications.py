@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from terrasatch.billing.models import Subscription
 from terrasatch.billing.plans import BillingInterval, PlanCode, get_plan
 from terrasatch.config import Settings
+from terrasatch.email_branding import html_signature, text_signature
 from terrasatch.errors import ProviderUnavailable
 from terrasatch.identity.models import Membership, MembershipRole, Organization, User
 
@@ -245,8 +246,7 @@ def _shell(title: str, body: str) -> str:
         "TERRASATCH</div>"
         f'<h1 style="font-size:28px;line-height:1.15;margin:12px 0 20px">{escape(title)}</h1>'
         f'<div style="color:#d6d6cf;font-size:15px;line-height:1.65">{body}</div>'
-        '<div style="margin-top:34px;padding-top:18px;border-top:1px solid #30342f;'
-        'color:#8f968f;font-size:12px">LISTEN. WATCH. LEARN. ADAPT.</div>'
+        f'{html_signature("billing@terrasatch.com")}'
         "</div></body></html>"
     )
 
@@ -295,7 +295,7 @@ def build_billing_email(
             text_lines.append(f"Recurring price: {price}")
         if activation_url:
             text_lines.extend(["", f"Activate your account: {activation_url}"])
-        text_lines.extend(["", "LISTEN. WATCH. LEARN. ADAPT."])
+        text_lines.append("")
         return BillingEmailMessage(
             subject=subject,
             text="\n".join(text_lines),
@@ -585,11 +585,15 @@ async def _deliver_direct_resend(
         context=context,
         activation_url=activation_url,
     )
+    signed_text = (
+        f"{message.text.rstrip()}\n\n"
+        f"{text_signature('billing@terrasatch.com')}"
+    )
     payload: dict[str, object] = {
         "from": settings.billing_from,
         "to": [context.to],
         "subject": message.subject,
-        "text": message.text,
+        "text": signed_text,
         "html": message.html,
     }
     if settings.billing_reply_to:
