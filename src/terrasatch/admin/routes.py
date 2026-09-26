@@ -278,10 +278,18 @@ async def admin_login(
     settings: Settings = request.app.state.settings
     _enabled(settings)
     _verify_csrf(request, csrf_token)
-    user = await _run_database(
-        settings,
-        lambda session: authenticate_user(session, email=email, password=password),
-    )
+    try:
+        user = await _run_database(
+            settings,
+            lambda session: authenticate_user(session, email=email, password=password),
+        )
+    except Exception as error:
+        logger.warning(
+            "admin.identity_lookup_failed",
+            error_type=type(error).__name__,
+        )
+        user = None
+
     if user is not None and user.is_superadmin:
         establish_browser_identity(request.session, user)
         issue_csrf_token(request.session)
