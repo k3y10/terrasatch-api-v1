@@ -15,8 +15,9 @@ die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 [[ -d "$STAGING_DIR" ]] || die "Missing staging worktree: $STAGING_DIR"
 [[ -f "$ENV_FILE" ]] || die "Missing staging environment file: $ENV_FILE"
 [[ -f "$COMPOSE_FILE" ]] || die "Missing staging Compose file: $COMPOSE_FILE"
-[[ "$(git -C "$STAGING_DIR" branch --show-current)" == "feat/subscription-billing" ]] ||
-  die "Resend staging setup must run from the isolated billing worktree."
+EXPECTED_BRANCH="${TERRASATCH_STAGING_BRANCH:-feat/subscription-billing}"
+[[ "$(git -C "$STAGING_DIR" branch --show-current)" == "$EXPECTED_BRANCH" ]] ||
+  die "Resend staging setup must run from the isolated staging worktree for $EXPECTED_BRANCH."
 
 chmod 600 "$ENV_FILE"
 
