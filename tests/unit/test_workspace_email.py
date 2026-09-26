@@ -16,10 +16,17 @@ from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
 from terrasatch.workspace.email_models import WorkspaceEmailMessage
 from terrasatch.workspace.email_service import (
+    BILLING_MAILBOX,
+    LEGAL_MAILBOX,
+    OPS_MAILBOX,
+    SUPPORT_MAILBOX,
     get_workspace_attachment,
     ingest_resend_received_email,
     list_workspace_emails,
     send_workspace_email,
+    sendable_mailboxes,
+    set_mailbox_delegate,
+    visible_mailboxes,
 )
 
 
@@ -209,5 +216,160 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
 
         stored = await session.get(WorkspaceEmailMessage, row.id)
         assert stored is not None
+
+    await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_admin_does_not_get_blanket_access_to_personal_or_legal_mail() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        admin = User(email="admin@terrasatch.com", display_name="Admin", enabled=True)
+        session.add(admin)
+        await session.flush()
+        now = __import__("datetime").datetime.now(__import__("datetime").UTC)
+        for index, mailbox in enumerate(
+            [
+                "admin@terrasatch.com",
+                "keaton@terrasatch.com",
+                SUPPORT_MAILBOX,
+                OPS_MAILBOX,
+                BILLING_MAILBOX,
+                LEGAL_MAILBOX,
+            ]
+        ):
+            session.add(
+                WorkspaceEmailMessage(
+                    provider_email_id=f"email_policy_{index}",
+                    direction="inbound",
+                    received_for=mailbox,
+                    from_address="sender@example.com",
+                    to_addresses=[mailbox],
+                    cc_addresses=[],
+                    bcc_addresses=[],
+                    reply_to=[],
+                    subject=mailbox,
+                    text_body="policy test",
+                    html_body=None,
+                    headers={},
+                    attachments=[],
+                    received_at=now,
+                )
+            )
+        await session.commit()
+
+        messages = await list_workspace_emails(
+            session,
+            user=admin,
+            role=MembershipRole.ADMIN,
+        )
+        visible = {str(item["mailbox"]) for item in messages}
+        assert "admin@terrasatch.com" in visible
+        assert SUPPORT_MAILBOX in visible
+        assert OPS_MAILBOX in visible
+        assert BILLING_MAILBOX in visible
+        assert "keaton@terrasatch.com" not in visible
+        assert LEGAL_MAILBOX not in visible
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_personal_mailbox_delegation_is_explicit_and_can_allow_send() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        keaton = User(email="keaton@terrasatch.com", display_name="Keaton", enabled=True)
+        ericka = User(email="ericka@terrasatch.com", display_name="Ericka", enabled=True)
+        session.add_all([keaton, ericka])
+        await session.commit()
+
+        await set_mailbox_delegate(
+            session,
+            actor=keaton,
+            role=MembershipRole.OWNER,
+            mailbox="keaton@terrasatch.com",
+            delegate=ericka,
+            can_send=False,
+        )
+        await session.commit()
+
+        visible = await visible_mailboxes(
+            session,
+            user=ericka,
+            role=MembershipRole.OPERATOR,
+        )
+        senders = await sendable_mailboxes(
+            session,
+            user=ericka,
+            role=MembershipRole.OPERATOR,
+        )
+        assert "keaton@terrasatch.com" in visible
+        assert "keaton@terrasatch.com" not in senders
+
+        await set_mailbox_delegate(
+            session,
+            actor=keaton,
+            role=MembershipRole.OWNER,
+            mailbox="keaton@terrasatch.com",
+            delegate=ericka,
+            can_send=True,
+        )
+        await session.commit()
+        senders = await sendable_mailboxes(
+            session,
+            user=ericka,
+            role=MembershipRole.OPERATOR,
+        )
+        assert "keaton@terrasatch.com" in senders
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_billing_mailbox_is_human_view_only_even_for_owner() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        owner = User(email="owner@terrasatch.com", display_name="Owner", enabled=True)
+        session.add(owner)
+        await session.commit()
+
+        visible = await visible_mailboxes(
+            session,
+            user=owner,
+            role=MembershipRole.OWNER,
+        )
+        senders = await sendable_mailboxes(
+            session,
+            user=owner,
+            role=MembershipRole.OWNER,
+        )
+        assert BILLING_MAILBOX in visible
+        assert BILLING_MAILBOX not in senders
+
+        with pytest.raises(InvalidConfiguration):
+            await send_workspace_email(
+                session,
+                Settings(environment="local", resend_api_key=SecretStr("re_test")),
+                user=owner,
+                role=MembershipRole.OWNER,
+                sender=BILLING_MAILBOX,
+                recipients=["customer@example.com"],
+                subject="Should not send",
+                text="Billing remains automation-owned.",
+                request_id=uuid4(),
+            )
 
     await engine.dispose()
