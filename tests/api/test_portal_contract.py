@@ -10,8 +10,6 @@ from terrasatch.config import Settings
 from terrasatch.main import create_app
 
 
-
-
 def csrf_token(html: str) -> str:
     match = re.search(r'name="csrf_token" value="([^"]+)"', html)
     assert match is not None
