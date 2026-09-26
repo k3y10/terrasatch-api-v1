@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from terrasatch.database.session import create_session_factory
 from terrasatch.workspace.email_service import (
+    get_workspace_attachment,
     get_workspace_email,
     is_internal_workspace_user,
     list_workspace_emails,
@@ -91,6 +92,29 @@ async def workspace_email_detail(
                 "message_id": message.internet_message_id,
                 "received_at": message.received_at,
             }
+        )
+
+
+@router.get("/organizations/{organization_id}/email/{email_id}/attachments/{attachment_id}")
+async def workspace_email_attachment(
+    organization_id: UUID,
+    email_id: UUID,
+    attachment_id: str,
+    request: Request,
+    response: Response,
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        if not is_internal_workspace_user(user):
+            raise HTTPException(status_code=403, detail="TerraSatch email access required")
+        return await get_workspace_attachment(
+            session,
+            request.app.state.settings,
+            user=user,
+            role=membership.role,
+            email_id=email_id,
+            attachment_id=attachment_id,
         )
 
 
