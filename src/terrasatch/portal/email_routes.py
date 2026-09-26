@@ -77,12 +77,17 @@ async def portal_email_inbox(
             user=user,
             role=membership.role,
         )
+        senders = await sendable_mailboxes(
+            session,
+            user=user,
+            role=membership.role,
+        )
     return HTMLResponse(
         render_email_inbox(
             organization_id=str(membership.organization_id),
             organization_name=membership.organization_name,
             messages=messages,
-            senders=sendable_mailboxes(user, membership.role),
+            senders=senders,
             csrf_token=issue_csrf_token(request.session),
         ),
         headers={"Cache-Control": "no-store"},
@@ -112,7 +117,11 @@ async def portal_email_detail(
         )
         await mark_workspace_email_read(session, user=user, email_id=email_id)
         await session.commit()
-        reply_allowed = message.received_for in sendable_mailboxes(user, membership.role)
+        reply_allowed = message.received_for in await sendable_mailboxes(
+            session,
+            user=user,
+            role=membership.role,
+        )
     return HTMLResponse(
         render_email_detail(
             organization_id=str(membership.organization_id),
