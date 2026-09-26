@@ -74,7 +74,7 @@ def render_email_detail(
     if attachments:
         items = "".join(
             (
-                f'<li><a href="/portal/email/{_attr(getattr(message, "id"))}/attachments/'
+                f'<li><a href="/portal/email/{_attr(message.id)}/attachments/'
                 f'{_attr(item.get("id") or "")}?organization={quote(organization_id)}">'
                 f'{escape(str(item.get("filename") or "attachment"))}</a>'
                 f' · {escape(str(item.get("content_type") or "file"))}</li>'
@@ -85,5 +85,5 @@ def render_email_detail(
         attachment_html = f'<div class="attachments"><strong>Attachments</strong><ul>{items}</ul></div>'
     reply = ""
     if reply_allowed and getattr(message, "direction", "") == "inbound":
-        reply = f'''<section class="panel"><div class="panel-head"><span>REPLY</span><small>From {mailbox}</small></div><form class="compose" method="post" action="/portal/email/{_attr(getattr(message, "id"))}/reply"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send reply</button></div></form></section>'''
+        reply = f'''<section class="panel"><div class="panel-head"><span>REPLY</span><small>From {mailbox}</small></div><form class="compose" method="post" action="/portal/email/{_attr(message.id)}/reply"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send reply</button></div></form></section>'''
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{subject} · TerraSatch</title>{_styles()}</head><body>{_header(organization_name)}<main><section class="top"><div><h1>{subject}</h1><p>{escape(str(getattr(message, "direction", "inbound")).upper())}</p></div><a href="/portal/email?organization={quote(organization_id)}">Back to inbox</a></section><section class="panel"><div class="message"><div class="meta"><b>FROM</b><span>{sender}</span><b>TO</b><span>{recipients}</span><b>MAILBOX</b><span>{mailbox}</span><b>RECEIVED</b><span>{timestamp}</span></div><pre>{body or "(No plain-text body was supplied.)"}</pre>{attachment_html}</div></section>{reply}</main></body></html>'''
