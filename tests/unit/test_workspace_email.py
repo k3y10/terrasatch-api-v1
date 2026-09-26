@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.errors import InvalidConfiguration
+from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
 from terrasatch.workspace.email_models import WorkspaceEmailMessage
 from terrasatch.workspace.email_service import (
+    get_workspace_attachment,
     ingest_resend_received_email,
     list_workspace_emails,
     send_workspace_email,
@@ -114,6 +115,45 @@ async def test_resend_received_email_is_persisted_once_and_visible_to_internal_a
         assert len(messages) == 1
         assert messages[0]["mailbox"] == "keaton@terrasatch.com"
         assert messages[0]["subject"] == "Field test follow-up"
+
+        def attachment_handler(request: httpx.Request) -> httpx.Response:
+            assert (
+                request.url.path
+                == "/emails/receiving/email_inbound_1/attachments/attachment_1"
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "id": "attachment_1",
+                    "filename": "notes.txt",
+                    "content_type": "text/plain",
+                    "download_url": "https://example.com/signed/notes.txt",
+                    "expires_at": "2026-09-26T05:00:00Z",
+                },
+            )
+
+        attachment = await get_workspace_attachment(
+            session,
+            settings,
+            user=user,
+            role=MembershipRole.OWNER,
+            email_id=result.email_id,
+            attachment_id="attachment_1",
+            transport=httpx.MockTransport(attachment_handler),
+        )
+        assert attachment["filename"] == "notes.txt"
+        assert attachment["download_url"] == "https://example.com/signed/notes.txt"
+
+        with pytest.raises(ResourceNotFound):
+            await get_workspace_attachment(
+                session,
+                settings,
+                user=user,
+                role=MembershipRole.OWNER,
+                email_id=result.email_id,
+                attachment_id="not-on-this-message",
+                transport=httpx.MockTransport(attachment_handler),
+            )
 
     await engine.dispose()
 
