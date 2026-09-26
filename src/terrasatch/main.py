@@ -45,7 +45,9 @@ from terrasatch.observability.health import check_readiness, liveness
 from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
 from terrasatch.observability.request_id import RequestIdMiddleware
+from terrasatch.portal.email_routes import router as portal_email_router
 from terrasatch.portal.routes import router as portal_router
+from terrasatch.workspace.email_routes import router as workspace_email_router
 from terrasatch.workspace.routes import router as workspace_router
 
 logger = structlog.get_logger(__name__)
@@ -259,7 +261,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(admin_satchy_router)
     application.include_router(admin_member_router)
     application.include_router(portal_router)
+    application.include_router(portal_email_router)
     application.include_router(workspace_router)
+    application.include_router(workspace_email_router)
     return application
 
 
