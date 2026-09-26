@@ -79,6 +79,96 @@ done
 
 printf 'Resend sending domain: terrasatch.com (verified)\n'
 
+say "Ensuring the staging Resend webhook preserves billing events and receives inbound email"
+webhook_response="$(
+  curl --silent --show-error --fail-with-body \
+    -H "Authorization: Bearer $resend_admin_api_key" \
+    "https://api.resend.com/webhooks/$RESEND_WEBHOOK_ID"
+)" || die "Unable to retrieve the configured Resend webhook."
+
+webhook_update_payload="$(
+  python3 - "$webhook_response" "$RESEND_WEBHOOK_URL" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected_endpoint = sys.argv[2]
+required = [
+    "email.sent",
+    "email.delivered",
+    "email.delivery_delayed",
+    "email.bounced",
+    "email.complained",
+    "email.failed",
+    "email.suppressed",
+    "email.received",
+]
+existing = payload.get("events") or []
+if not isinstance(existing, list):
+    existing = []
+events = []
+for event in [*existing, *required]:
+    if isinstance(event, str) and event and event not in events:
+        events.append(event)
+print(
+    json.dumps(
+        {
+            "endpoint": expected_endpoint,
+            "events": events,
+            "status": "enabled",
+        },
+        separators=(",", ":"),
+    )
+)
+PY
+)"
+
+curl --silent --show-error --fail-with-body \
+  -X PATCH \
+  -H "Authorization: Bearer $resend_admin_api_key" \
+  -H 'Content-Type: application/json' \
+  -d "$webhook_update_payload" \
+  "https://api.resend.com/webhooks/$RESEND_WEBHOOK_ID" >/dev/null ||
+  die "Unable to update the Resend webhook endpoint/events."
+
+webhook_verify="$(
+  curl --silent --show-error --fail-with-body \
+    -H "Authorization: Bearer $resend_admin_api_key" \
+    "https://api.resend.com/webhooks/$RESEND_WEBHOOK_ID"
+)" || die "Unable to verify the updated Resend webhook."
+
+python3 - "$webhook_verify" "$RESEND_WEBHOOK_URL" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected_endpoint = sys.argv[2]
+required = {
+    "email.sent",
+    "email.delivered",
+    "email.delivery_delayed",
+    "email.bounced",
+    "email.complained",
+    "email.failed",
+    "email.suppressed",
+    "email.received",
+}
+events = set(payload.get("events") or [])
+endpoint = str(payload.get("endpoint") or "")
+status = str(payload.get("status") or "enabled")
+missing = sorted(required - events)
+if endpoint != expected_endpoint:
+    raise SystemExit(f"Resend webhook endpoint mismatch: {endpoint}")
+if missing:
+    raise SystemExit("Resend webhook is missing required events: " + ", ".join(missing))
+if status == "disabled":
+    raise SystemExit("Resend webhook is disabled")
+print("Resend webhook endpoint: staging workspace")
+print("Billing delivery events: preserved")
+print("Inbound email.received: enabled")
+PY
+unset webhook_response webhook_update_payload webhook_verify
+
 say "Rotating the staging Resend webhook signing secret"
 rotate_response="$(
   curl --silent --show-error --fail-with-body \
