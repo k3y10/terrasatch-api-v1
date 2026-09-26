@@ -142,6 +142,13 @@ Resend remains the delivery/receiving provider; PostgreSQL is the durable worksp
 TerraSatch.
 
 
+## Delegation UI
+
+The human workspace at `/portal/email` includes a **Mailbox Access** panel for mailboxes the signed-in
+user is allowed to manage. Personal mailbox owners can grant/revoke view-only or view-and-send
+access. Organization owners can manage shared mailbox delegation. The panel makes
+`billing@terrasatch.com` explicitly view-only and never offers human send permission.
+
 ## Delegation API
 
 Mailbox delegation is organization-scoped and only accepts enabled internal TerraSatch members.
