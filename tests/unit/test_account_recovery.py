@@ -154,7 +154,6 @@ async def test_activation_resend_reuses_valid_activation() -> None:
     await engine.dispose()
 
 
-
 @pytest.mark.asyncio
 async def test_legacy_admin_hash_migrates_to_superadmin_owner() -> None:
     engine = create_async_engine("sqlite+aiosqlite://")
