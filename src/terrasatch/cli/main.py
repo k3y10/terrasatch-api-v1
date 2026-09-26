@@ -22,6 +22,7 @@ from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
+from terrasatch.identity.access import migrate_legacy_admin_identity
 from terrasatch.main import create_app
 from terrasatch.observability.health import check_readiness
 from terrasatch.organizations.service import (
@@ -29,6 +30,7 @@ from terrasatch.organizations.service import (
     create_site,
     list_organizations,
     list_sites,
+    resolve_organization,
 )
 from terrasatch.workers.runner import run_worker
 
@@ -280,7 +282,7 @@ def admin_configure(
         typer.Option("--env-file", help="Owner-only environment file to update."),
     ] = Path(".env"),
 ) -> None:
-    """Set an owner-only local admin login configuration without printing secrets."""
+    """Set legacy bootstrap/break-glass admin credentials without printing secrets."""
 
     admin_email = email or typer.prompt("Administrator email").strip()
     if "@" not in admin_email or admin_email.startswith("@") or admin_email.endswith("@"):
@@ -304,8 +306,58 @@ def admin_configure(
         },
         destination=env_file,
     )
-    typer.echo(f"Browser administration configured in {env_file} with owner-only permissions.")
-    typer.echo("Restart the API, then open /admin using HTTPS in production.")
+    typer.echo(f"Legacy bootstrap administration configured in {env_file} with owner-only permissions.")
+    typer.echo(
+        "Use 'terrasatch admin migrate-identity' to move normal /admin access "
+        "to a database-backed User."
+    )
+
+
+@admin_app.command("migrate-identity")
+def admin_migrate_identity(
+    email: Annotated[
+        str,
+        typer.Option("--email", help="Canonical database-backed superadmin email."),
+    ],
+    organization: Annotated[
+        str,
+        typer.Option("--organization", help="Organization ID, slug, or name to own."),
+    ],
+    display_name: Annotated[
+        str,
+        typer.Option("--display-name", help="Human display name."),
+    ] = "TerraSatch Founder",
+) -> None:
+    """Migrate the legacy admin credential into one normal superadmin User identity."""
+
+    settings = _load_settings()
+    if settings.admin_password_hash is None:
+        typer.echo(
+            "Legacy TERRASATCH_ADMIN_PASSWORD_HASH is required for this one-time migration.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    async def operation(session: AsyncSession, active_settings: Settings):
+        selected = await resolve_organization(session, organization)
+        return await migrate_legacy_admin_identity(
+            session,
+            organization_id=selected.id,
+            email=email,
+            display_name=display_name,
+            legacy_password_hash=active_settings.admin_password_hash.get_secret_value(),
+            settings=active_settings,
+        )
+
+    user, membership = _run_database(operation)
+    typer.echo(
+        f"Unified identity ready: {user.email} "
+        f"(superadmin={user.is_superadmin}, organization_role={membership.role.value})."
+    )
+    typer.echo(
+        "The legacy admin email/password hash may remain temporarily as break-glass "
+        "credentials, but normal /admin and /portal access now use this User."
+    )
 
 
 @deployment_app.command("check")
