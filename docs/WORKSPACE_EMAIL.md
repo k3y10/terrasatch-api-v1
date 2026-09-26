@@ -33,19 +33,33 @@ GET /emails/receiving/{email_id}
 The signed webhook provides `data.email_id`; TerraSatch verifies the webhook before retrieving
 and storing the complete message.
 
-## Access policy
+## Mailbox separation and access policy
 
-- Only authenticated TerraSatch users whose account email is under `@terrasatch.com` can open the
-  email workspace.
-- Owners and admins may view the internal TerraSatch inbox.
-- Other internal members see mail addressed to their own portal account.
-- A personal mailbox should use the same address on the person's portal user account so personal
-  access resolves cleanly.
-- `ops@terrasatch.com` is a shared send identity for admins/owners and does not need to be a login
-  account.
-- Operators, admins, and owners may send from their own mailbox.
-- Admins and owners may also send from `ops@terrasatch.com`.
-- A user cannot send as another person's mailbox.
+Only authenticated TerraSatch users whose portal account is under `@terrasatch.com` can open the
+email workspace. General organization roles do not grant blanket access to every executive mailbox.
+
+| Mailbox | Default visibility | Human send policy | Purpose |
+| --- | --- | --- | --- |
+| personal user address, e.g. `keaton@terrasatch.com` | that user only | that user; explicit delegates may optionally send | executive/personal company mail |
+| `support@terrasatch.com` | operator, admin, owner | operator, admin, owner | customer/user support |
+| `ops@terrasatch.com` | admin, owner | admin, owner | company/field operations |
+| `legal@terrasatch.com` | owner | owner | legal, contracts, privileged/sensitive correspondence |
+| `billing@terrasatch.com` | admin, owner | **human sending disabled** | Stripe/billing lifecycle automation and billing visibility |
+
+Personal mailboxes are private by default even when another user is an organization admin or owner.
+A mailbox owner can explicitly delegate their own personal mailbox to another enabled internal
+organization member with view-only or view-and-send access. Organization owners can explicitly
+delegate shared company mailboxes. Delegation is additive and stored in
+`workspace_email_delegates`; it does not change the user's general organization role.
+
+`billing@terrasatch.com` is intentionally different: the existing Stripe/billing outbox owns
+billing lifecycle sending. Human workspace users may be granted visibility, but the workspace will
+not send manually as `billing@`. This keeps billing automation, idempotency, retries, and
+delivery/bounce reconciliation isolated from normal human correspondence.
+
+A user cannot send as another person's mailbox unless that mailbox owner explicitly delegated send
+permission. Incoming HTML is stored for archival fidelity, but the server-rendered portal displays
+escaped plain text. This avoids rendering untrusted email HTML in the workspace.
 - Incoming HTML is stored for archival fidelity, but the server-rendered portal displays escaped
   plain text. This avoids rendering untrusted email HTML in the workspace.
 - Attachment metadata is stored, and authorized workspace users can open attachments through a
@@ -60,7 +74,9 @@ bash deploy/release-oracle.sh
 ```
 
 The release applies Alembic migrations, so production must reach migration
-`0022_workspace_email` before inbound delivery is enabled.
+`0023_workspace_email_delegates` before inbound delivery is enabled. Migration
+`0022_workspace_email` creates the durable message/read-state tables and `0023` adds explicit
+mailbox delegation.
 
 Do not enable receiving DNS first. Deploy and verify the API route/database before changing mail
 routing.
@@ -111,3 +127,56 @@ After deployment and receiving configuration:
 
 Resend remains the delivery/receiving provider; PostgreSQL is the durable workspace copy used by
 TerraSatch.
+
+
+## Delegation API
+
+Mailbox delegation is organization-scoped and only accepts enabled internal TerraSatch members.
+
+- `GET /api/v1/workspace/organizations/{organization_id}/email-access/delegations?mailbox=...`
+- `POST /api/v1/workspace/organizations/{organization_id}/email-access/delegations`
+- `POST /api/v1/workspace/organizations/{organization_id}/email-access/delegations/revoke`
+
+Create/update payload:
+
+```json
+{
+  "mailbox": "keaton@terrasatch.com",
+  "delegate_email": "ericka@terrasatch.com",
+  "can_send": false
+}
+```
+
+Personal mailbox delegation can only be managed by the owner of that mailbox. Shared mailbox
+delegation can only be managed by an organization owner. Any requested send permission for
+`billing@terrasatch.com` is forced off.
+
+## Operational boundary
+
+Stripe billing remains:
+
+```text
+Stripe lifecycle event
+  -> TerraSatch subscription/billing service
+  -> durable billing email outbox
+  -> Oracle worker
+  -> Resend send API
+  -> Resend delivery/bounce event
+  -> signed TerraSatch Resend webhook
+  -> billing outbox delivery state
+```
+
+Human/inbound email remains:
+
+```text
+external sender
+  -> Resend Receiving
+  -> email.received
+  -> signed TerraSatch Resend webhook
+  -> workspace email storage
+  -> mailbox policy/delegation
+  -> /portal/email
+```
+
+Both paths intentionally share Resend transport and webhook verification but do not share human
+mailbox authorization or billing-send authority.
