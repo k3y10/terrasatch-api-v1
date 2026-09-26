@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
+from terrasatch.errors import InvalidConfiguration
 from terrasatch.identity.models import Account, Membership, MembershipRole, Organization, User
 from terrasatch.workspace.email_models import WorkspaceEmailMessage
 from terrasatch.workspace.email_service import (
@@ -152,7 +153,7 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
         assert row.direction == "outbound"
         assert sent_payload["from"] == "ops@terrasatch.com"
 
-        with pytest.raises(Exception):
+        with pytest.raises(InvalidConfiguration):
             await send_workspace_email(
                 session,
                 settings,
