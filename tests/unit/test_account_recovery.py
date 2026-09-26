@@ -11,6 +11,7 @@ from terrasatch.admin.security import hash_admin_password, verify_admin_password
 from terrasatch.billing.service import recover_or_refresh_activation_for_email
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
+from terrasatch.identity.access import migrate_legacy_admin_identity
 from terrasatch.identity.models import (
     Account,
     Membership,
@@ -19,7 +20,6 @@ from terrasatch.identity.models import (
     PasswordResetIntent,
     User,
 )
-from terrasatch.identity.access import migrate_legacy_admin_identity
 from terrasatch.identity.recovery import (
     create_password_reset_intent,
     recover_password_reset_token,
