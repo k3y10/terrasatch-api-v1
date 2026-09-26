@@ -11,7 +11,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.data_ui import render_data_inspector, render_data_sources
-from terrasatch.admin.routes import _admin_actor_id, _require_authenticated, _run_database, _verify_csrf
+from terrasatch.admin.routes import (
+    _admin_actor_id,
+    _require_authenticated,
+    _run_database,
+    _verify_csrf,
+)
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.config import Settings
 from terrasatch.errors import TerraSatchError
