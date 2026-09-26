@@ -8,16 +8,22 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
 from terrasatch.database.session import create_session_factory
+from terrasatch.identity.models import Membership, User
 from terrasatch.workspace.email_service import (
     get_workspace_attachment,
     get_workspace_email,
     is_internal_workspace_user,
     list_workspace_emails,
+    list_mailbox_delegates,
     mark_workspace_email_read,
+    normalize_email_address,
+    remove_mailbox_delegate,
     reply_to_workspace_email,
     send_workspace_email,
+    set_mailbox_delegate,
 )
 from terrasatch.workspace.routes import access, csrf
 
@@ -35,6 +41,139 @@ class ComposeEmail(BaseModel):
 class ReplyEmail(BaseModel):
     request_id: UUID
     text: str = Field(min_length=1, max_length=20_000)
+
+
+class MailboxDelegationRequest(BaseModel):
+    mailbox: str = Field(min_length=3, max_length=320)
+    delegate_email: str = Field(min_length=5, max_length=320)
+    can_send: bool = False
+
+
+class MailboxDelegationRevoke(BaseModel):
+    mailbox: str = Field(min_length=3, max_length=320)
+    delegate_email: str = Field(min_length=5, max_length=320)
+
+
+async def _organization_delegate_user(
+    session,
+    *,
+    organization_id: UUID,
+    email: str,
+) -> User:
+    normalized = normalize_email_address(email)
+    user = await session.scalar(
+        select(User)
+        .join(Membership, Membership.user_id == User.id)
+        .where(
+            Membership.organization_id == organization_id,
+            Membership.enabled.is_(True),
+            User.enabled.is_(True),
+            func.lower(User.email) == normalized,
+        )
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Delegate must be an enabled member of this organization",
+        )
+    return user
+
+
+@router.get("/organizations/{organization_id}/email-access/delegations")
+async def workspace_email_delegations(
+    organization_id: UUID,
+    mailbox: str,
+    request: Request,
+) -> dict[str, object]:
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        if not is_internal_workspace_user(user):
+            raise HTTPException(status_code=403, detail="TerraSatch email access required")
+        rows = await list_mailbox_delegates(
+            session,
+            actor=user,
+            role=membership.role,
+            mailbox=mailbox,
+        )
+        delegate_ids = [row.user_id for row in rows]
+        delegates = {}
+        if delegate_ids:
+            delegates = {
+                item.id: item.email
+                for item in await session.scalars(
+                    select(User).where(User.id.in_(delegate_ids))
+                )
+            }
+        return {
+            "mailbox": normalize_email_address(mailbox),
+            "delegates": [
+                {
+                    "user_id": str(row.user_id),
+                    "email": delegates.get(row.user_id, ""),
+                    "can_send": bool(row.can_send),
+                }
+                for row in rows
+            ],
+        }
+
+
+@router.post("/organizations/{organization_id}/email-access/delegations")
+async def workspace_email_delegate(
+    organization_id: UUID,
+    payload: MailboxDelegationRequest,
+    request: Request,
+) -> dict[str, object]:
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        actor, membership = await access(request, session, organization_id)
+        if not is_internal_workspace_user(actor):
+            raise HTTPException(status_code=403, detail="TerraSatch email access required")
+        delegate = await _organization_delegate_user(
+            session,
+            organization_id=organization_id,
+            email=payload.delegate_email,
+        )
+        row = await set_mailbox_delegate(
+            session,
+            actor=actor,
+            role=membership.role,
+            mailbox=payload.mailbox,
+            delegate=delegate,
+            can_send=payload.can_send,
+        )
+        await session.commit()
+        return {
+            "mailbox": row.mailbox_address,
+            "delegate_email": delegate.email,
+            "can_send": bool(row.can_send),
+        }
+
+
+@router.post("/organizations/{organization_id}/email-access/delegations/revoke")
+async def workspace_email_delegate_revoke(
+    organization_id: UUID,
+    payload: MailboxDelegationRevoke,
+    request: Request,
+) -> dict[str, bool]:
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        actor, membership = await access(request, session, organization_id)
+        if not is_internal_workspace_user(actor):
+            raise HTTPException(status_code=403, detail="TerraSatch email access required")
+        delegate = await _organization_delegate_user(
+            session,
+            organization_id=organization_id,
+            email=payload.delegate_email,
+        )
+        removed = await remove_mailbox_delegate(
+            session,
+            actor=actor,
+            role=membership.role,
+            mailbox=payload.mailbox,
+            delegate=delegate,
+        )
+        await session.commit()
+        return {"removed": removed}
 
 
 @router.get("/organizations/{organization_id}/email")
