@@ -311,16 +311,16 @@ def admin_configure(
         "with owner-only permissions."
     )
     typer.echo(
-        "Use 'terrasatch admin migrate-identity' to move normal /admin access "
-        "to a database-backed User."
+        "Use 'terrasatch admin promote-superadmin' to make the canonical "
+        "database-backed founder identity the normal /admin account."
     )
 
 
-@admin_app.command("migrate-identity")
-def admin_migrate_identity(
+@admin_app.command("promote-superadmin")
+def admin_promote_superadmin(
     email: Annotated[
         str,
-        typer.Option("--email", help="Canonical database-backed superadmin email."),
+        typer.Option("--email", help="Canonical TerraSatch superadmin email."),
     ],
     organization: Annotated[
         str,
@@ -329,36 +329,18 @@ def admin_migrate_identity(
     display_name: Annotated[
         str,
         typer.Option("--display-name", help="Human display name."),
-    ] = "TerraSatch Founder",
-    new_password: Annotated[
-        bool,
-        typer.Option(
-            "--new-password",
-            help="Prompt for a new unified password instead of reusing the legacy admin hash.",
-        ),
-    ] = False,
+    ] = "Keaton",
 ) -> None:
-    """Create the canonical database-backed superadmin User identity."""
+    """Make one TerraSatch User the platform superadmin and organization owner.
+
+    The existing legacy admin password hash is reused so no password is printed
+    or re-entered during migration.
+    """
 
     settings = _load_settings()
-    password_hash: str | None = None
-    if new_password:
-        password = getpass.getpass("New unified password (12+ characters): ")
-        confirmation = getpass.getpass("Confirm unified password: ")
-        if password != confirmation:
-            typer.echo("Passwords do not match.", err=True)
-            raise typer.Exit(code=1)
-        try:
-            password_hash = hash_admin_password(password)
-        except ValueError as error:
-            typer.echo(str(error), err=True)
-            raise typer.Exit(code=1) from error
-    elif settings.admin_password_hash is not None:
-        password_hash = settings.admin_password_hash.get_secret_value()
-
-    if password_hash is None:
+    if settings.admin_password_hash is None:
         typer.echo(
-            "No legacy admin password hash is available; rerun with --new-password.",
+            "Legacy admin password hash is not configured; cannot reuse the existing password.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -370,56 +352,14 @@ def admin_migrate_identity(
             organization_id=selected.id,
             email=email,
             display_name=display_name,
-            password_hash=password_hash,
+            password_hash=settings.admin_password_hash.get_secret_value(),
             settings=active_settings,
-        )
-
-    user, membership = _run_database(operation)
-    typer.echo(
-        f"Unified identity ready: {user.email} "
-        f"(superadmin={user.is_superadmin}, organization_role={membership.role.value})."
-    )
-    typer.echo(
-        "Normal /admin and /portal access now use this User. Legacy bootstrap "
-        "credentials may remain temporarily for break-glass recovery."
-    )
-
-
-@admin_app.command("promote-superadmin")
-def admin_promote_superadmin(
-    email: str = typer.Option(..., "--email", help="Canonical TerraSatch superadmin email."),
-    organization: str = typer.Option(
-        ...,
-        "--organization",
-        help="Organization ID, slug, or name to own.",
-    ),
-    display_name: str = typer.Option("Keaton", "--display-name"),
-) -> None:
-    """Promote one normal TerraSatch user identity to platform superadmin.
-
-    The existing legacy admin password hash is copied into the database-backed
-    user so the same password continues to work without exposing or retyping it.
-    """
-
-    async def operation(session: AsyncSession, settings: Settings):
-        if settings.admin_password_hash is None:
-            raise InvalidConfiguration(
-                "Legacy admin password hash is not configured for migration"
-            )
-        selected = await resolve_organization(session, organization)
-        return await migrate_legacy_admin_identity(
-            session,
-            organization_id=selected.id,
-            email=email,
-            display_name=display_name,
-            legacy_password_hash=settings.admin_password_hash.get_secret_value(),
-            settings=settings,
         )
 
     user, membership = _run_database(operation)
     typer.echo(f"Superadmin: {user.email}")
     typer.echo(f"Organization role: {membership.role.value}")
-    typer.echo("One TerraSatch password now authorizes portal and admin access.")
+    typer.echo("Same TerraSatch password now works for /portal and /admin.")
 
 
 @deployment_app.command("check")
