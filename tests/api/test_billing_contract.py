@@ -335,7 +335,7 @@ async def test_signed_received_email_webhook_reaches_transactional_workspace_sto
         )
 
     assert response.status_code == 200
-    assert response.json() == {"matched": True, "duplicate": False}
+    assert response.json() == {"received": True, "matched": True, "duplicate": False}
 
     async with factory() as session:
         stored = await session.scalar(
