@@ -87,7 +87,10 @@ def upgrade():
 
 def downgrade():
     op.drop_table("workspace_email_reads")
-    op.drop_index("ix_workspace_email_messages_recipient_user_id", table_name="workspace_email_messages")
+    op.drop_index(
+        "ix_workspace_email_messages_recipient_user_id",
+        table_name="workspace_email_messages",
+    )
     op.drop_index("ix_workspace_email_parent_id", table_name="workspace_email_messages")
     op.drop_index("ix_workspace_email_received_at", table_name="workspace_email_messages")
     op.drop_index("ix_workspace_email_received_for", table_name="workspace_email_messages")
