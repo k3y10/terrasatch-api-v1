@@ -19,6 +19,7 @@ from terrasatch.identity.models import (
     PasswordResetIntent,
     User,
 )
+from terrasatch.identity.access import migrate_legacy_admin_identity
 from terrasatch.identity.recovery import (
     create_password_reset_intent,
     recover_password_reset_token,
@@ -149,5 +150,43 @@ async def test_activation_resend_reuses_valid_activation() -> None:
         assert first is not None
         assert second == first
         assert first[1] == organization.id
+
+    await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_legacy_admin_hash_migrates_to_superadmin_owner() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    legacy_hash = hash_admin_password("legacy-password-123")
+
+    async with factory() as session:
+        account = Account(id=uuid4(), name="TerraSatch")
+        organization = Organization(
+            id=uuid4(),
+            account_id=account.id,
+            name="TerraSatch",
+            slug="terrasatch",
+        )
+        session.add_all([account, organization])
+        await session.flush()
+
+        user, membership = await migrate_legacy_admin_identity(
+            session,
+            organization_id=organization.id,
+            email="keaton@terrasatch.com",
+            display_name="Keaton",
+            legacy_password_hash=legacy_hash,
+            settings=settings(),
+        )
+
+        assert user.email == "keaton@terrasatch.com"
+        assert user.is_superadmin is True
+        assert user.password_hash == legacy_hash
+        assert membership.role is MembershipRole.OWNER
+        assert membership.enabled is True
 
     await engine.dispose()
