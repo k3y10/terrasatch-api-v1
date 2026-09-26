@@ -14,7 +14,6 @@ from terrasatch.identity.access import (
 from terrasatch.identity.models import Account, MembershipRole, Organization, User
 
 
-
 def test_membership_role_order_is_monotonic() -> None:
     assert role_allows(MembershipRole.OWNER, MembershipRole.ADMIN) is True
     assert role_allows(MembershipRole.ADMIN, MembershipRole.OPERATOR) is True
