@@ -6,7 +6,7 @@ ENV_FILE="${TERRASATCH_STAGING_ENV_FILE:-$STAGING_DIR/.env.staging}"
 COMPOSE_FILE="${TERRASATCH_STAGING_COMPOSE_FILE:-$STAGING_DIR/deploy/docker-compose.workspace-staging.yml}"
 RESEND_WEBHOOK_URL="https://staging-api.terrasatch.com/api/v1/workspace/billing/resend/webhook"
 RESEND_WEBHOOK_ID="${TERRASATCH_RESEND_WEBHOOK_ID:-76225e17-36a9-4dc9-95a4-b28094a26d4d}"
-RESEND_DOMAIN_ID="${TERRASATCH_RESEND_DOMAIN_ID:-5876992d-002a-4b26-b53c-0c7e29f33b8f}"
+RESEND_DOMAIN_ID="${TERRASATCH_RESEND_DOMAIN_ID:-}"
 RESEND_DOMAIN_NAME="terrasatch.com"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -35,49 +35,116 @@ printf '\n'
 [[ "$resend_admin_api_key" == re_* ]] ||
   die "Resend admin API key must use the expected re_ prefix."
 
-say "Verifying the TerraSatch Resend sending domain"
-curl --silent --show-error --fail-with-body \
-  -X POST \
-  -H "Authorization: Bearer $resend_admin_api_key" \
-  -H 'Content-Type: application/json' \
-  "https://api.resend.com/domains/$RESEND_DOMAIN_ID/verify" >/dev/null || true
+say "Checking the TerraSatch Resend domain"
+domains_response="$(
+  curl --silent --show-error --fail-with-body \
+    -H "Authorization: Bearer $resend_admin_api_key" \
+    "https://api.resend.com/domains"
+)" || die "Unable to list Resend domains with the supplied admin key."
 
-domain_status=""
-domain_name=""
-for attempt in $(seq 1 6); do
-  domain_response="$(
-    curl --silent --show-error --fail-with-body \
-      -H "Authorization: Bearer $resend_admin_api_key" \
-      "https://api.resend.com/domains/$RESEND_DOMAIN_ID"
-  )" || die "Unable to retrieve the TerraSatch Resend domain."
-
-  read -r domain_name domain_status < <(
-    python3 - "$domain_response" <<'PY'
+read -r discovered_domain_id domain_status sending_capability receiving_capability < <(
+  python3 - "$domains_response" "$RESEND_DOMAIN_NAME" "$RESEND_DOMAIN_ID" <<'PY'
 import json
 import sys
 
 payload = json.loads(sys.argv[1])
-print(str(payload.get("name") or ""), str(payload.get("status") or ""))
+expected_name = sys.argv[2].casefold()
+configured_id = sys.argv[3].strip()
+items = payload.get("data") or payload.get("domains") or []
+if not isinstance(items, list):
+    items = []
+
+matches = [
+    item for item in items
+    if isinstance(item, dict)
+    and str(item.get("name") or "").casefold() == expected_name
+]
+if configured_id:
+    configured = [
+        item for item in matches
+        if str(item.get("id") or "") == configured_id
+    ]
+    if configured:
+        matches = configured
+
+if not matches:
+    raise SystemExit("terrasatch.com was not found in the Resend team for this Full Access key")
+if len(matches) > 1:
+    raise SystemExit("multiple terrasatch.com domains were returned; set TERRASATCH_RESEND_DOMAIN_ID explicitly")
+
+item = matches[0]
+capabilities = item.get("capabilities") or {}
+print(
+    str(item.get("id") or ""),
+    str(item.get("status") or ""),
+    str(capabilities.get("sending") or ""),
+    str(capabilities.get("receiving") or ""),
+)
 PY
-  )
-  unset domain_response
+) || die "Unable to resolve terrasatch.com from the current Resend team."
 
-  [[ "$domain_name" == "$RESEND_DOMAIN_NAME" ]] ||
-    die "Configured Resend domain ID does not resolve to terrasatch.com."
+unset domains_response
+RESEND_DOMAIN_ID="$discovered_domain_id"
 
-  if [[ "$domain_status" == "verified" ]]; then
-    break
-  fi
+[[ -n "$RESEND_DOMAIN_ID" ]] || die "Resend did not return a domain ID for terrasatch.com."
 
-  if [[ "$attempt" -lt 6 ]]; then
-    sleep 5
-  fi
-done
+domain_ready=false
+if [[ "$domain_status" == "verified" || "$sending_capability" == "enabled" ]]; then
+  domain_ready=true
+fi
 
-[[ "$domain_status" == "verified" ]] ||
-  die "terrasatch.com is not verified in Resend yet. Add the required GoDaddy DNS records, wait for propagation, then rerun this helper."
+if [[ "$domain_ready" != "true" ]]; then
+  printf 'Current Resend domain status: %s (sending=%s, receiving=%s)\n' \
+    "${domain_status:-unknown}" "${sending_capability:-unknown}" "${receiving_capability:-unknown}"
+  printf 'Requesting verification because sending is not enabled yet.\n'
 
-printf 'Resend sending domain: terrasatch.com (verified)\n'
+  curl --silent --show-error --fail-with-body \
+    -X POST \
+    -H "Authorization: Bearer $resend_admin_api_key" \
+    -H 'Content-Type: application/json' \
+    "https://api.resend.com/domains/$RESEND_DOMAIN_ID/verify" >/dev/null ||
+    die "Resend rejected the domain verification request."
+
+  for attempt in $(seq 1 12); do
+    domain_response="$(
+      curl --silent --show-error --fail-with-body \
+        -H "Authorization: Bearer $resend_admin_api_key" \
+        "https://api.resend.com/domains/$RESEND_DOMAIN_ID"
+    )" || die "Unable to retrieve the TerraSatch Resend domain."
+
+    read -r domain_name domain_status sending_capability receiving_capability < <(
+      python3 - "$domain_response" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+capabilities = payload.get("capabilities") or {}
+print(
+    str(payload.get("name") or ""),
+    str(payload.get("status") or ""),
+    str(capabilities.get("sending") or ""),
+    str(capabilities.get("receiving") or ""),
+)
+PY
+    )
+    unset domain_response
+
+    [[ "$domain_name" == "$RESEND_DOMAIN_NAME" ]] ||
+      die "Configured Resend domain ID does not resolve to terrasatch.com."
+
+    if [[ "$domain_status" == "verified" || "$sending_capability" == "enabled" ]]; then
+      domain_ready=true
+      break
+    fi
+    [[ "$attempt" -lt 12 ]] && sleep 5
+  done
+fi
+
+[[ "$domain_ready" == "true" ]] ||
+  die "terrasatch.com exists in Resend but sending is not enabled yet."
+
+printf 'Resend domain: terrasatch.com (status=%s, sending=%s, receiving=%s)\n' \
+  "${domain_status:-unknown}" "${sending_capability:-unknown}" "${receiving_capability:-unknown}"
 
 say "Ensuring the staging Resend webhook preserves billing events and receives inbound email"
 webhook_response="$(
