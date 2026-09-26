@@ -309,15 +309,18 @@ async def ingest_resend_received_email(
     return InboundEmailResult(True, False, event_type, message.id)
 
 
-def _visible_statement(user: User, role: MembershipRole):
+async def _visible_statement(
+    session: AsyncSession,
+    *,
+    user: User,
+    role: MembershipRole,
+):
     statement = select(WorkspaceEmailMessage)
-    if not is_internal_workspace_user(user):
+    mailboxes = await visible_mailboxes(session, user=user, role=role)
+    if not mailboxes:
         return statement.where(False)
-    if role in {MembershipRole.ADMIN, MembershipRole.OWNER}:
-        return statement
     return statement.where(
-        func.lower(WorkspaceEmailMessage.received_for)
-        == normalize_email_address(user.email)
+        func.lower(WorkspaceEmailMessage.received_for).in_(mailboxes)
     )
 
 
@@ -330,7 +333,7 @@ async def list_workspace_emails(
 ) -> list[dict[str, object]]:
     rows = list(
         await session.scalars(
-            _visible_statement(user, role)
+            (await _visible_statement(session, user=user, role=role))
             .order_by(WorkspaceEmailMessage.received_at.desc())
             .limit(max(1, min(limit, 200)))
         )
@@ -361,7 +364,8 @@ async def list_workspace_emails(
                 "received_at": row.received_at,
                 "attachment_count": len(row.attachments or []),
                 "read": row.id in read_ids,
-                "reply_allowed": row.received_for in sendable_mailboxes(user, role),
+                "reply_allowed": row.received_for
+                in await sendable_mailboxes(session, user=user, role=role),
             }
         )
     return payloads
@@ -375,7 +379,9 @@ async def get_workspace_email(
     email_id: UUID,
 ) -> WorkspaceEmailMessage:
     message = await session.scalar(
-        _visible_statement(user, role).where(WorkspaceEmailMessage.id == email_id)
+        (await _visible_statement(session, user=user, role=role)).where(
+            WorkspaceEmailMessage.id == email_id
+        )
     )
     if message is None:
         raise ResourceNotFound("Email was not found")
@@ -551,7 +557,7 @@ async def send_workspace_email(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> WorkspaceEmailMessage:
     normalized_sender = normalize_email_address(sender)
-    allowed = sendable_mailboxes(user, role)
+    allowed = await sendable_mailboxes(session, user=user, role=role)
     if normalized_sender not in allowed:
         raise InvalidConfiguration("You are not allowed to send from this TerraSatch mailbox")
 
@@ -627,7 +633,7 @@ async def reply_to_workspace_email(
     if original.direction != "inbound":
         raise InvalidConfiguration("Only inbound email can be replied to")
     sender = normalize_email_address(original.received_for)
-    if sender not in sendable_mailboxes(user, role):
+    if sender not in await sendable_mailboxes(session, user=user, role=role):
         raise InvalidConfiguration("This mailbox is view-only for your account")
     reply_target = (
         original.reply_to[0]
