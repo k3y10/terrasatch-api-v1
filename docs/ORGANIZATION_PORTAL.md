@@ -68,3 +68,21 @@ The resulting user is enabled, marked `is_superadmin=true`, and assigned the sel
 Passwords are never stored in plaintext. `/admin/members` and the unified identity use the same fixed-cost scrypt representation. Password reset increments the user's credential version and therefore remains the canonical way to replace the credential after migration.
 
 Use HTTPS in production and share temporary credentials out-of-band.
+# Unified operator workspace
+
+The authenticated `/portal` now keeps Overview, Email, Devices, Tools & services,
+and Account & access in one navigation shell. Organization changes reload the
+authorized account context and preserve the selected section. The API and HTML
+login paths use the same validated account identity.
+
+Email loads on first opening the Email section using the same-origin
+`/portal/email?organization=<id>&embedded=1` view. Existing mailbox permissions
+and CSRF checks remain in force; only assigned internal TerraSatch mailboxes are
+supported by this beta. Customer organization mail is explicitly unavailable.
+Message navigation and compose/reply forms remain inside the workspace.
+
+Tools & services loads the existing organization-scoped integration catalog on
+demand, with a bounded timeout and manual refresh. Catalog readiness describes
+connection capability, not a purchased entitlement or a grant of access.
+Device status is a page-load snapshot with manual refresh. There is no background
+polling, separate mailbox container, or automatic message sending.

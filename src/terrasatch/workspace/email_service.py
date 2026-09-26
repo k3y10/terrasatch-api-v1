@@ -93,9 +93,7 @@ async def mailbox_permissions(
 
     delegated = list(
         await session.scalars(
-            select(WorkspaceEmailDelegate).where(
-                WorkspaceEmailDelegate.user_id == user.id
-            )
+            select(WorkspaceEmailDelegate).where(WorkspaceEmailDelegate.user_id == user.id)
         )
     )
     for item in delegated:
@@ -392,7 +390,9 @@ async def ingest_resend_received_email(
     except (httpx.HTTPError, ValueError) as error:
         raise ProviderUnavailable("Resend inbound email retrieval failed") from error
 
-    payload = raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    payload = (
+        raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    )
     if not isinstance(payload, dict):
         raise ProviderUnavailable("Resend inbound email response is invalid")
 
@@ -419,12 +419,8 @@ async def ingest_resend_received_email(
         bcc_addresses=_string_list(payload.get("bcc") or event_data.get("bcc")),
         reply_to=_string_list(payload.get("reply_to")),
         subject=subject,
-        text_body=(
-            str(text_body)[:_MAX_TEXT_BODY] if isinstance(text_body, str) else None
-        ),
-        html_body=(
-            str(html_body)[:_MAX_HTML_BODY] if isinstance(html_body, str) else None
-        ),
+        text_body=(str(text_body)[:_MAX_TEXT_BODY] if isinstance(text_body, str) else None),
+        html_body=(str(html_body)[:_MAX_HTML_BODY] if isinstance(html_body, str) else None),
         headers=_headers(payload.get("headers")),
         attachments=_attachments(payload.get("attachments") or event_data.get("attachments")),
         received_at=_parse_time(payload.get("created_at") or event.get("created_at")),
@@ -444,9 +440,7 @@ async def _visible_statement(
     mailboxes = await visible_mailboxes(session, user=user, role=role)
     if not mailboxes:
         return statement.where(False)
-    return statement.where(
-        func.lower(WorkspaceEmailMessage.received_for).in_(mailboxes)
-    )
+    return statement.where(func.lower(WorkspaceEmailMessage.received_for).in_(mailboxes))
 
 
 async def list_workspace_emails(
@@ -456,13 +450,31 @@ async def list_workspace_emails(
     role: MembershipRole,
     limit: int = 100,
 ) -> list[dict[str, object]]:
-    rows = list(
-        await session.scalars(
-            (await _visible_statement(session, user=user, role=role))
-            .order_by(WorkspaceEmailMessage.received_at.desc())
-            .limit(max(1, min(limit, 200)))
-        )
+    # Project summaries in SQL so large bodies and attachment metadata never enter
+    # the ORM identity map just to render the inbox. Both PostgreSQL and SQLite
+    # support substr/coalesce/json_array_length for these Text/JSON columns.
+    statement = (await _visible_statement(session, user=user, role=role)).with_only_columns(
+        WorkspaceEmailMessage.id,
+        WorkspaceEmailMessage.direction,
+        WorkspaceEmailMessage.received_for,
+        WorkspaceEmailMessage.from_address,
+        WorkspaceEmailMessage.to_addresses,
+        WorkspaceEmailMessage.subject,
+        WorkspaceEmailMessage.received_at,
+        func.substr(func.coalesce(WorkspaceEmailMessage.text_body, ""), 1, 1024).label(
+            "text_preview"
+        ),
+        func.coalesce(func.json_array_length(WorkspaceEmailMessage.attachments), 0).label(
+            "attachment_count"
+        ),
     )
+    rows = (
+        await session.execute(
+            statement.order_by(WorkspaceEmailMessage.received_at.desc()).limit(
+                max(1, min(limit, 200))
+            )
+        )
+    ).all()
     if not rows:
         return []
     read_ids = set(
@@ -476,8 +488,7 @@ async def list_workspace_emails(
     payloads: list[dict[str, object]] = []
     sendable = set(await sendable_mailboxes(session, user=user, role=role))
     for row in rows:
-        body = row.text_body or ""
-        preview = " ".join(body.split())[:220]
+        preview = " ".join(row.text_preview.split())[:220]
         payloads.append(
             {
                 "id": str(row.id),
@@ -488,7 +499,7 @@ async def list_workspace_emails(
                 "subject": row.subject,
                 "preview": preview,
                 "received_at": row.received_at,
-                "attachment_count": len(row.attachments or []),
+                "attachment_count": row.attachment_count,
                 "read": row.id in read_ids,
                 "reply_allowed": row.received_for in sendable,
             }
@@ -554,8 +565,7 @@ async def get_workspace_attachment(
         (
             item
             for item in (message.attachments or [])
-            if isinstance(item, dict)
-            and str(item.get("id") or "") == clean_attachment_id
+            if isinstance(item, dict) and str(item.get("id") or "") == clean_attachment_id
         ),
         None,
     )
@@ -584,7 +594,9 @@ async def get_workspace_attachment(
     except (httpx.HTTPError, ValueError) as error:
         raise ProviderUnavailable("Resend attachment retrieval failed") from error
 
-    payload = raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    payload = (
+        raw.get("data") if isinstance(raw, dict) and isinstance(raw.get("data"), dict) else raw
+    )
     if not isinstance(payload, dict):
         raise ProviderUnavailable("Resend attachment response is invalid")
     if str(payload.get("id") or "") != clean_attachment_id:
@@ -595,9 +607,7 @@ async def get_workspace_attachment(
     return {
         "id": clean_attachment_id,
         "filename": str(
-            payload.get("filename")
-            or stored_attachment.get("filename")
-            or "attachment"
+            payload.get("filename") or stored_attachment.get("filename") or "attachment"
         ),
         "content_type": str(
             payload.get("content_type")
@@ -713,9 +723,7 @@ async def send_workspace_email(
         transport=transport,
     )
     existing = await session.scalar(
-        select(WorkspaceEmailMessage).where(
-            WorkspaceEmailMessage.provider_email_id == provider_id
-        )
+        select(WorkspaceEmailMessage).where(WorkspaceEmailMessage.provider_email_id == provider_id)
     )
     if existing is not None:
         return existing
@@ -772,11 +780,7 @@ async def reply_to_workspace_email(
     sender = normalize_email_address(original.received_for)
     if sender not in await sendable_mailboxes(session, user=user, role=role):
         raise InvalidConfiguration("This mailbox is view-only for your account")
-    reply_target = (
-        original.reply_to[0]
-        if original.reply_to
-        else original.from_address
-    )
+    reply_target = original.reply_to[0] if original.reply_to else original.from_address
     recipient = normalize_email_address(reply_target)
     if not recipient:
         raise InvalidConfiguration("The original sender address is invalid")

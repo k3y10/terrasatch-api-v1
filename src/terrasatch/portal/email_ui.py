@@ -31,11 +31,15 @@ def render_email_inbox(
     organization_members: list[dict[str, str]],
     delegates: dict[str, list[dict[str, object]]],
     csrf_token: str,
+    embedded: bool = False,
 ) -> str:
+    embed_query = "&amp;embedded=1" if embedded else ""
+    embed_input = '<input type="hidden" name="embedded" value="1">' if embedded else ""
+    workspace_link = "" if embedded else f'<a href="/portal?organization={quote(organization_id)}">Back to workspace</a>'
     rows = []
     for message in messages:
         message_id = _attr(message["id"])
-        href = f"/portal/email/{message_id}?organization={quote(organization_id)}"
+        href = f"/portal/email/{message_id}?organization={quote(organization_id)}{embed_query}"
         unread = not bool(message.get("read"))
         sender = escape(str(message.get("from") or ""))
         subject = escape(str(message.get("subject") or "(no subject)"))
@@ -54,7 +58,7 @@ def render_email_inbox(
     )
     compose = ""
     if sender_options:
-        compose = f'''<section class="panel"><div class="panel-head"><span>COMPOSE</span><small>Sent through the verified TerraSatch Resend domain</small></div><form class="compose" method="post" action="/portal/email/compose"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label>From<select name="sender">{sender_options}</select></label><label>To<input type="email" name="recipient" required></label><label class="wide">Subject<input name="subject" maxlength="500" required></label><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send email</button></div></form></section>'''
+        compose = f'''<section class="panel"><div class="panel-head"><span>COMPOSE</span><small>Sent through the verified TerraSatch Resend domain</small></div><form class="compose" method="post" action="/portal/email/compose">{embed_input}<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label>From<select name="sender">{sender_options}</select></label><label>To<input type="email" name="recipient" required></label><label class="wide">Subject<input name="subject" maxlength="500" required></label><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send email</button></div></form></section>'''
 
     access_sections: list[str] = []
     member_options = "".join(
@@ -74,7 +78,7 @@ def render_email_inbox(
                 f' <small style="color:var(--muted)">'
                 f'{"view + send" if item.get("can_send") else "view only"}</small></span>'
                 '<form method="post" action="/portal/email/access/revoke">'
-                f'<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
+                f'{embed_input}<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
                 f'<input type="hidden" name="organization" value="{_attr(organization_id)}">'
                 f'<input type="hidden" name="mailbox" value="{_attr(mailbox)}">'
                 f'<input type="hidden" name="delegate_email" value="{_attr(item.get("email") or "")}">'
@@ -91,7 +95,7 @@ def render_email_inbox(
             '<div style="padding:14px;border-bottom:1px solid var(--line)">'
             f'<strong>{escape(mailbox)}</strong>{delegate_rows}'
             '<form class="compose" method="post" action="/portal/email/access/delegate">'
-            f'<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
+            f'{embed_input}<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}">'
             f'<input type="hidden" name="organization" value="{_attr(organization_id)}">'
             f'<input type="hidden" name="mailbox" value="{_attr(mailbox)}">'
             f'<label>Delegate<select name="delegate_email" required>{member_options}</select></label>'
@@ -107,7 +111,7 @@ def render_email_inbox(
             + "</section>"
         )
 
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email · TerraSatch</title>{_styles()}</head><body>{_header(organization_name)}<main><section class="top"><div><h1>Email</h1><p>Inbound and human-sent TerraSatch messages in the field workspace.</p></div><a href="/portal?organization={quote(organization_id)}">Back to workspace</a></section>{compose}<section class="panel"><div class="panel-head"><span>INBOX</span><small>{len(messages)} message(s)</small></div><div class="table-wrap"><table><thead><tr><th>STATE</th><th>SUBJECT</th><th>FROM</th><th>MAILBOX</th><th>TIME</th></tr></thead><tbody>{table}</tbody></table></div></section>{access_panel}</main></body></html>'''
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email · TerraSatch</title>{_styles()}</head><body>{"" if embedded else _header(organization_name)}<main><section class="top"><div><h1>Email</h1><p>Inbound and human-sent TerraSatch messages in the field workspace.</p></div>{workspace_link}</section>{compose}<section class="panel"><div class="panel-head"><span>INBOX</span><small>{len(messages)} message(s)</small></div><div class="table-wrap"><table><thead><tr><th>STATE</th><th>SUBJECT</th><th>FROM</th><th>MAILBOX</th><th>TIME</th></tr></thead><tbody>{table}</tbody></table></div></section>{access_panel}</main></body></html>'''
 
 
 def render_email_detail(
@@ -117,7 +121,10 @@ def render_email_detail(
     message: object,
     reply_allowed: bool,
     csrf_token: str,
+    embedded: bool = False,
 ) -> str:
+    embed_query = "&amp;embedded=1" if embedded else ""
+    embed_input = '<input type="hidden" name="embedded" value="1">' if embedded else ""
     subject = escape(str(getattr(message, "subject", "") or "(no subject)"))
     sender = escape(str(getattr(message, "from_address", "") or ""))
     mailbox = escape(str(getattr(message, "received_for", "") or ""))
@@ -130,7 +137,7 @@ def render_email_detail(
         items = "".join(
             (
                 f'<li><a href="/portal/email/{_attr(message.id)}/attachments/'
-                f'{_attr(item.get("id") or "")}?organization={quote(organization_id)}">'
+                f'{quote(str(item.get("id") or ""), safe="")}?organization={quote(organization_id)}" target="_blank" rel="noopener noreferrer">'
                 f'{escape(str(item.get("filename") or "attachment"))}</a>'
                 f' · {escape(str(item.get("content_type") or "file"))}</li>'
             )
@@ -140,5 +147,5 @@ def render_email_detail(
         attachment_html = f'<div class="attachments"><strong>Attachments</strong><ul>{items}</ul></div>'
     reply = ""
     if reply_allowed and getattr(message, "direction", "") == "inbound":
-        reply = f'''<section class="panel"><div class="panel-head"><span>REPLY</span><small>From {mailbox}</small></div><form class="compose" method="post" action="/portal/email/{_attr(message.id)}/reply"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send reply</button></div></form></section>'''
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{subject} · TerraSatch</title>{_styles()}</head><body>{_header(organization_name)}<main><section class="top"><div><h1>{subject}</h1><p>{escape(str(getattr(message, "direction", "inbound")).upper())}</p></div><a href="/portal/email?organization={quote(organization_id)}">Back to inbox</a></section><section class="panel"><div class="message"><div class="meta"><b>FROM</b><span>{sender}</span><b>TO</b><span>{recipients}</span><b>MAILBOX</b><span>{mailbox}</span><b>RECEIVED</b><span>{timestamp}</span></div><pre>{body or "(No plain-text body was supplied.)"}</pre>{attachment_html}</div></section>{reply}</main></body></html>'''
+        reply = f'''<section class="panel"><div class="panel-head"><span>REPLY</span><small>From {mailbox}</small></div><form class="compose" method="post" action="/portal/email/{_attr(message.id)}/reply">{embed_input}<input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><input type="hidden" name="organization" value="{_attr(organization_id)}"><label class="wide">Message<textarea name="body" maxlength="20000" required></textarea></label><div class="wide"><button type="submit">Send reply</button></div></form></section>'''
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{subject} · TerraSatch</title>{_styles()}</head><body>{"" if embedded else _header(organization_name)}<main><section class="top"><div><h1>{subject}</h1><p>{escape(str(getattr(message, "direction", "inbound")).upper())}</p></div><a href="/portal/email?organization={quote(organization_id)}{embed_query}">Back to inbox</a></section><section class="panel"><div class="message"><div class="meta"><b>FROM</b><span>{sender}</span><b>TO</b><span>{recipients}</span><b>MAILBOX</b><span>{mailbox}</span><b>RECEIVED</b><span>{timestamp}</span></div><pre>{body or "(No plain-text body was supplied.)"}</pre>{attachment_html}</div></section>{reply}</main></body></html>'''

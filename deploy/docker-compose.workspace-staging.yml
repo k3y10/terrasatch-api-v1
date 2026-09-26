@@ -1,5 +1,11 @@
 name: terrasatch-workspace-staging
 
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-runtime: &runtime
   image: terrasatch-workspace-staging:local
   build:
@@ -29,6 +35,7 @@ x-runtime: &runtime
     TERRASATCH_OLLAMA_MODEL: qwen3:0.6b
     TERRASATCH_INTELLIGENCE_TIMEOUT_SECONDS: "40"
   restart: unless-stopped
+  logging: *bounded-logging
   mem_limit: 384m
   cpus: 0.15
   depends_on:
@@ -54,6 +61,7 @@ services:
     mem_limit: 384m
     cpus: 0.1
     restart: unless-stopped
+    logging: *bounded-logging
   redis:
     image: redis:7-alpine
     command: [redis-server, --appendonly, "yes", --maxmemory, 64mb, --maxmemory-policy, noeviction]
@@ -67,6 +75,7 @@ services:
     mem_limit: 128m
     cpus: 0.05
     restart: unless-stopped
+    logging: *bounded-logging
   api:
     <<: *runtime
     ports:
@@ -87,6 +96,7 @@ services:
     mem_limit: 2304m
     cpus: 0.5
     restart: unless-stopped
+    logging: *bounded-logging
 
 volumes:
   staging_postgres:
