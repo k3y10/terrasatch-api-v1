@@ -394,6 +394,10 @@ portal_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https
 printf 'public organization portal login: %s (expected 200)\n' "$portal_code"
 [[ "$portal_code" == "200" ]] || die "Staging organization portal is not reachable."
 
+admin_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/admin/login || true)"
+printf 'public superadmin login: %s (expected 200)\n' "$admin_code"
+[[ "$admin_code" == "200" ]] || die "Staging superadmin login is not reachable."
+
 forgot_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/forgot-password || true)"
 printf 'public forgot-password page: %s (expected 200)\n' "$forgot_code"
 [[ "$forgot_code" == "200" ]] || die "Staging forgot-password page is not reachable."
