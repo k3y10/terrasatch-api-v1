@@ -154,6 +154,21 @@ def _can_manage_mailbox(
     return mailbox in _SHARED_MAILBOXES and role == MembershipRole.OWNER
 
 
+def manageable_mailboxes(
+    actor: User,
+    role: MembershipRole,
+) -> list[str]:
+    """Return mailboxes whose explicit delegation this actor may manage."""
+
+    own = normalize_email_address(actor.email)
+    if not own.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
+        return []
+    mailboxes = [own]
+    if role == MembershipRole.OWNER:
+        mailboxes.extend(sorted(_SHARED_MAILBOXES - {own}))
+    return mailboxes
+
+
 async def set_mailbox_delegate(
     session: AsyncSession,
     *,
