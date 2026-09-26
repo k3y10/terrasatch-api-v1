@@ -22,9 +22,11 @@ from terrasatch.masterdata import models as masterdata_models
 from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
+from terrasatch.workspace import email_models as workspace_email_models
 from terrasatch.workspace import models as workspace_models
 
 _ = (
+    workspace_email_models,
     workspace_models,
     action_models,
     auth_models,

@@ -11,7 +11,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.admin.data_ui import render_data_inspector, render_data_sources
-from terrasatch.admin.routes import _require_authenticated, _run_database, _verify_csrf
+from terrasatch.admin.routes import (
+    _admin_actor_id,
+    _require_authenticated,
+    _run_database,
+    _verify_csrf,
+)
 from terrasatch.admin.security import issue_csrf_token
 from terrasatch.config import Settings
 from terrasatch.errors import TerraSatchError
@@ -108,7 +113,7 @@ async def admin_create_data_source(
             session,
             organization_id=organization_id,
             actor_type="admin_session",
-            actor_id=settings.admin_email,
+            actor_id=_admin_actor_id(request, settings),
             action="data_source.create",
             target_type="data_source",
             target_id=str(source.id),
@@ -153,7 +158,7 @@ async def admin_queue_source_sync(
             session,
             organization_id=organization_id,
             actor_type="admin_session",
-            actor_id=settings.admin_email,
+            actor_id=_admin_actor_id(request, settings),
             action="source_sync.queue",
             target_type="source_sync_run",
             target_id=str(run.id),

@@ -1,3 +1,7 @@
+import re
+from types import SimpleNamespace
+from uuid import uuid4
+
 import httpx
 import pytest
 
@@ -5,6 +9,11 @@ from terrasatch.admin.security import generate_session_secret
 from terrasatch.config import Settings
 from terrasatch.main import create_app
 
+
+def csrf_token(html: str) -> str:
+    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert match is not None
+    return match.group(1)
 
 def make_settings() -> Settings:
     return Settings(
@@ -77,3 +86,138 @@ async def test_portal_account_recovery_pages_are_available() -> None:
     assert "Create a new password" in reset.text
     assert 'id="reset-token"' in reset.text
 
+
+@pytest.mark.asyncio
+async def test_superadmin_portal_login_unlocks_admin_session(monkeypatch) -> None:
+    user = SimpleNamespace(
+        id=uuid4(),
+        credential_version=4,
+        email="keaton@terrasatch.com",
+        display_name="Keaton",
+        is_superadmin=True,
+    )
+
+    async def fake_authenticate(_session, *, email: str, password: str):
+        assert email == user.email
+        assert password == "founder-password"
+        return user
+
+    async def fake_database(_settings, operation):
+        return await operation(None)
+
+    monkeypatch.setattr("terrasatch.portal.routes.authenticate_user", fake_authenticate)
+    monkeypatch.setattr("terrasatch.portal.routes._run_database", fake_database)
+
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        login = await client.get("/portal/login")
+        signed_in = await client.post(
+            "/portal/login",
+            data={
+                "email": user.email,
+                "password": "founder-password",
+                "csrf_token": csrf_token(login.text),
+            },
+        )
+        assert signed_in.status_code == 303
+        admin_login = await client.get("/admin/login")
+
+    assert admin_login.status_code == 303
+    assert admin_login.headers["location"] == "/admin"
+
+
+@pytest.mark.asyncio
+async def test_regular_portal_user_does_not_gain_admin_access(monkeypatch) -> None:
+    user = SimpleNamespace(
+        id=uuid4(),
+        credential_version=1,
+        email="member@terrasatch.com",
+        display_name="Member",
+        is_superadmin=False,
+    )
+
+    async def fake_authenticate(_session, *, email: str, password: str):
+        return user
+
+    async def fake_database(_settings, operation):
+        return await operation(None)
+
+    monkeypatch.setattr("terrasatch.portal.routes.authenticate_user", fake_authenticate)
+    monkeypatch.setattr("terrasatch.portal.routes._run_database", fake_database)
+
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        login = await client.get("/portal/login")
+        signed_in = await client.post(
+            "/portal/login",
+            data={
+                "email": user.email,
+                "password": "member-password",
+                "csrf_token": csrf_token(login.text),
+            },
+        )
+        assert signed_in.status_code == 303
+        admin = await client.get("/admin/fleet-status")
+
+    assert admin.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_superadmin_admin_login_establishes_portal_identity(monkeypatch) -> None:
+    user = SimpleNamespace(
+        id=uuid4(),
+        credential_version=2,
+        email="keaton@terrasatch.com",
+        display_name="Keaton",
+        is_superadmin=True,
+    )
+
+    async def fake_authenticate(_session, *, email: str, password: str):
+        assert email == user.email
+        assert password == "founder-password"
+        return user
+
+    async def fake_database(_settings, operation):
+        return await operation(None)
+
+    async def fake_require_user(_request, _settings, *, session=None):
+        return user.id
+
+    monkeypatch.setattr("terrasatch.admin.routes.authenticate_user", fake_authenticate)
+    monkeypatch.setattr("terrasatch.admin.routes._run_database", fake_database)
+    monkeypatch.setattr("terrasatch.portal.routes._require_user", fake_require_user)
+
+    application = create_app(make_settings())
+    transport = httpx.ASGITransport(app=application)
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        login = await client.get("/admin/login")
+        signed_in = await client.post(
+            "/admin/login",
+            data={
+                "email": user.email,
+                "password": "founder-password",
+                "csrf_token": csrf_token(login.text),
+            },
+        )
+        assert signed_in.status_code == 303
+        portal_login = await client.get("/portal/login")
+
+    assert portal_login.status_code == 303
+    assert portal_login.headers["location"] == "/portal"

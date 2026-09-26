@@ -22,6 +22,7 @@ from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
+from terrasatch.identity.access import promote_superadmin_identity
 from terrasatch.main import create_app
 from terrasatch.observability.health import check_readiness
 from terrasatch.organizations.service import (
@@ -29,6 +30,7 @@ from terrasatch.organizations.service import (
     create_site,
     list_organizations,
     list_sites,
+    resolve_organization,
 )
 from terrasatch.workers.runner import run_worker
 
@@ -280,7 +282,7 @@ def admin_configure(
         typer.Option("--env-file", help="Owner-only environment file to update."),
     ] = Path(".env"),
 ) -> None:
-    """Set an owner-only local admin login configuration without printing secrets."""
+    """Set legacy bootstrap/break-glass admin credentials without printing secrets."""
 
     admin_email = email or typer.prompt("Administrator email").strip()
     if "@" not in admin_email or admin_email.startswith("@") or admin_email.endswith("@"):
@@ -304,8 +306,60 @@ def admin_configure(
         },
         destination=env_file,
     )
-    typer.echo(f"Browser administration configured in {env_file} with owner-only permissions.")
-    typer.echo("Restart the API, then open /admin using HTTPS in production.")
+    typer.echo(
+        f"Legacy bootstrap administration configured in {env_file} "
+        "with owner-only permissions."
+    )
+    typer.echo(
+        "Use 'terrasatch admin promote-superadmin' to make the canonical "
+        "database-backed founder identity the normal /admin account."
+    )
+
+
+@admin_app.command("promote-superadmin")
+def admin_promote_superadmin(
+    email: Annotated[
+        str,
+        typer.Option("--email", help="Canonical TerraSatch superadmin email."),
+    ],
+    organization: Annotated[
+        str,
+        typer.Option("--organization", help="Organization ID, slug, or name to own."),
+    ],
+    display_name: Annotated[
+        str,
+        typer.Option("--display-name", help="Human display name."),
+    ] = "Keaton",
+) -> None:
+    """Make one TerraSatch User the platform superadmin and organization owner.
+
+    The existing legacy admin password hash is reused so no password is printed
+    or re-entered during migration.
+    """
+
+    settings = _load_settings()
+    if settings.admin_password_hash is None:
+        typer.echo(
+            "Legacy admin password hash is not configured; cannot reuse the existing password.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    async def operation(session: AsyncSession, active_settings: Settings):
+        selected = await resolve_organization(session, organization)
+        return await promote_superadmin_identity(
+            session,
+            organization_id=selected.id,
+            email=email,
+            display_name=display_name,
+            password_hash=settings.admin_password_hash.get_secret_value(),
+            settings=active_settings,
+        )
+
+    user, membership = _run_database(operation)
+    typer.echo(f"Superadmin: {user.email}")
+    typer.echo(f"Organization role: {membership.role.value}")
+    typer.echo("Same TerraSatch password now works for /portal and /admin.")
 
 
 @deployment_app.command("check")

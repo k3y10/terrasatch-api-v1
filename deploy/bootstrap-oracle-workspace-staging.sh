@@ -5,6 +5,7 @@ BRANCH="${TERRASATCH_STAGING_BRANCH:-feat/subscription-billing}"
 EXPECTED_HEAD="${TERRASATCH_EXPECTED_STAGING_HEAD:-}"
 PROD_REPO="${TERRASATCH_PROD_REPO:-/opt/terrasatch/api}"
 DEFAULT_STAGING_DIR="${TERRASATCH_STAGING_DIR:-/home/ubuntu/terrasatch-workspace-staging}"
+STAGING_ENV_SOURCE="${TERRASATCH_STAGING_ENV_SOURCE:-}"
 CADDYFILE="${TERRASATCH_CADDYFILE:-/etc/caddy/Caddyfile}"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -80,20 +81,31 @@ staging_head="$(git -C "$staging_dir" rev-parse HEAD)"
 printf 'Staging head: %s\n' "$staging_head"
 
 if [[ ! -f "$staging_dir/.env.staging" ]]; then
-  mapfile -t env_candidates < <(
-    find /opt/terrasatch /home/ubuntu -maxdepth 6 -type f -name .env.staging 2>/dev/null |
-      grep -v "^$staging_dir/.env.staging$" || true
-  )
-  if [[ "${#env_candidates[@]}" -eq 1 ]]; then
-    say "Restoring existing owner-only staging environment file"
-    cp "${env_candidates[0]}" "$staging_dir/.env.staging"
+  if [[ -n "$STAGING_ENV_SOURCE" ]]; then
+    [[ -f "$STAGING_ENV_SOURCE" ]] ||
+      die "Explicit staging environment source does not exist: $STAGING_ENV_SOURCE"
+    [[ "$STAGING_ENV_SOURCE" != "$staging_dir/.env.staging" ]] ||
+      die "Explicit staging environment source resolves to the target file itself."
+    say "Restoring explicitly selected owner-only staging environment file"
+    cp "$STAGING_ENV_SOURCE" "$staging_dir/.env.staging"
     chmod 600 "$staging_dir/.env.staging"
-  elif [[ "${#env_candidates[@]}" -gt 1 ]]; then
-    printf 'Found multiple .env.staging files; refusing to guess:\n' >&2
-    printf '  %s\n' "${env_candidates[@]}" >&2
-    exit 1
   else
-    die "No existing .env.staging was found on the server."
+    mapfile -t env_candidates < <(
+      find /opt/terrasatch /home/ubuntu -maxdepth 6 -type f -name .env.staging 2>/dev/null |
+        grep -v "^$staging_dir/.env.staging$" || true
+    )
+    if [[ "${#env_candidates[@]}" -eq 1 ]]; then
+      say "Restoring existing owner-only staging environment file"
+      cp "${env_candidates[0]}" "$staging_dir/.env.staging"
+      chmod 600 "$staging_dir/.env.staging"
+    elif [[ "${#env_candidates[@]}" -gt 1 ]]; then
+      printf 'Found multiple .env.staging files; refusing to guess:\n' >&2
+      printf '  %s\n' "${env_candidates[@]}" >&2
+      printf 'Set TERRASATCH_STAGING_ENV_SOURCE to the intended existing file and rerun.\n' >&2
+      exit 1
+    else
+      die "No existing .env.staging was found on the server."
+    fi
   fi
 fi
 
@@ -381,6 +393,10 @@ printf 'Synthetic checkout creation: skipped (deployment verification is non-des
 portal_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/login || true)"
 printf 'public organization portal login: %s (expected 200)\n' "$portal_code"
 [[ "$portal_code" == "200" ]] || die "Staging organization portal is not reachable."
+
+admin_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/admin/login || true)"
+printf 'public superadmin login: %s (expected 200)\n' "$admin_code"
+[[ "$admin_code" == "200" ]] || die "Staging superadmin login is not reachable."
 
 forgot_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/portal/forgot-password || true)"
 printf 'public forgot-password page: %s (expected 200)\n' "$forgot_code"
