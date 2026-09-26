@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
@@ -61,3 +61,28 @@ class WorkspaceEmailRead(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WorkspaceEmailDelegate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Explicit mailbox access delegated to one internal TerraSatch user."""
+
+    __tablename__ = "workspace_email_delegates"
+    __table_args__ = (
+        UniqueConstraint(
+            "mailbox_address",
+            "user_id",
+            name="uq_workspace_email_delegate_mailbox_user",
+        ),
+        Index("ix_workspace_email_delegate_mailbox", "mailbox_address"),
+        Index("ix_workspace_email_delegate_user", "user_id"),
+    )
+
+    mailbox_address: Mapped[str] = mapped_column(String(320), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    can_send: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
