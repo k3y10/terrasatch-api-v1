@@ -87,8 +87,6 @@ async def test_portal_account_recovery_pages_are_available() -> None:
     assert 'id="reset-token"' in reset.text
 
 
-
-
 @pytest.mark.asyncio
 async def test_superadmin_portal_login_unlocks_admin_session(monkeypatch) -> None:
     user = SimpleNamespace(
