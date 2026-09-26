@@ -11,7 +11,7 @@ from terrasatch.admin.security import hash_admin_password, verify_admin_password
 from terrasatch.billing.service import recover_or_refresh_activation_for_email
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
-from terrasatch.identity.access import migrate_legacy_admin_identity
+from terrasatch.identity.access import promote_superadmin_identity
 from terrasatch.identity.models import (
     Account,
     Membership,
@@ -155,7 +155,7 @@ async def test_activation_resend_reuses_valid_activation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_admin_hash_migrates_to_superadmin_owner() -> None:
+async def test_password_hash_promotes_canonical_superadmin_owner() -> None:
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -173,12 +173,12 @@ async def test_legacy_admin_hash_migrates_to_superadmin_owner() -> None:
         session.add_all([account, organization])
         await session.flush()
 
-        user, membership = await migrate_legacy_admin_identity(
+        user, membership = await promote_superadmin_identity(
             session,
             organization_id=organization.id,
             email="keaton@terrasatch.com",
             display_name="Keaton",
-            legacy_password_hash=legacy_hash,
+            password_hash=legacy_hash,
             settings=settings(),
         )
 
