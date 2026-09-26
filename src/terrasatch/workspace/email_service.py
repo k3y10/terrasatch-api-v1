@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.config import Settings
+from terrasatch.email_branding import formatted_sender, render_human_email
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable, ResourceNotFound
 from terrasatch.identity.models import MembershipRole, User
 from terrasatch.workspace.email_models import (
@@ -615,6 +616,7 @@ async def _post_resend_email(
     recipients: list[str],
     subject: str,
     text: str,
+    html: str | None,
     request_id: UUID,
     thread_message_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -635,6 +637,8 @@ async def _post_resend_email(
         "subject": clean_subject,
         "text": clean_text,
     }
+    if html:
+        payload["html"] = html
     if thread_message_id:
         payload["headers"] = {
             "In-Reply-To": thread_message_id,
@@ -689,12 +693,21 @@ async def send_workspace_email(
     if not clean_recipients or any(not item for item in clean_recipients):
         raise InvalidConfiguration("One or more recipient email addresses are invalid")
 
+    signed_text, signed_html = render_human_email(
+        text,
+        sender=normalized_sender,
+        user_display_name=user.display_name,
+    )
     provider_id, provider_message_id = await _post_resend_email(
         settings,
-        sender=normalized_sender,
+        sender=formatted_sender(
+            normalized_sender,
+            user_display_name=user.display_name,
+        ),
         recipients=clean_recipients,
         subject=subject,
-        text=text,
+        text=signed_text,
+        html=signed_html,
         request_id=request_id,
         thread_message_id=thread_message_id,
         transport=transport,
@@ -721,8 +734,8 @@ async def send_workspace_email(
         bcc_addresses=[],
         reply_to=[],
         subject=subject.strip(),
-        text_body=text.strip(),
-        html_body=None,
+        text_body=signed_text,
+        html_body=signed_html,
         headers=(
             {"In-Reply-To": thread_message_id, "References": thread_message_id}
             if thread_message_id
