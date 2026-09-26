@@ -105,8 +105,6 @@ async def mailbox_permissions(
         if mailbox == BILLING_MAILBOX:
             can_send = False
         permissions[mailbox] = permissions.get(mailbox, False) or can_send
-        if mailbox not in permissions:
-            permissions[mailbox] = can_send
     return permissions
 
 
