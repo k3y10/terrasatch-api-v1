@@ -1,4 +1,5 @@
 """Signed Resend inbound webhook and authenticated workspace email API."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
