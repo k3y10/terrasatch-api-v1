@@ -43,7 +43,7 @@ and storing the complete message.
   access resolves cleanly.
 - `ops@terrasatch.com` is a shared send identity for admins/owners and does not need to be a login
   account.
-- Internal users may send from their own mailbox.
+- Operators, admins, and owners may send from their own mailbox.
 - Admins and owners may also send from `ops@terrasatch.com`.
 - A user cannot send as another person's mailbox.
 - Incoming HTML is stored for archival fidelity, but the server-rendered portal displays escaped
