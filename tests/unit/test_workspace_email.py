@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -232,7 +233,7 @@ async def test_admin_does_not_get_blanket_access_to_personal_or_legal_mail() -> 
         admin = User(email="admin@terrasatch.com", display_name="Admin", enabled=True)
         session.add(admin)
         await session.flush()
-        now = __import__("datetime").datetime.now(__import__("datetime").UTC)
+        now = datetime.now(UTC)
         for index, mailbox in enumerate(
             [
                 "admin@terrasatch.com",
