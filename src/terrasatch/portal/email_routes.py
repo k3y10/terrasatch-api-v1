@@ -1,4 +1,5 @@
 """Human-facing TerraSatch workspace email pages."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
