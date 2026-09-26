@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -33,6 +35,21 @@ class UserOrganizationAccess:
 
 def role_allows(role: MembershipRole, minimum: MembershipRole) -> bool:
     return _ROLE_RANK[role] >= _ROLE_RANK[minimum]
+
+
+def establish_browser_identity(
+    browser_session: MutableMapping[str, Any],
+    user: User,
+) -> None:
+    """Create one shared browser identity for portal and platform administration."""
+
+    browser_session.clear()
+    browser_session["portal_user_id"] = str(user.id)
+    browser_session["portal_credential_version"] = user.credential_version
+    browser_session["portal_email"] = user.email
+    browser_session["portal_display_name"] = user.display_name
+    if user.is_superadmin:
+        browser_session["admin_authenticated"] = True
 
 
 async def authenticate_user(
@@ -242,6 +259,101 @@ async def create_or_update_organization_member(
         session.add(membership)
     else:
         membership.role = role
+        membership.enabled = True
+
+    await session.flush()
+    return user, membership
+
+
+
+async def migrate_legacy_admin_identity(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    email: str,
+    display_name: str,
+    legacy_password_hash: str,
+    settings: Settings | None = None,
+) -> tuple[User, Membership]:
+    """Promote one database-backed identity using the legacy admin password hash.
+
+    This is a one-way compatibility bridge for deployments moving from the
+    environment-backed superadmin credential to the normal User identity.
+    """
+
+    organization = await session.get(Organization, organization_id)
+    if organization is None or not organization.enabled:
+        raise ResourceNotFound("Organization was not found")
+
+    normalized_email = email.strip().casefold()
+    normalized_name = display_name.strip()
+    if not normalized_email or "@" not in normalized_email:
+        raise InvalidConfiguration("A valid superadmin email is required")
+    if not normalized_name:
+        raise InvalidConfiguration("Superadmin display name is required")
+    if not verify_admin_password("__probe__", legacy_password_hash):
+        # verify_admin_password returning False does not distinguish a valid hash
+        # from a wrong password, so validate the stored representation structurally.
+        parts = legacy_password_hash.split("$")
+        if len(parts) != 6 or parts[0] != "scrypt":
+            raise InvalidConfiguration("Legacy admin password hash is invalid")
+
+    user = await session.scalar(select(User).where(User.email == normalized_email))
+    membership = None
+    if user is not None:
+        membership = await session.scalar(
+            select(Membership).where(
+                Membership.organization_id == organization_id,
+                Membership.user_id == user.id,
+            )
+        )
+
+    if membership is None or not membership.enabled:
+        from terrasatch.billing.entitlements import enforce_member_slot
+
+        await enforce_member_slot(session, organization_id=organization_id)
+
+    already_counted = user is not None and await _user_counts_toward_capacity(session, user)
+    if not already_counted and settings is not None:
+        registered_users = await count_portal_users(session)
+        if registered_users >= settings.max_portal_users:
+            raise ResourceConflict(
+                "Member registration is temporarily paused because the configured "
+                "network capacity was reached.",
+                details={
+                    "registered_members": registered_users,
+                    "max_portal_users": settings.max_portal_users,
+                },
+            )
+
+    if user is None:
+        user = User(
+            email=normalized_email,
+            display_name=normalized_name,
+            password_hash=legacy_password_hash,
+            credential_version=1,
+            is_superadmin=True,
+            enabled=True,
+        )
+        session.add(user)
+        await session.flush()
+    else:
+        user.display_name = normalized_name
+        user.password_hash = legacy_password_hash
+        user.credential_version += 1
+        user.is_superadmin = True
+        user.enabled = True
+
+    if membership is None:
+        membership = Membership(
+            organization_id=organization_id,
+            user_id=user.id,
+            role=MembershipRole.OWNER,
+            enabled=True,
+        )
+        session.add(membership)
+    else:
+        membership.role = MembershipRole.OWNER
         membership.enabled = True
 
     await session.flush()
