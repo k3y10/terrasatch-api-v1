@@ -306,7 +306,10 @@ def admin_configure(
         },
         destination=env_file,
     )
-    typer.echo(\n        f"Legacy bootstrap administration configured in {env_file} "\n        "with owner-only permissions."\n    )
+    typer.echo(
+        f"Legacy bootstrap administration configured in {env_file} "
+        "with owner-only permissions."
+    )
     typer.echo(
         "Use 'terrasatch admin migrate-identity' to move normal /admin access "
         "to a database-backed User."
