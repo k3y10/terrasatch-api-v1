@@ -251,9 +251,13 @@ class Settings(BaseSettings):
 
     @property
     def admin_is_configured(self) -> bool:
-        """Only expose browser administration when all required secrets are configured."""
+        """Expose browser administration when signed browser sessions are configured.
 
-        return bool(self.admin_email and self.admin_password_hash and self.admin_session_secret)
+        Database-backed superadmin users are the primary administrators. The legacy
+        admin email/password hash remain optional bootstrap and break-glass credentials.
+        """
+
+        return self.admin_session_secret is not None
 
     @property
     def integration_secret_store_is_configured(self) -> bool:
