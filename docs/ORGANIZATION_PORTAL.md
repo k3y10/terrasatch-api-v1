@@ -1,10 +1,10 @@
 # TerraSatch Organization Portal
 
-The organization portal gives each human user an individual browser login while preserving the existing TerraSatch superadmin console.
+The organization portal and superadmin console share one database-backed human identity. A user can sign in once and access every authorized surface.
 
 ## Browser surfaces
 
-- `/admin` — TerraSatch superadmin operations console configured from deployment secrets.
+- `/admin` — TerraSatch superadmin operations console for users with the platform `is_superadmin` capability.
 - `/admin/members` — superadmin member creation, password reset, and organization-role assignment.
 - `/portal` — organization-scoped member portal.
 - `/portal/fleet-status` — session-protected fleet JSON for the organization portal and public radio console.
@@ -18,7 +18,7 @@ Human access uses the existing `User` and `Membership` records. A user may belon
 - `operator`
 - `viewer`
 
-The user record now has an optional scrypt password hash for local browser authentication. Existing users remain valid after migration because the new field is nullable until a superadmin assigns a password.
+The user record stores the scrypt password hash used by both `/portal` and `/admin`, plus `is_superadmin` for platform-wide administration. Organization authority remains separate in `Membership.role`; TerraSatch founders can therefore be both platform superadmins and organization owners without maintaining a second login.
 
 ## Current authorization boundary
 
@@ -45,8 +45,25 @@ A member with access to several organizations can switch organizations in `/port
 
 A TerraSatch superadmin session continues to see the global fleet across all organizations unless an organization is explicitly selected in Admin.
 
+## Unified founder / superadmin identity
+
+A database-backed superadmin uses the same signed browser session across `/portal`, `/portal/email`, and `/admin`. Logging into the portal as a superadmin unlocks the admin console; logging into the admin console establishes the portal identity as well.
+
+The deployment setting `TERRASATCH_ADMIN_SESSION_SECRET` remains required because it signs browser sessions. `TERRASATCH_ADMIN_EMAIL` and `TERRASATCH_ADMIN_PASSWORD_HASH` are retained only as legacy bootstrap / break-glass credentials while older deployments migrate.
+
+Use the one-time migration command to copy the existing legacy admin password hash into a canonical User without revealing or retyping the password:
+
+```bash
+terrasatch admin migrate-identity \
+  --email keaton@terrasatch.com \
+  --display-name Keaton \
+  --organization <organization-id-or-slug>
+```
+
+The migrated user is enabled, marked `is_superadmin=true`, and assigned the selected organization's `owner` role.
+
 ## Password handling
 
-Passwords are never stored in plaintext. `/admin/members` hashes submitted passwords with the same fixed-cost scrypt implementation used for the bootstrap administrator. A superadmin can reset an existing user's password by submitting the same email again.
+Passwords are never stored in plaintext. `/admin/members` and the unified identity use the same fixed-cost scrypt representation. Password reset increments the user's credential version and therefore remains the canonical way to replace the credential after migration.
 
 Use HTTPS in production and share temporary credentials out-of-band.
