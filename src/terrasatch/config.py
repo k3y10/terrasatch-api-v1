@@ -130,6 +130,16 @@ class Settings(BaseSettings):
             "RESEND_API_KEY",
         ),
     )
+    workspace_monday_api_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices(
+            "workspace_monday_api_token", "TERRASATCH_WORKSPACE_MONDAY_API_TOKEN"
+        ),
+    )
+    workspace_monday_board_ids: str = Field(
+        default="", validation_alias=AliasChoices(
+            "workspace_monday_board_ids", "TERRASATCH_WORKSPACE_MONDAY_BOARD_IDS"
+        ),
+    )
     workspace_email_organization_id: UUID | None = Field(
         default=None,
         validation_alias=AliasChoices(
