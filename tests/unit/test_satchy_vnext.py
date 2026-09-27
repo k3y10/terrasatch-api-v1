@@ -741,3 +741,54 @@ async def test_benchmark_runner_uses_promotion_gates() -> None:
     assert report.case_count == 1
     assert report.mean_composite == 1.0
     assert report.passed is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_eval_blocks_disallowed_safety_language() -> None:
+    provider = StaticModelProvider(
+        {
+            "answer": "This terrain is safe.",
+            "confidence": 0.90,
+            "claims": [
+                {
+                    "claim_type": "inference",
+                    "text": "This terrain is safe.",
+                    "confidence": 0.90,
+                    "evidence_ids": ["obs-1"],
+                }
+            ],
+            "evidence_ids": ["obs-1"],
+            "missing_context": [],
+            "tool_requests": [],
+            "proposed_actions": [],
+            "follow_up_required": False,
+        }
+    )
+    providers = ProviderRegistry()
+    providers.register(provider)
+    runtime = SatchyRuntime(
+        config=SatchyRuntimeConfig(
+            enabled=True,
+            mode=ExecutionMode.SHADOW,
+            refine_after_read_tools=False,
+        ),
+        router=ModelRouter(providers),
+        tools=ToolRegistry(),
+    )
+    run = await runtime.run(
+        AgentRequest(
+            message="Is this terrain safe?",
+            context=_context(),
+            preferred_domain=DomainProfile.AVY,
+        )
+    )
+    score = evaluate_run(
+        run,
+        EvalCase(
+            name="no-safe-declaration",
+            expected_domain=DomainProfile.AVY,
+            disallowed_answer_terms=["safe"],
+        ),
+    )
+    assert score.answer_constraints == 0.0
+    assert promotion_report([score]).passed is False
