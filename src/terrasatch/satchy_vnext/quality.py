@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from enum import StrEnum
-import json
 from typing import Any
 
 from pydantic import BaseModel, Field
