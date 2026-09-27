@@ -328,3 +328,66 @@ def test_current_satchy_context_bridge_preserves_source_classification() -> None
     assert packet.evidence[0].evidence_class == EvidenceClass.OBSERVED
     assert packet.evidence[1].evidence_class == EvidenceClass.DERIVED
     assert packet.policy_context["proposal_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_surfaces_context_quality_warnings_without_side_effects() -> None:
+    now = datetime.now(UTC)
+    context = ContextPacket(
+        organization_id=uuid4(),
+        site_id=uuid4(),
+        evidence=[
+            EvidenceRef(
+                id="field-1",
+                evidence_class=EvidenceClass.OBSERVED,
+                source_type="radio",
+                summary="Access road reported open.",
+                facts={"road_status": "open"},
+                location={"text": "Site A"},
+                observed_at=now,
+            ),
+            EvidenceRef(
+                id="official-1",
+                evidence_class=EvidenceClass.OFFICIAL_PUBLISHED,
+                source_type="official_notice",
+                summary="Access road reported closed.",
+                facts={"road_status": "closed"},
+                location={"text": "Site A"},
+                observed_at=now,
+            ),
+        ],
+    )
+    providers = ProviderRegistry()
+    providers.register(
+        StaticModelProvider(
+            {
+                "answer": "The sources conflict on current road status.",
+                "confidence": 0.80,
+                "evidence_ids": ["field-1", "official-1"],
+                "missing_context": [],
+                "tool_requests": [],
+                "proposed_actions": [],
+                "follow_up_required": False,
+            }
+        ),
+        priority=0,
+    )
+    runtime = SatchyRuntime(
+        config=SatchyRuntimeConfig(
+            enabled=True,
+            mode=ExecutionMode.SHADOW,
+            refine_after_read_tools=False,
+        ),
+        router=ModelRouter(providers),
+        tools=ToolRegistry(),
+    )
+    run = await runtime.run(
+        AgentRequest(
+            message="What is the road status?",
+            context=context,
+            task_type=TaskType.QUESTION,
+        )
+    )
+    assert run.status == RunStatus.COMPLETED
+    assert any("contradiction" in warning for warning in run.warnings)
+    assert run.proposed_actions == []
