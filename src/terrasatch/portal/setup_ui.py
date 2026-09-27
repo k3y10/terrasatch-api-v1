@@ -11,7 +11,10 @@ async function api(path,body){const response=await fetch(base+path,{method:body=
 function el(tag,text,parent){const x=document.createElement(tag);if(text)x.textContent=text;if(parent)parent.append(x);return x}
 function field(form,label,key,type='text'){const l=el('label',label,form);l.style.display='grid';l.style.gap='5px';l.style.margin='10px 0';const input=el('input','',l);input.name=key;input.type=type;input.autocomplete=type==='password'?'new-password':'off';return input}
 function button(parent,label,action){const b=el('button',label,parent);b.type='button';b.addEventListener('click',async()=>{b.disabled=true;try{await action()}finally{b.disabled=false}});return b}
+const icons={terrasatch_edge:'/assets/satchy.png',google_drive:'google-drive.svg',google_calendar:'google-calendar.svg',microsoft_365:'microsoft-icon.svg',microsoft_calendar:'outlook.svg',jira:'jira.svg',confluence:'confluence.svg',slack:'slack.png',microsoft_teams:'microsoft-teams.svg',cloudflare_r2:'cloudflare-icon.svg',aws_s3:'aws-s3.svg',nws_forecast:'national-weather-service.png',snowflake:'snowflake.svg',esri_arcgis:'esri.svg',arcgis_enterprise_public:'esri.svg',mapbox:'mapbox.svg',onx_backcountry:'onx-backcountry.svg',caltopo:'caltopo.png',gaia_gps:'gaia-gps.png'};
 window.renderIntegrationSetup=(card,item)=>{
+ const heading=card.querySelector('h3');heading.classList.add('service-heading');if(icons[item.key]){const image=el('img');image.className='service-icon';image.alt='';image.width=38;image.height=38;image.src=icons[item.key].startsWith('/')?icons[item.key]:'/workspace-assets/integrations/'+icons[item.key];heading.prepend(image)}else{const icon=el('span',item.auth==='public_https'?'API':item.key==='email'?'@':item.name.slice(0,2).toUpperCase());icon.className='service-monogram';icon.setAttribute('aria-hidden','true');heading.prepend(icon)}
+
  const guidance=item.setup||{};el('p',guidance.detail||'',card);
  const details=el('details','',card);el('summary','Connection setup',details);
  const status=el('p','',details);status.setAttribute('role','status');

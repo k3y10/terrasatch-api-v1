@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from terrasatch import __version__
 from terrasatch.admin.data_routes import router as data_admin_router
@@ -46,6 +47,8 @@ from terrasatch.observability.logging import configure_logging
 from terrasatch.observability.quality import api_catalog, build_quality_report, common_errors
 from terrasatch.observability.request_id import RequestIdMiddleware
 from terrasatch.portal.email_routes import router as portal_email_router
+from terrasatch.portal.pwa import ASSET_DIRECTORY
+from terrasatch.portal.pwa import router as pwa_router
 from terrasatch.portal.routes import router as portal_router
 from terrasatch.workspace.email_routes import router as workspace_email_router
 from terrasatch.workspace.routes import router as workspace_router
@@ -260,6 +263,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(edge_admin_router)
     application.include_router(admin_satchy_router)
     application.include_router(admin_member_router)
+    application.include_router(pwa_router)
+    application.mount(
+        "/workspace-assets", StaticFiles(directory=ASSET_DIRECTORY), name="workspace-assets"
+    )
     application.include_router(portal_router)
     application.include_router(portal_email_router)
     application.include_router(workspace_router)

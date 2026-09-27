@@ -1,0 +1,41 @@
+{
+  "production": "https://www.terrasatch.com",
+  "commit": "d534785c91dda65877d5947c825f954e24da8b13",
+  "assets": [
+    {
+      "file": "/integrations/onx-backcountry.svg",
+      "source": "https://www.onxmaps.com/assets/images/backcountry/logo-light.svg",
+      "sha256": "1b841552982c425bbb0c96a4d41abe666f83577307868e972bddad8108da7cc9"
+    },
+    {
+      "file": "/integrations/caltopo.png",
+      "source": "https://blog.caltopo.com/wp-content/uploads/2019/10/caltopoLogo_menu1.png",
+      "sha256": "b416ca8b63ce4b866ce1ed8d2e837e15c394bab2394c112f3c2c8648f07af251"
+    },
+    {
+      "file": "/integrations/gaia-gps.png",
+      "source": "https://i0.wp.com/blog.gaiagps.com/wp-content/uploads/2016/06/Gaia-GPS_Logo-Horizontal_390.png?resize=400%2C117&ssl=1",
+      "sha256": "919e47eaa02c8c9e079af7f8027a1108d86c7da72b5eb0ae2093e147c294050c"
+    },
+    {
+      "file": "/integrations/esri.svg",
+      "source": "https://cdn.simpleicons.org/esri/007AC2",
+      "sha256": "3fdf6ad5fe9f9688452f1c9227a15473e6ede07e9ccade569e89a98277728a43"
+    },
+    {
+      "file": "/integrations/mapbox.svg",
+      "source": "https://cdn.simpleicons.org/mapbox/FFFFFF",
+      "sha256": "0bac3f338802899d2fcddbcdef6e8f5ee87a3831c679d193c8af28cde8abd516"
+    },
+    {
+      "file": "/integrations/slack.png",
+      "source": "https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png",
+      "sha256": "cfd9f050bf26ea547af438722c5a93be002c721f0f32a3c996595eab7af1b36d"
+    },
+    {
+      "file": "/integrations/snowflake.svg",
+      "source": "https://cdn.simpleicons.org/snowflake/29B5E8",
+      "sha256": "ffba0ab5ce4e2f222c3fdacc42e2d7de763b39d525ea0948566cb02614ee7908"
+    }
+  ]
+}

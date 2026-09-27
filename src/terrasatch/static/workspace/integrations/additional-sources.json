@@ -1,0 +1,70 @@
+{
+  "assets": [
+    {
+      "file": "/integrations/google-drive.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "google-drive",
+      "sha256": "86f9582da343db8bbd902836af5325efb96f472be8661f5980ab06610af74c2a"
+    },
+    {
+      "file": "/integrations/google-calendar.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "google-calendar",
+      "sha256": "6272fa6185b8f274aa455927b143d1928b76b955cde5b5915184280578ce5b13"
+    },
+    {
+      "file": "/integrations/microsoft-icon.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "microsoft-icon",
+      "sha256": "ec04ea891cf7e489683358fd0ffa845f6b1b94bb214f9760cb7eaf8f82edf536"
+    },
+    {
+      "file": "/integrations/microsoft-teams.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "microsoft-teams",
+      "sha256": "9c5d2c232aaa6b252a84c4d05e6d1ed006a95af567731b0f026658a92a293be5"
+    },
+    {
+      "file": "/integrations/jira.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "jira",
+      "sha256": "f97fabb642f756e2c8a88adbdb05c42c00ce8b7171379ed4b43b056f0a9c7785"
+    },
+    {
+      "file": "/integrations/confluence.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "confluence",
+      "sha256": "af7c87acc4b8bd3fe9d1831f5c8243a1dc4849f1c83a4f04c5e753ee30238abd"
+    },
+    {
+      "file": "/integrations/cloudflare-icon.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "cloudflare-icon",
+      "sha256": "54d79f2733f59b680e2fc723d9aa3ee0aab669190032e1b594703618e2b017f4"
+    },
+    {
+      "file": "/integrations/aws-s3.svg",
+      "collection": "Iconify Logos",
+      "source": "https://github.com/iconify/icon-sets/blob/master/json/logos.json",
+      "icon": "aws-s3",
+      "sha256": "9430758ae47005b8472db0ad5d4d3e67e2e45ae9f7677887e48670604cc247cb"
+    },
+    {
+      "file": "/integrations/outlook.svg",
+      "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/11.0.0/icons/microsoftoutlook.svg",
+      "sha256": "427c24461c34a9fe4a4d5b5b89f0f17db58ef185f8fe0c4eee92ac5df12a7a6f"
+    },
+    {
+      "file": "/integrations/national-weather-service.png",
+      "source": "https://www.weather.gov/images/nws/nws_logo.png",
+      "sha256": "71b1e7464701b4d721ef3caff8c32151533e34c78f5f102f4af3f2c0d06b615a"
+    }
+  ]
+}

@@ -238,3 +238,17 @@ Provider app registration is still required for OAuth services; no installed ada
 implies access to a customer's provider account. Public endpoint and credential
 validation remain server-side. Staging's encryption key is persisted in its restricted
 environment file and must be preserved across releases.
+
+
+### Installable workspace frame
+
+The workspace uses a fixed header/footer with independently scrolling content and
+optional navigation/Satchy panels. Panel visibility is a local device preference;
+module access and mailbox permissions remain server-controlled. Small screens use
+closable drawers. Existing vendor icons are vendored from the website asset set,
+with source provenance retained in the static integration directory.
+
+The PWA manifest starts at /portal and registers a narrowly handled service worker.
+Only the public offline page and brand icon are cached. Authenticated HTML, email,
+API responses, and mutations are network-only; offline sending is not queued.
+Installation is browser-dependent and is not equivalent to offline access to mail.
