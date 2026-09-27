@@ -6,14 +6,14 @@ from uuid import uuid4
 
 import pytest
 
-from terrasatch.satchy_vnext.domains import infer_domain
 from terrasatch.satchy.schemas import SatchyContext
 from terrasatch.satchy_vnext.bridge import context_packet_from_current
+from terrasatch.satchy_vnext.domains import infer_domain
 from terrasatch.satchy_vnext.evals import EvalCase, evaluate_run, promotion_report
 from terrasatch.satchy_vnext.impact import ImpactMeasurement, summarize_impact
 from terrasatch.satchy_vnext.policy import PolicyEngine
-from terrasatch.satchy_vnext.quality import QualityIssueType, inspect_context_quality
 from terrasatch.satchy_vnext.providers import ModelRouter, ProviderRegistry, StaticModelProvider
+from terrasatch.satchy_vnext.quality import QualityIssueType, inspect_context_quality
 from terrasatch.satchy_vnext.runtime import SatchyRuntime, SatchyRuntimeConfig
 from terrasatch.satchy_vnext.schemas import (
     AgentRequest,
