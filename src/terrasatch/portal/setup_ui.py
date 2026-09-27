@@ -27,7 +27,9 @@ window.renderIntegrationSetup=(card,item)=>{
  if(!item.can_connect){el('p',item.requires_admin?'Ask your organization administrator to connect this service.':'Provider setup is not available yet. The reason is shown above.',details);return}
  const add=el('details','',details);el('summary','Add a connection',add);const form=el('form','',add);
  const label=el('label','Who can use this connection?',form);const scope=el('select','',label);for(const s of item.allowed_scopes||[]){const option=el('option',s==='user'?'Only me':s==='organization'?'Organization':'Selected team',scope);option.value=s}
- const team=field(form,'Team ID (only for a team connection)','team_id');team.hidden=true;scope.addEventListener('change',()=>team.hidden=scope.value!=='team');
+ scope.value=(item.allowed_scopes||[]).includes('user')?'user':(item.allowed_scopes||[]).includes('organization')?'organization':'team';
+ const teamLabel=el('label','Team',form),team=el('select','',teamLabel);teamLabel.hidden=scope.value!=='team';let teamsLoaded=false;
+ async function chooseTeam(){teamLabel.hidden=scope.value!=='team';if(scope.value!=='team'||teamsLoaded)return;try{const snapshot=await api('');team.replaceChildren();for(const t of snapshot.teams||[]){const option=el('option',t.name,team);option.value=t.id}if(!team.options.length)el('option','No teams available',team).value='';teamsLoaded=true}catch(e){status.textContent=e.message}}scope.addEventListener('change',chooseTeam);if(scope.value==='team')chooseTeam();
  const name=field(form,'Connection name','display_name');name.value=item.name;
  el('p','Choose approved destinations. Leave optional fields blank; required fields are validated by the API.',form);
  const configs=(guidance.configuration_fields||[]).map(f=>{const input=field(form,f.key.replaceAll('_',' ')+(f.type==='list'?' (comma-separated)':''),f.key,f.type==='number'?'number':'text');return {input,type:f.type}});
