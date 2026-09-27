@@ -3,8 +3,8 @@
 This package is intentionally not imported by TerraSatch production routes.
 """
 
-from .domains import DOMAIN_DEFINITIONS, definition_for, infer_domain
 from .bridge import context_packet_from_current
+from .domains import DOMAIN_DEFINITIONS, definition_for, infer_domain
 from .evals import (
     EvalCase,
     EvalScore,
