@@ -4,6 +4,7 @@ This package is intentionally not imported by TerraSatch production routes.
 """
 
 from .domains import DOMAIN_DEFINITIONS, definition_for, infer_domain
+from .bridge import context_packet_from_current
 from .evals import (
     EvalCase,
     EvalScore,
@@ -12,6 +13,7 @@ from .evals import (
     evaluate_run,
     promotion_report,
 )
+from .impact import ImpactMeasurement, ImpactSummary, summarize_impact
 from .policy import PolicyEngine
 from .providers import (
     ModelProviderError,
@@ -19,6 +21,12 @@ from .providers import (
     OllamaModelProvider,
     ProviderRegistry,
     StaticModelProvider,
+)
+from .quality import (
+    ContextQualityReport,
+    QualityIssue,
+    QualityIssueType,
+    inspect_context_quality,
 )
 from .runtime import SatchyRuntime, SatchyRuntimeConfig
 from .schemas import (
@@ -44,6 +52,7 @@ __all__ = [
     "AgentRequest",
     "AgentRun",
     "Connectivity",
+    "ContextQualityReport",
     "ContextPacket",
     "DOMAIN_DEFINITIONS",
     "DomainProfile",
@@ -52,6 +61,8 @@ __all__ = [
     "EvidenceClass",
     "EvidenceRef",
     "ExecutionMode",
+    "ImpactMeasurement",
+    "ImpactSummary",
     "ModelProviderError",
     "ModelRouter",
     "OllamaModelProvider",
@@ -60,6 +71,8 @@ __all__ = [
     "PromotionThresholds",
     "ProposedAction",
     "ProviderRegistry",
+    "QualityIssue",
+    "QualityIssueType",
     "RiskLevel",
     "RunStatus",
     "SatchyRuntime",
@@ -69,9 +82,12 @@ __all__ = [
     "ToolEffect",
     "ToolRegistry",
     "ToolSpec",
+    "context_packet_from_current",
     "default_tool_specs",
     "definition_for",
     "evaluate_run",
     "infer_domain",
+    "inspect_context_quality",
     "promotion_report",
+    "summarize_impact",
 ]

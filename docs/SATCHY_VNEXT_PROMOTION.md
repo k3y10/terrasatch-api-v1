@@ -35,6 +35,9 @@ Measure:
 - estimated cost per run
 - disagreement with current deterministic extraction
 - human reviewer preference on representative cases
+- context contradiction/freshness detection
+- measured manual time vs Satchy-assisted time
+- proposal acceptance and reviewer edit ratio
 
 Initial promotion thresholds:
 
@@ -85,6 +88,9 @@ Track:
 - time saved
 - false positive action rate
 - missing-context rate
+- measured minutes saved per workflow
+- reviewer edit ratio
+- source records processed per accepted output
 
 ## Stage 5 — production decision support
 
@@ -143,3 +149,22 @@ At minimum, create versioned fixtures for:
 - model timeout/fallback
 - cross-tenant IDs
 - approval/rejection/cancel phrases
+
+
+## Trial impact measurement
+
+The 14-day Satchy trial should report observed value without inventing ROI.
+
+For workflows such as field reports, handoffs, observation structuring, incident summaries, and
+routine notifications, capture a reviewed baseline and the actual assisted completion time.
+
+Report:
+
+- measured minutes saved
+- proposal/output acceptance rate
+- reviewer edit ratio
+- source records processed
+- workflow count by type
+
+Do not convert these measurements into a monetary ROI claim unless the customer supplies an
+approved labor-cost or operational-cost baseline.

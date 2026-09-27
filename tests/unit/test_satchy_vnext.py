@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
 from terrasatch.satchy_vnext.domains import infer_domain
+from terrasatch.satchy.schemas import SatchyContext
+from terrasatch.satchy_vnext.bridge import context_packet_from_current
 from terrasatch.satchy_vnext.evals import EvalCase, evaluate_run, promotion_report
+from terrasatch.satchy_vnext.impact import ImpactMeasurement, summarize_impact
 from terrasatch.satchy_vnext.policy import PolicyEngine
+from terrasatch.satchy_vnext.quality import QualityIssueType, inspect_context_quality
 from terrasatch.satchy_vnext.providers import ModelRouter, ProviderRegistry, StaticModelProvider
 from terrasatch.satchy_vnext.runtime import SatchyRuntime, SatchyRuntimeConfig
 from terrasatch.satchy_vnext.schemas import (
@@ -228,3 +232,99 @@ async def test_eval_gate_rewards_grounding_and_approval() -> None:
     assert score.action_safety == 1.0
     report = promotion_report([score])
     assert report.mean_grounding == 1.0
+
+
+def test_context_quality_flags_same_location_fact_conflict_and_staleness() -> None:
+    now = datetime.now(UTC)
+    packet = ContextPacket(
+        organization_id=uuid4(),
+        site_id=uuid4(),
+        evidence=[
+            EvidenceRef(
+                id="radio-1",
+                evidence_class=EvidenceClass.OBSERVED,
+                source_type="radio",
+                summary="Road reported open.",
+                facts={"road_status": "open"},
+                location={"text": "Cardiff"},
+                observed_at=now - timedelta(minutes=5),
+            ),
+            EvidenceRef(
+                id="ops-2",
+                evidence_class=EvidenceClass.OFFICIAL_PUBLISHED,
+                source_type="official_notice",
+                summary="Road reported closed.",
+                facts={"road_status": "closed"},
+                location={"text": "Cardiff"},
+                observed_at=now - timedelta(hours=10),
+            ),
+        ],
+    )
+    report = inspect_context_quality(packet, now=now)
+    assert report.contradiction_count == 1
+    assert report.stale_count == 1
+    assert any(
+        issue.issue_type == QualityIssueType.CONTRADICTION
+        for issue in report.issues
+    )
+
+
+def test_impact_summary_uses_measured_values_only() -> None:
+    measurements = [
+        ImpactMeasurement(
+            workflow="shift_report",
+            manual_seconds=900,
+            assisted_seconds=240,
+            accepted=True,
+            edit_ratio=0.10,
+            source_record_count=12,
+        ),
+        ImpactMeasurement(
+            workflow="shift_report",
+            manual_seconds=600,
+            assisted_seconds=300,
+            accepted=False,
+            edit_ratio=0.40,
+            source_record_count=8,
+        ),
+    ]
+    summary = summarize_impact(measurements)
+    assert summary.measurement_count == 2
+    assert summary.measured_minutes_saved == 16.0
+    assert summary.acceptance_rate == 0.5
+    assert summary.mean_edit_ratio == 0.25
+    assert summary.source_record_count == 20
+
+
+def test_current_satchy_context_bridge_preserves_source_classification() -> None:
+    organization_id = uuid4()
+    site_id = uuid4()
+    current = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        evidence=[
+            {
+                "id": "tx-1",
+                "type": "source_transmission",
+                "summary": "Control 2 reports no avalanche activity.",
+                "confidence": 1.0,
+                "location": "Cardiff Bowl",
+                "created_at": "2026-09-27T16:00:00+00:00",
+            },
+            {
+                "id": "event-1",
+                "type": "observation",
+                "summary": "No avalanche activity observed.",
+                "confidence": 0.92,
+                "location": "Cardiff Bowl",
+                "created_at": "2026-09-27T16:00:01+00:00",
+            },
+        ],
+    )
+    packet = context_packet_from_current(current, domain=DomainProfile.AVY)
+    assert packet.organization_id == organization_id
+    assert packet.site_id == site_id
+    assert packet.domain == DomainProfile.AVY
+    assert packet.evidence[0].evidence_class == EvidenceClass.OBSERVED
+    assert packet.evidence[1].evidence_class == EvidenceClass.DERIVED
+    assert packet.policy_context["proposal_only"] is True

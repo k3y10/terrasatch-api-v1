@@ -26,6 +26,7 @@ from .providers import (
     ModelRequest,
     ModelRouter,
 )
+from .quality import inspect_context_quality
 from .schemas import (
     AgentPlan,
     AgentRequest,
@@ -303,7 +304,11 @@ Authorized tool contracts for this turn:
             return disabled
 
         risk = self._risk_for_task(request.task_type)
-        warnings: list[str] = []
+        quality = inspect_context_quality(request.context)
+        warnings: list[str] = [
+            f"Context quality: {issue.issue_type.value}: {issue.summary}"
+            for issue in quality.issues
+        ]
         usage = []
         tool_results: list[ToolResult] = []
         proposed_actions: list[ProposedAction] = []
