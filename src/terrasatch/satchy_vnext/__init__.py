@@ -16,6 +16,7 @@ from .evals import (
     promotion_report,
 )
 from .impact import ImpactMeasurement, ImpactSummary, summarize_impact
+from .observability import JsonlTraceStore
 from .policy import PolicyEngine
 from .providers import (
     ModelProviderError,
@@ -71,6 +72,7 @@ __all__ = [
     "GroundedClaim",
     "ImpactMeasurement",
     "ImpactSummary",
+    "JsonlTraceStore",
     "ModelProviderError",
     "ModelRouter",
     "OllamaModelProvider",
