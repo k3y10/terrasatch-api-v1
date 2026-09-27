@@ -91,6 +91,7 @@ class StaticModelProvider:
         self.response = response or {
             "answer": "No model-backed answer is configured for this isolated Satchy runtime.",
             "confidence": 0.5,
+            "claims": [],
             "evidence_ids": [],
             "missing_context": [],
             "tool_requests": [],
@@ -193,9 +194,10 @@ class ModelRouter:
         connectivity: Connectivity,
         risk_level: RiskLevel,
         prefer_local: bool,
+        requires_local: bool = False,
     ) -> tuple[ModelProvider, ModelRoute]:
         entries = self.registry.entries()
-        if connectivity == Connectivity.OFFLINE:
+        if connectivity == Connectivity.OFFLINE or requires_local:
             entries = [entry for entry in entries if entry.provider.local]
         if prefer_local:
             entries.sort(key=lambda item: (not item.provider.local, item.priority, item.cost_tier))
@@ -219,7 +221,7 @@ class ModelRouter:
         reason = (
             f"Selected {chosen.name}/{chosen.model}; task={task_type.value}, "
             f"connectivity={connectivity.value}, risk={risk_level.value}, "
-            f"prefer_local={prefer_local}."
+            f"prefer_local={prefer_local}, requires_local={requires_local}."
         )
         return chosen, ModelRoute(
             provider=chosen.name,
