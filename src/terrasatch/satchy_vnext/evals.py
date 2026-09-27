@@ -73,7 +73,12 @@ def evaluate_run(run: AgentRun, case: EvalCase) -> EvalScore:
         if claim.claim_type == ClaimType.FACT
     ]
     if factual_claims:
-        authorized_ids = run.request.context.evidence_ids
+        authorized_ids = set(run.request.context.evidence_ids)
+        authorized_ids.update(
+            evidence.id
+            for result in run.tool_results
+            for evidence in result.evidence
+        )
         grounded_claims = sum(
             1
             for claim in factual_claims
