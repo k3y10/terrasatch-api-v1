@@ -1,0 +1,36 @@
+name: Satchy vNext Sandbox QA
+
+on:
+  push:
+    branches:
+      - feat/satchy-vnext-isolated-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile isolated runtime
+        run: python -m compileall -q src/terrasatch/satchy_vnext tests/unit/test_satchy_vnext.py
+
+      - name: Ruff isolated runtime
+        run: python -m ruff check src/terrasatch/satchy_vnext tests/unit/test_satchy_vnext.py
+
+      - name: Run isolated tests
+        run: python -m pytest -q tests/unit/test_satchy_vnext.py
