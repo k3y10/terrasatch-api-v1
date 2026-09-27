@@ -5,6 +5,7 @@ This package is intentionally not imported by TerraSatch production routes.
 
 from .benchmark import BenchmarkCase, BenchmarkReport, run_benchmark
 from .bridge import context_packet_from_current
+from .corpus import seed_benchmark_cases
 from .domains import DOMAIN_DEFINITIONS, definition_for, infer_domain
 from .evals import (
     EvalCase,
@@ -97,5 +98,6 @@ __all__ = [
     "inspect_context_quality",
     "promotion_report",
     "run_benchmark",
+    "seed_benchmark_cases",
     "summarize_impact",
 ]
