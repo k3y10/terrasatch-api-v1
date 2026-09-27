@@ -246,10 +246,15 @@ Authorized tool contracts for this turn:
         *,
         request: AgentRequest,
         warnings: list[str],
+        additional_evidence: list[EvidenceRef] | None = None,
     ) -> AgentPlan:
+        additional_ids = {
+            item.id for item in (additional_evidence or [])
+        }
         valid, rejected = self.policy.validate_evidence_ids(
             plan.evidence_ids,
             context=request.context,
+            additional_allowed_ids=additional_ids,
         )
         if rejected:
             warnings.append(
@@ -262,6 +267,7 @@ Authorized tool contracts for this turn:
             claim_valid, claim_rejected = self.policy.validate_evidence_ids(
                 claim.evidence_ids,
                 context=request.context,
+                additional_allowed_ids=additional_ids,
             )
             if claim_rejected:
                 warnings.append(
@@ -280,6 +286,7 @@ Authorized tool contracts for this turn:
             tool_valid, tool_rejected = self.policy.validate_evidence_ids(
                 tool_request.evidence_ids,
                 context=request.context,
+                additional_allowed_ids=additional_ids,
             )
             if tool_rejected:
                 warnings.append(
@@ -293,6 +300,7 @@ Authorized tool contracts for this turn:
             action_valid, action_rejected = self.policy.validate_evidence_ids(
                 action.evidence_ids,
                 context=request.context,
+                additional_allowed_ids=additional_ids,
             )
             if action_rejected:
                 warnings.append(
@@ -427,7 +435,12 @@ Authorized tool contracts for this turn:
                 # New tool evidence is not silently added to the original authorization set.
                 # It can support the answer through the tool result, while original evidence IDs
                 # still pass the same strict validation.
-                refined = self._ground_plan(refined, request=request, warnings=warnings)
+                refined = self._ground_plan(
+                    refined,
+                    request=request,
+                    warnings=warnings,
+                    additional_evidence=read_evidence,
+                )
                 final_plan = refined
                 route = refined_route
 
