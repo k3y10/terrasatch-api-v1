@@ -124,6 +124,7 @@ def default_tool_specs() -> list[ToolSpec]:
             description="Search authorized EchoSatch radio, voice, and field-message records.",
             effect=ToolEffect.READ,
             arguments_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            required_scopes=["echo:read"],
         ),
         ToolSpec(
             name="grid.resolve_context",
@@ -137,33 +138,39 @@ def default_tool_specs() -> list[ToolSpec]:
                     "longitude": {"type": "number"},
                 },
             },
+            required_scopes=["grid:read"],
         ),
         ToolSpec(
             name="core.explain_derivation",
             description="Explain a CoreSatch derived value and its source lineage.",
             effect=ToolEffect.READ,
+            required_scopes=["core:read"],
         ),
         ToolSpec(
             name="quak.authorize",
             description="Check QuakSatch access policy without changing authorization state.",
             effect=ToolEffect.READ,
+            required_scopes=["quak:read"],
         ),
         ToolSpec(
             name="workspace.generate_report",
             description="Create a proposed operational report for human review.",
             effect=ToolEffect.PROPOSE_WRITE,
             risk_level=RiskLevel.MEDIUM,
+            required_scopes=["workspace:report"],
         ),
         ToolSpec(
             name="notify.team",
             description="Send an external team notification through an approved integration.",
             effect=ToolEffect.EXTERNAL_WRITE,
             risk_level=RiskLevel.HIGH,
+            required_scopes=["notify:team"],
         ),
         ToolSpec(
             name="edge.command",
             description="Request a command on an authorized EdgeSatch field asset.",
             effect=ToolEffect.PHYSICAL,
             risk_level=RiskLevel.CRITICAL,
+            required_scopes=["edge:command"],
         ),
     ]
