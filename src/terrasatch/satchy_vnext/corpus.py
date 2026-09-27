@@ -183,6 +183,7 @@ def seed_benchmark_cases(
                     ],
                     policy_context={
                         "tool_allowlist": ["edge.command"],
+                        "scopes": ["edge:command"],
                     },
                 ),
             ),
