@@ -100,8 +100,11 @@ class PolicyEngine:
         evidence_ids: list[str],
         *,
         context: ContextPacket,
+        additional_allowed_ids: set[str] | None = None,
     ) -> tuple[list[str], list[str]]:
-        allowed = context.evidence_ids
+        allowed = set(context.evidence_ids)
+        if additional_allowed_ids:
+            allowed.update(additional_allowed_ids)
         valid = [item for item in evidence_ids if item in allowed]
         rejected = [item for item in evidence_ids if item not in allowed]
         return valid, rejected
