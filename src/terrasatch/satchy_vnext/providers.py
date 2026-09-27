@@ -47,6 +47,7 @@ class ModelProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ProviderEntry:
+    provider_id: str
     provider: ModelProvider
     priority: int = 100
     enabled: bool = True
@@ -61,11 +62,16 @@ class ProviderRegistry:
         self,
         provider: ModelProvider,
         *,
+        provider_id: str | None = None,
         priority: int = 100,
         enabled: bool = True,
         cost_tier: int = 0,
     ) -> None:
-        self._entries[provider.name] = ProviderEntry(
+        resolved_id = provider_id or f"{provider.name}:{provider.model}"
+        if resolved_id in self._entries:
+            raise ValueError(f"Model provider is already registered: {resolved_id}")
+        self._entries[resolved_id] = ProviderEntry(
+            provider_id=resolved_id,
             provider=provider,
             priority=priority,
             enabled=enabled,
@@ -75,7 +81,7 @@ class ProviderRegistry:
     def entries(self) -> list[ProviderEntry]:
         return sorted(
             (entry for entry in self._entries.values() if entry.enabled),
-            key=lambda item: (item.priority, item.cost_tier),
+            key=lambda item: (item.priority, item.cost_tier, item.provider_id),
         )
 
 
