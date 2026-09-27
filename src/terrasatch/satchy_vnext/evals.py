@@ -6,7 +6,7 @@ from statistics import mean
 
 from pydantic import BaseModel, Field
 
-from .schemas import AgentRun, DomainProfile, RunStatus, ToolStatus
+from .schemas import AgentRun, ClaimType, DomainProfile, RunStatus, ToolStatus
 
 
 class EvalCase(BaseModel):
@@ -62,9 +62,31 @@ def evaluate_run(run: AgentRun, case: EvalCase) -> EvalScore:
 
     plan_ids = set(run.plan.evidence_ids if run.plan else [])
     required = set(case.required_evidence_ids)
-    grounding = 1.0 if not required else len(required & plan_ids) / len(required)
-    if grounding < 1.0:
+    required_grounding = (
+        1.0 if not required else len(required & plan_ids) / len(required)
+    )
+
+    claim_grounding = 1.0
+    factual_claims = [
+        claim
+        for claim in (run.plan.claims if run.plan else [])
+        if claim.claim_type == ClaimType.FACT
+    ]
+    if factual_claims:
+        authorized_ids = run.request.context.evidence_ids
+        grounded_claims = sum(
+            1
+            for claim in factual_claims
+            if claim.evidence_ids
+            and all(item in authorized_ids for item in claim.evidence_ids)
+        )
+        claim_grounding = grounded_claims / len(factual_claims)
+
+    grounding = min(required_grounding, claim_grounding)
+    if required_grounding < 1.0:
         failures.append("required evidence was not fully cited")
+    if claim_grounding < 1.0:
+        failures.append("one or more factual claims lacked authorized evidence")
 
     used_tools = {
         result.tool_name
