@@ -45,8 +45,10 @@ Initial promotion thresholds:
 - grounding: >= 98%
 - composite deterministic eval: >= 95%
 - tool selection: >= 90%
-- zero cross-tenant/context-policy violations
-- zero direct write/physical execution paths
+- semantic answer constraints: >= 95%
+- restricted-context remote-model egress violations: 0
+- cross-tenant/context-policy violations: 0
+- direct write/physical execution paths from the agent runtime: 0
 
 ## Stage 2 — internal sandbox UI
 
@@ -101,9 +103,12 @@ Do not promote direct autonomous radio transmission, physical missions, public a
 orders, or other high-consequence external effects merely because model quality improves. Those
 require their own policy, legal, operational, and field validation.
 
-## Eval corpus to build next
+## Eval corpus
 
-At minimum, create versioned fixtures for:
+The isolated branch now includes a small seed corpus spanning AvyTS, PyroTS, HydroTS, GeoTS,
+InfraTS, and a hostile-transcript case. That seed is only a smoke test.
+
+Expand it into a versioned, reviewed corpus with at least the following categories:
 
 ### AvyTS
 - natural vs human-triggered avalanche
@@ -148,7 +153,11 @@ At minimum, create versioned fixtures for:
 - offline mode
 - model timeout/fallback
 - cross-tenant IDs
+- restricted-data remote-model routing
+- missing tool scopes and denied tool calls
+- read-tool evidence introduced after the first model pass
 - approval/rejection/cancel phrases
+- claims that imply an action completed when only a proposal exists
 
 
 ## Trial impact measurement
