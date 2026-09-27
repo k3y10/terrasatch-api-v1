@@ -71,11 +71,14 @@ https://support.tomorrow.io/hc/en-us/articles/39329004302484-Logging-Weather-Dri
 
 Technosylva combines wildfire simulations, situational awareness, field observations, incident
 mapping and resource context. Watch Duty combines official sources, radio monitoring, maps,
-satellites, weather, alerts, and human verification.
+satellites, weather, alerts, and human verification. Watch Duty's 2025 annual report also describes
+AI-assisted image detection, official-document parsing, and a speech-to-text radio transcription
+service in development, while retaining human-written alerts.
 
 Sources:
 https://technosylva.com/fire-agencies/
 https://www.watchduty.org/how-it-works/overview
+https://www.watchduty.org/blog/2025-annual-report
 
 **TerraSatch implication:** the differentiator is not another dashboard. It is the cross-source
 field pipeline: EchoSatch + EdgeSatch + GridSatch + CoreSatch + Satchy, with provenance preserved.
@@ -99,47 +102,63 @@ These are unusually relevant building blocks for field AI.
 
 ## Gaps that matter before production Satchy
 
-### P0 — trust and evaluation
+The current production platform still has these gaps. The isolated vNext branch addresses several
+of them in code, but none should be considered production-complete until the promotion stages have
+run against representative data and humans have reviewed the results.
 
-1. No canonical AgentRun contract persisted across all Satchy interactions.
-2. No broad domain eval corpus with known expected evidence, tool, and safety outcomes.
-3. No measured hallucination/unsupported-claim rate.
-4. No calibrated confidence or abstention benchmark.
-5. No explicit shadow/canary promotion gates.
-6. No standardized contradiction handling across radio, official data, sensors, and models.
+### P0 — now implemented in the isolated vNext runtime
 
-### P0 — context
+- source-classified `ContextPacket`
+- auditable `AgentRun` contract
+- provider-neutral model registry, routing, fallback, and local-only restricted-data routing
+- claim-level evidence grounding
+- typed tools with READ / PROPOSE_WRITE / EXTERNAL_WRITE / PHYSICAL effects
+- explicit tool scopes and fail-closed policy decisions
+- approval-gated action proposals
+- context freshness and conservative contradiction checks
+- model/tool latency and usage records
+- AvyTS / PyroTS / HydroTS / GeoTS / InfraTS domain profiles
+- deterministic eval and promotion gates
+- semantic answer constraints
+- cross-domain seed benchmark corpus
+- local sandbox CLI and benchmark runner
+- append-only local AgentRun trace store
+- compatibility bridge from the current SatchyContext
+- measured trial-impact metrics for time saved, acceptance, and reviewer edits
 
-1. Current SatchyContext is useful but not yet a source-classified ContextPacket.
-2. GridSatch concepts are spread across API master data, TerraSatch Map, and AvyTS.
-3. No single context retrieval contract for spatial/environmental/incident history.
-4. Limited long-running incident/shift context.
-5. User adaptation exists, but operational facts must remain separate from preferences.
+These are sandbox capabilities only. They do not alter current production routes or behavior.
 
-### P0 — agent runtime
+### P0 — still required before any production canary
 
-1. Current Satchy model use is tied closely to the API provider setting.
-2. No model capability router/fallback chain across local/remote model classes.
-3. No general typed tool registry.
-4. No side-effect taxonomy shared across all tools.
-5. No durable agent workflow state for multi-minute/hour tasks.
-6. No per-run latency/token/cost/quality telemetry.
+1. Run the vNext tests and benchmark corpus in a real Python environment and record the results.
+2. Add read-only sandbox adapters for EchoSatch, GridSatch, CoreSatch, and QuakSatch.
+3. Persist AgentRuns and reviewer feedback in a staging-grade audit store.
+4. Build a much larger reviewed eval corpus from real field shorthand and organization workflows.
+5. Measure unsupported-claim rate, claim-evidence precision/recall, and abstention behavior.
+6. Run current Satchy and vNext side by side in shadow mode on the same authorized context.
+7. Add an internal review UI with evidence drill-down, model route, tool calls, and feedback.
+8. Complete threat modeling for prompt injection, cross-tenant access, secrets, retention, and egress.
+9. Validate local-model performance and resource use on actual EdgeSatch hardware.
+10. Require zero direct external-write/physical-execution paths in the agent runtime.
 
-### P1 — field advantage
+### P1 — context and field advantage
 
-1. Finish and repeatedly field-test RF -> audio -> STT -> event ingestion.
-2. Add degraded/offline Satchy with local model and cached GridSatch context.
-3. Treat radio shorthand, callsigns, location aliases and domain vocabulary as first-class eval data.
-4. Add cross-source contradiction detection and handoff/shift summarization.
-5. Make evidence review one click from every Satchy factual statement.
+1. Consolidate GridSatch identity across API terrain cells, AvyTS H3 cells, and TerraSatch Map.
+2. Add real DEM/terrain, environmental, temporal, and incident-history context behind GridSatch.
+3. Finish repeated RF -> audio -> STT -> event field validation across supported radio targets.
+4. Cache enough GridSatch/CoreSatch context for useful degraded/offline operation.
+5. Add cross-source handoff, shift summarization, and contradiction-resolution workflows.
+6. Treat callsigns, location aliases, field shorthand, and organization terminology as eval data.
+7. Keep official, observed, modeled, derived, and AI-interpreted information visually distinct.
 
-### P1 — customer value
+### P1 — customer impact
 
-1. Measure minutes of work avoided per report/handoff/observation.
-2. During the 14-day trial, show what Satchy listened to, structured, linked, summarized and drafted.
-3. Show approval acceptance/edit rate rather than generic "AI usage."
-4. Build reusable organization terminology, SOP and reporting templates.
-5. Make "why Satchy said this" visible, not hidden behind a confidence number.
+1. During the 14-day trial, show what Satchy listened to, structured, linked, summarized, and drafted.
+2. Measure actual manual time versus Satchy-assisted time for repeated workflows.
+3. Track approval acceptance, rejection reason, and reviewer edit ratio.
+4. Make every important factual statement expandable to its evidence and provenance.
+5. Learn organization terminology, SOPs, and report templates without turning habits into facts.
+6. Do not claim monetary ROI unless the customer supplies an approved cost baseline.
 
 ## Defensible TerraSatch position
 
@@ -179,21 +198,25 @@ spatially grounded operational record and useful work without losing the origina
 
 The isolated `terrasatch.satchy_vnext` package adds:
 
-- ContextPacket and evidence classes
-- AgentRun and model usage records
-- provider-neutral model registry/router
+- ContextPacket with source class, sensitivity, spatial/environmental/operational context
+- AgentRun, claim-level grounding, model route, tool results, warnings, and usage records
+- provider-neutral model registry/router with multiple model variants and fallback
 - local Ollama and deterministic static providers
-- model fallback
-- domain profiles
-- typed tool registry
-- effect/risk classification
-- fail-closed policy engine
-- approval-gated action proposals
-- prompt-injection boundary language
+- restricted-context local-only model routing
+- AvyTS, PyroTS, HydroTS, GeoTS, InfraTS, and general domain profiles
+- typed tool registry with explicit scopes and side-effect classes
+- fail-closed policy engine that separates hard blocks from human-review proposals
+- approval-gated action proposals; no direct external or physical execution
+- prompt-injection boundary language and malicious-transcript benchmark cases
+- context freshness and conservative same-location contradiction detection
 - memory interfaces that default to no writes
-- trace store interface
-- deterministic eval scoring and promotion thresholds
+- in-memory and append-only local AgentRun trace stores
+- deterministic eval scoring, semantic answer constraints, and promotion thresholds
+- repeatable benchmark runner plus a cross-domain seed corpus
+- measured trial-impact summaries using observed baselines only
+- current-Satchy compatibility bridge
 - explicit EchoSatch/GridSatch/CoreSatch/QuakSatch contracts
+- local sandbox CLI that does not start the production API
 
 It does **not** connect production handlers, migrate database tables, rename current production
 modules, alter API routes, or enable Satchy vNext for customers.
