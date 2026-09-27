@@ -101,7 +101,7 @@ class ToolRegistry:
         evidence_raw = raw.pop("evidence", []) if isinstance(raw, dict) else []
         evidence: list[EvidenceRef] = []
         for item in evidence_raw if isinstance(evidence_raw, list) else []:
-            evidence.append(item if isinstance(item, EvidenceRef) else EvidenceRef.model_validate(item))
+            evidence.append(\n                item\n                if isinstance(item, EvidenceRef)\n                else EvidenceRef.model_validate(item)\n            )
         return ToolResult(
             tool_name=name,
             status=ToolStatus.COMPLETED,

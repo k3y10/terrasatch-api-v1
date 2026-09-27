@@ -72,7 +72,7 @@ def evaluate_run(run: AgentRun, case: EvalCase) -> EvalScore:
         if result.status in {ToolStatus.COMPLETED, ToolStatus.PROPOSED}
     }
     expected_tools = set(case.expected_tool_names)
-    tool_selection = 1.0 if not expected_tools else len(used_tools & expected_tools) / len(expected_tools)
+    tool_selection = (\n        1.0\n        if not expected_tools\n        else len(used_tools & expected_tools) / len(expected_tools)\n    )
     if tool_selection < 1.0:
         failures.append("expected tools were not fully selected")
 

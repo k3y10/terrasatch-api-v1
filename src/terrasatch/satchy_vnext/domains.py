@@ -91,7 +91,7 @@ DOMAIN_DEFINITIONS: dict[DomainProfile, DomainDefinition] = {
         ),
         safety_rules=(
             "Keep observed gauge values distinct from modeled flood projections.",
-            "Do not represent a model threshold crossing as an official warning unless sourced as one.",
+            (\n                "Do not represent a model threshold crossing as an official warning "\n                "unless sourced as one."\n            ),
         ),
         evidence_precedence=_DEFAULT_PRECEDENCE,
     ),

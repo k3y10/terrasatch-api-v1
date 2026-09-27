@@ -200,7 +200,7 @@ class ModelRouter:
         if prefer_local:
             entries.sort(key=lambda item: (not item.provider.local, item.priority, item.cost_tier))
 
-        capability = "reasoning" if task_type in {TaskType.ANALYZE, TaskType.PLAN, TaskType.COMMAND} else "fast"
+        capability = (\n            "reasoning"\n            if task_type in {TaskType.ANALYZE, TaskType.PLAN, TaskType.COMMAND}\n            else "fast"\n        )
         capable = [entry for entry in entries if capability in entry.provider.capabilities]
         if capable:
             entries = capable
