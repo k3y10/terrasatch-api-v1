@@ -154,3 +154,24 @@ Domain profiles should shape extraction and reasoning without creating five inde
 7. Canary read-only workspace answers for internal users.
 8. Only after promotion gates pass, allow vNext to create proposals in the existing action plane.
 9. Never grant direct physical or external-write authority to the model runtime.
+
+
+## Local sandbox execution
+
+The vNext package can be exercised without starting the TerraSatch API or connecting a production
+database.
+
+```bash
+python -m terrasatch.satchy_vnext inspect-context ./context.json
+
+python -m terrasatch.satchy_vnext run ./context.json \
+  --message "Summarize the current field evidence." \
+  --provider ollama \
+  --model qwen3:1.7b
+```
+
+The CLI always constructs a SANDBOX runtime. Tool contracts are registered without production
+handlers, so no API write, external notification, radio transmission, or physical action can occur.
+
+For repeatable test suites, `BenchmarkCase` and `run_benchmark()` execute AgentRequests through the
+same runtime and produce deterministic EvalScores plus the promotion report.
