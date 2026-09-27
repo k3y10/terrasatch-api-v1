@@ -633,8 +633,8 @@ async def _post_resend_email(
     thread_message_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[str, str | None]:
-    receiving_key = settings.resend_receiving_api_key or settings.resend_api_key
-    if receiving_key is None:
+    sending_key = settings.resend_api_key
+    if sending_key is None:
         raise ProviderUnavailable("Resend API key is unavailable")
     clean_subject = subject.strip()
     clean_text = text.strip()
@@ -647,6 +647,7 @@ async def _post_resend_email(
     payload: dict[str, object] = {
         "from": sender,
         "to": recipients,
+        "reply_to": normalize_email_address(sender),
         "subject": clean_subject,
         "text": clean_text,
     }
@@ -658,7 +659,7 @@ async def _post_resend_email(
             "References": thread_message_id,
         }
     headers = {
-        "Authorization": f"Bearer {receiving_key.get_secret_value()}",
+        "Authorization": f"Bearer {sending_key.get_secret_value()}",
         "Content-Type": "application/json",
         "Idempotency-Key": f"terrasatch-workspace-email/{request_id}"[:256],
     }

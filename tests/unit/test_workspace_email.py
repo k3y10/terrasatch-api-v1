@@ -185,10 +185,11 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
         sent_payload: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["Authorization"] == "Bearer re_test"
             sent_payload.update(__import__("json").loads(request.content))
             return httpx.Response(200, json={"id": "email_outbound_1"})
 
-        settings = Settings(environment="local", resend_api_key=SecretStr("re_test"))
+        settings = Settings(environment="local", resend_api_key=SecretStr("re_test"), resend_receiving_api_key=SecretStr("re_receiving_test"))
         row = await send_workspace_email(
             session,
             settings,
@@ -202,6 +203,7 @@ async def test_workspace_email_sender_cannot_impersonate_another_person() -> Non
             transport=httpx.MockTransport(handler),
         )
         await session.commit()
+        assert sent_payload["reply_to"] == "ops@terrasatch.com"
         assert row.direction == "outbound"
         assert sent_payload["from"] == "TerraSatch Operations <ops@terrasatch.com>"
         assert "html" in sent_payload
