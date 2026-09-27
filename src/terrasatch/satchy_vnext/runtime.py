@@ -387,7 +387,26 @@ Authorized tool contracts for this turn:
                     context=request.context,
                     mode=self.config.mode,
                 )
-                if registered.spec.effect != ToolEffect.READ or not decision.allowed:
+                if registered.spec.effect == ToolEffect.READ and not decision.allowed:
+                    tool_results.append(
+                        ToolResult(
+                            tool_name=registered.spec.name,
+                            status=ToolStatus.BLOCKED,
+                            error=decision.reason,
+                        )
+                    )
+                    continue
+
+                if registered.spec.effect != ToolEffect.READ:
+                    if not decision.proposal_allowed:
+                        tool_results.append(
+                            ToolResult(
+                                tool_name=registered.spec.name,
+                                status=ToolStatus.BLOCKED,
+                                error=decision.reason,
+                            )
+                        )
+                        continue
                     proposed = ProposedAction(
                         action_type=registered.spec.name,
                         summary=tool_request.reason,
@@ -441,6 +460,12 @@ Authorized tool contracts for this turn:
                     warnings=warnings,
                     additional_evidence=read_evidence,
                 )
+                if refined.tool_requests:
+                    warnings.append(
+                        "Refinement requested additional tools; multi-round tool execution "
+                        "is disabled in this runtime."
+                    )
+                    refined = refined.model_copy(update={"tool_requests": []})
                 final_plan = refined
                 route = refined_route
 
