@@ -111,6 +111,9 @@ class SatchyRuntime:
     ) -> str:
         definition = definition_for(domain)
         rules = "\n".join(f"- {rule}" for rule in definition.safety_rules)
+        precedence = " > ".join(
+            item.value for item in definition.evidence_precedence
+        )
         tool_specs = [
             spec.model_dump(mode="json")
             for spec in self.tools.specs()
@@ -139,6 +142,10 @@ Domain purpose: {definition.purpose}
 Domain safety rules:
 {rules}
 
+Evidence precedence guidance:
+{precedence}
+Use precedence to frame uncertainty and provenance. Never silently discard contradictory evidence.
+
 Authorized tool contracts for this turn:
 {json.dumps(tool_specs, ensure_ascii=False)}
 """
@@ -154,10 +161,12 @@ Authorized tool contracts for this turn:
         if extra_evidence:
             existing = packet.evidence_ids
             packet.evidence.extend(item for item in extra_evidence if item.id not in existing)
+        quality = inspect_context_quality(packet)
         payload = {
             "request": request.message,
             "task_type": request.task_type.value,
             "context_packet": packet.model_dump(mode="json"),
+            "context_quality": quality.model_dump(mode="json"),
             "tool_results": [
                 item.model_dump(mode="json") for item in (tool_results or [])
             ],
