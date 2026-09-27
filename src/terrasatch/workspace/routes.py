@@ -519,7 +519,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                     WorkspaceMessage.organization_id == organization_id,
                     WorkspaceMessage.user_id == user.id,
                 )
-                .order_by(WorkspaceMessage.created_at.desc())
+                .order_by(WorkspaceMessage.created_at.desc(), WorkspaceMessage.role.asc())
                 .limit(40)
             )
         )
@@ -1180,7 +1180,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                     WorkspaceMessage.organization_id == organization_id,
                     WorkspaceMessage.user_id == user.id,
                 )
-                .order_by(WorkspaceMessage.created_at.desc())
+                .order_by(WorkspaceMessage.created_at.desc(), WorkspaceMessage.role.asc())
                 .limit(12)
             )
         )
