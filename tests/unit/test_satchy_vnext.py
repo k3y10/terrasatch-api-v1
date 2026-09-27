@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from terrasatch.satchy.schemas import SatchyContext
+from terrasatch.satchy_vnext.benchmark import BenchmarkCase, run_benchmark
 from terrasatch.satchy_vnext.bridge import context_packet_from_current
 from terrasatch.satchy_vnext.domains import infer_domain
 from terrasatch.satchy_vnext.evals import EvalCase, evaluate_run, promotion_report
@@ -687,3 +688,56 @@ def test_provider_registry_supports_multiple_models_from_same_provider() -> None
     assert len(entries) == 2
     assert entries[0].provider.model == "static-small"
     assert entries[1].provider.model == "static-large"
+
+
+@pytest.mark.asyncio
+async def test_benchmark_runner_uses_promotion_gates() -> None:
+    provider = StaticModelProvider(
+        {
+            "answer": "Natural avalanche observed.",
+            "confidence": 0.95,
+            "claims": [
+                {
+                    "claim_type": "fact",
+                    "text": "Natural avalanche observed.",
+                    "confidence": 0.95,
+                    "evidence_ids": ["obs-1"],
+                }
+            ],
+            "evidence_ids": ["obs-1"],
+            "missing_context": [],
+            "tool_requests": [],
+            "proposed_actions": [],
+            "follow_up_required": False,
+        }
+    )
+    providers = ProviderRegistry()
+    providers.register(provider)
+    runtime = SatchyRuntime(
+        config=SatchyRuntimeConfig(
+            enabled=True,
+            mode=ExecutionMode.SHADOW,
+            refine_after_read_tools=False,
+        ),
+        router=ModelRouter(providers),
+        tools=ToolRegistry(),
+    )
+    request = AgentRequest(
+        message="Summarize the avalanche observation.",
+        context=_context(),
+        preferred_domain=DomainProfile.AVY,
+        task_type=TaskType.SUMMARIZE,
+    )
+    case = BenchmarkCase(
+        name="avy-grounded-summary",
+        request=request,
+        evaluation=EvalCase(
+            name="avy-grounded-summary",
+            expected_domain=DomainProfile.AVY,
+            required_evidence_ids=["obs-1"],
+        ),
+    )
+    report = await run_benchmark(runtime, [case])
+    assert report.case_count == 1
+    assert report.mean_composite == 1.0
+    assert report.passed is True
