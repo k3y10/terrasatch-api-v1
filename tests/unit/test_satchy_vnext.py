@@ -24,6 +24,7 @@ from terrasatch.satchy_vnext.schemas import (
     EvidenceClass,
     EvidenceRef,
     ExecutionMode,
+    GroundedClaim,
     RiskLevel,
     RunStatus,
     Sensitivity,
@@ -520,10 +521,7 @@ def test_tool_scope_policy_fails_closed() -> None:
 
 def test_grounded_claim_requires_evidence() -> None:
     with pytest.raises(ValueError, match="evidence"):
-        __import__(
-            "terrasatch.satchy_vnext.schemas",
-            fromlist=["GroundedClaim"],
-        ).GroundedClaim(
+        GroundedClaim(
             claim_type=ClaimType.FACT,
             text="Unsupported operational fact.",
             confidence=0.9,
