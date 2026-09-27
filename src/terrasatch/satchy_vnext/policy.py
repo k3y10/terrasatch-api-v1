@@ -40,6 +40,28 @@ class PolicyEngine:
                 reason="Tool is outside the authorized context allowlist.",
             )
 
+        granted_scopes = context.policy_context.get("scopes", [])
+        if not isinstance(granted_scopes, list):
+            granted_scopes = []
+        missing_scopes = [
+            scope for scope in spec.required_scopes if scope not in granted_scopes
+        ]
+        if missing_scopes:
+            return PolicyDecision(
+                allowed=False,
+                approval_required=True,
+                risk_level=spec.risk_level,
+                reason="Missing required tool scopes: " + ", ".join(missing_scopes),
+            )
+
+        if spec.domains and context.domain.value not in spec.domains:
+            return PolicyDecision(
+                allowed=False,
+                approval_required=True,
+                risk_level=spec.risk_level,
+                reason="Tool is not authorized for the active domain profile.",
+            )
+
         if spec.effect == ToolEffect.READ:
             return PolicyDecision(
                 allowed=True,
