@@ -188,6 +188,7 @@ async def create_or_update_organization_member(
     password: str,
     role: MembershipRole,
     settings: Settings | None = None,
+    create_only: bool = False,
 ) -> tuple[User, Membership]:
     organization = await session.get(Organization, organization_id)
     if organization is None:
@@ -206,6 +207,8 @@ async def create_or_update_organization_member(
         raise InvalidConfiguration(str(error)) from error
 
     user = await session.scalar(select(User).where(User.email == normalized_email))
+    if user is not None and create_only:
+        raise ResourceConflict("Account already exists; no credentials or access were changed")
     membership = None
     if user is not None:
         membership = await session.scalar(

@@ -220,3 +220,21 @@ The workspace Satchy rail uses the existing authenticated chat API. Panel prefer
 ### Monday internal pilot
 
 `TERRASATCH_WORKSPACE_MONDAY_API_TOKEN` is stored only in the server environment. `TERRASATCH_WORKSPACE_MONDAY_BOARD_IDS` is a comma-separated allowlist, maximum eight numeric IDs. The connector uses a fixed Monday HTTPS endpoint and read-only GraphQL query. Each board is limited to 100 tasks; the interface shows the first 20 and labels partial results. No polling or writes occur. Routes require membership in the configured internal organization and admin/owner role. Summary requests also require CSRF and are rate limited; model output cannot execute actions. Personal Monday tokens mirror the user's Monday access, so use a suitably restricted account. No credential is returned to the browser.
+
+
+### Internal team setup and beta connection manager
+
+The portal Account & access panel provides owner-only internal team account creation.
+It creates a new @terrasatch.com identity with Viewer or Operator access, enforcing
+subscription seats and server capacity. Existing identities cannot be reset or claimed
+through this form. The owner supplies an initial password and shares it securely; no
+invitation is sent. Shared-mailbox delegation stays in Email. Domain receiving and
+a member's ability to sign in are separate states.
+
+Tools & services defaults to ready/connected adapters, with search and filters for
+platform setup and planned providers. Connection setup uses existing scoped API
+requests, OAuth authorization, encrypted manual credentials, tests, and revocation.
+Provider app registration is still required for OAuth services; no installed adapter
+implies access to a customer's provider account. Public endpoint and credential
+validation remain server-side. Staging's encryption key is persisted in its restricted
+environment file and must be preserved across releases.
