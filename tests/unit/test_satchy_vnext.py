@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from uuid import uuid4
 
 import pytest
@@ -17,6 +19,7 @@ from terrasatch.satchy_vnext.schemas import (
     EvidenceClass,
     EvidenceRef,
     ExecutionMode,
+    RiskLevel,
     RunStatus,
     TaskType,
     ToolEffect,
@@ -94,6 +97,7 @@ async def test_write_tool_is_only_proposed_and_never_executed() -> None:
     providers.register(StaticModelProvider(response), priority=0)
 
     async def must_not_run(_arguments, _context):
+        await asyncio.sleep(0)
         raise AssertionError("external-write handler must never execute")
 
     tools = ToolRegistry()
@@ -164,17 +168,14 @@ async def test_unauthorized_evidence_is_removed_and_warned() -> None:
     assert any("unauthorized evidence" in warning for warning in run.warnings)
 
 
-@pytest.mark.asyncio
-async def test_offline_routing_keeps_local_provider() -> None:
+def test_offline_routing_keeps_local_provider() -> None:
     providers = ProviderRegistry()
     providers.register(StaticModelProvider(), priority=10)
     router = ModelRouter(providers)
     provider, route = router.select(
         task_type=TaskType.QUESTION,
         connectivity=Connectivity.OFFLINE,
-        risk_level=__import__(
-            "terrasatch.satchy_vnext.schemas", fromlist=["RiskLevel"]
-        ).RiskLevel.LOW,
+        risk_level=RiskLevel.LOW,
         prefer_local=True,
     )
     assert provider.local is True
