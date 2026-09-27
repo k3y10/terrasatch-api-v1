@@ -89,12 +89,19 @@ class StaticModelProvider:
     """Deterministic test/sandbox provider. Never calls a network service."""
 
     name = "static"
-    model = "static-v1"
     local = True
     capabilities = frozenset({"fast", "reasoning", "structured"})
 
-    def __init__(self, response: dict[str, Any] | None = None) -> None:
-        self.response = response or {
+    def __init__(
+        self,
+        response: dict[str, Any] | None = None,
+        *,
+        responses: list[dict[str, Any]] | None = None,
+        model: str = "static-v1",
+    ) -> None:
+        if response is not None and responses is not None:
+            raise ValueError("Provide either response or responses, not both")
+        default = {
             "answer": "No model-backed answer is configured for this isolated Satchy runtime.",
             "confidence": 0.5,
             "claims": [],
@@ -104,11 +111,21 @@ class StaticModelProvider:
             "proposed_actions": [],
             "follow_up_required": False,
         }
+        configured = responses if responses is not None else [response or default]
+        if not configured:
+            raise ValueError("StaticModelProvider requires at least one response")
+        self.model = model
+        self.responses = [dict(item) for item in configured]
+        self.requests: list[ModelRequest] = []
+        self._index = 0
 
     async def generate(self, request: ModelRequest) -> ModelOutput:
-        _ = request
+        self.requests.append(request)
+        index = min(self._index, len(self.responses) - 1)
+        response = self.responses[index]
+        self._index += 1
         return ModelOutput(
-            data=dict(self.response),
+            data=dict(response),
             usage=ModelUsage(
                 provider=self.name,
                 model=self.model,
