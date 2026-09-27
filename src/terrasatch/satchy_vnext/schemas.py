@@ -97,6 +97,13 @@ class TaskType(StrEnum):
     COMMAND = "command"
 
 
+class ClaimType(StrEnum):
+    FACT = "fact"
+    INFERENCE = "inference"
+    RECOMMENDATION = "recommendation"
+    PROCESS = "process"
+
+
 class EvidenceRef(BaseModel):
     id: str = Field(min_length=1, max_length=255)
     evidence_class: EvidenceClass
@@ -169,9 +176,23 @@ class ProposedAction(BaseModel):
     policy_reason: str | None = Field(default=None, max_length=2000)
 
 
+class GroundedClaim(BaseModel):
+    claim_type: ClaimType
+    text: str = Field(min_length=1, max_length=4000)
+    confidence: float = Field(ge=0, le=1)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def factual_claim_requires_evidence(self):
+        if self.claim_type == ClaimType.FACT and not self.evidence_ids:
+            raise ValueError("Factual claims require at least one evidence ID")
+        return self
+
+
 class AgentPlan(BaseModel):
     answer: str = Field(min_length=1, max_length=12000)
     confidence: float = Field(ge=0, le=1)
+    claims: list[GroundedClaim] = Field(max_length=64)
     evidence_ids: list[str] = Field(default_factory=list, max_length=64)
     missing_context: list[str] = Field(default_factory=list, max_length=32)
     tool_requests: list[ToolRequest] = Field(default_factory=list, max_length=16)
