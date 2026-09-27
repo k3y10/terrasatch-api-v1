@@ -17,6 +17,7 @@ from .tools import ToolSpec
 class PolicyDecision(BaseModel):
     allowed: bool
     approval_required: bool
+    proposal_allowed: bool = False
     risk_level: RiskLevel
     reason: str
 
@@ -75,6 +76,7 @@ class PolicyEngine:
         return PolicyDecision(
             allowed=False,
             approval_required=True,
+            proposal_allowed=True,
             risk_level=spec.risk_level,
             reason=(
                 f"{spec.effect.value} tools are proposal-only in Satchy vNext "
