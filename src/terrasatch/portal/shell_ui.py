@@ -4,6 +4,8 @@
 from html import escape
 from urllib.parse import quote
 
+from .assistant_ui import assistant_panel, assistant_script, assistant_styles
+
 
 def workspace_content(
     *,
@@ -14,6 +16,7 @@ def workspace_content(
     overview: str,
     devices: str,
     billing: str,
+    csrf_token: str = "",
 ) -> str:
 
     internal = email.strip().casefold().endswith("@terrasatch.com")
@@ -58,7 +61,7 @@ def workspace_content(
 
 <section id="account" class="workspace-section" aria-labelledby="account-title"><div class="section-heading"><div><span class="eyebrow">IDENTITY &amp; ENTITLEMENTS</span><h2 id="account-title" tabindex="-1">Account &amp; access</h2></div></div><div class="workspace-card account-identity"><h3>{escape(display_name)}</h3><p>{escape(email)}</p><strong>ROLE · {escape(role.upper())}</strong><p>Organization membership controls which field systems you can see. Billing management requires owner or administrator permission. Mailbox permissions are assigned separately.</p></div>{billing}<div class="workspace-card"><h3>Connected tools</h3><p>Device capabilities come from the connected hardware and provider. Radio transmission remains operator-controlled. Subscription status alone does not activate hardware or grant mailbox access.</p><p>Radio operation is available through your authorized field console.</p></div></section>
 
-</div></div>{_navigation_script()}"""
+</div>{assistant_panel(selected_organization, csrf_token)}</div>{_navigation_script()}{assistant_script()}{assistant_styles()}"""
 
 
 def _navigation_script() -> str:

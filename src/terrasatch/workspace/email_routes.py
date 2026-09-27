@@ -23,11 +23,23 @@ from terrasatch.workspace.email_service import (
     remove_mailbox_delegate,
     reply_to_workspace_email,
     send_workspace_email,
+    sendable_mailboxes,
     set_mailbox_delegate,
 )
 from terrasatch.workspace.routes import access, csrf
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace-email"])
+
+
+def require_email_organization(settings, organization_id: UUID) -> None:
+    configured = settings.workspace_email_organization_id
+    if configured is None or configured != organization_id:
+        raise HTTPException(403, "Email is not enabled for this organization")
+
+
+async def email_access(request, session, organization_id):
+    require_email_organization(request.app.state.settings, organization_id)
+    return await access(request, session, organization_id)
 
 
 class ComposeEmail(BaseModel):
@@ -86,7 +98,7 @@ async def workspace_email_delegations(
     request: Request,
 ) -> dict[str, object]:
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         rows = await list_mailbox_delegates(
@@ -125,7 +137,7 @@ async def workspace_email_delegate(
 ) -> dict[str, object]:
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
-        actor, membership = await access(request, session, organization_id)
+        actor, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(actor):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         delegate = await _organization_delegate_user(
@@ -157,7 +169,7 @@ async def workspace_email_delegate_revoke(
 ) -> dict[str, bool]:
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
-        actor, membership = await access(request, session, organization_id)
+        actor, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(actor):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         delegate = await _organization_delegate_user(
@@ -184,7 +196,7 @@ async def workspace_email_list(
 ) -> dict[str, object]:
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         messages = await list_workspace_emails(
@@ -204,7 +216,7 @@ async def workspace_email_detail(
 ) -> dict[str, object]:
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         message = await get_workspace_email(
@@ -244,7 +256,7 @@ async def workspace_email_attachment(
 ) -> dict[str, str]:
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         return await get_workspace_attachment(
@@ -265,7 +277,7 @@ async def workspace_email_read(
 ) -> dict[str, bool]:
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         await get_workspace_email(
             session,
             user=user,
@@ -285,7 +297,7 @@ async def workspace_email_compose(
 ) -> dict[str, str]:
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         row = await send_workspace_email(
@@ -312,7 +324,7 @@ async def workspace_email_reply(
 ) -> dict[str, str]:
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
-        user, membership = await access(request, session, organization_id)
+        user, membership = await email_access(request, session, organization_id)
         if not is_internal_workspace_user(user):
             raise HTTPException(status_code=403, detail="TerraSatch email access required")
         row = await reply_to_workspace_email(
@@ -326,3 +338,24 @@ async def workspace_email_reply(
         )
         await session.commit()
         return {"id": str(row.id), "provider_email_id": row.provider_email_id}
+
+
+@router.post("/organizations/{organization_id}/email/{email_id}/draft")
+async def workspace_email_draft(organization_id: UUID, email_id: UUID, request: Request, response: Response):
+    from terrasatch.billing.rate_limit import enforce_public_rate_limit
+    from terrasatch.workspace.support_assistant import draft_support_reply
+
+    csrf(request)
+    settings = request.app.state.settings
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(settings)() as session:
+        user, membership = await email_access(request, session, organization_id)
+        message = await get_workspace_email(session, user=user, role=membership.role, email_id=email_id)
+        senders = await sendable_mailboxes(session, user=user, role=membership.role)
+        if message.direction != "inbound" or message.received_for not in senders:
+            raise HTTPException(403, "Reply permission is required to prepare a draft")
+        subject, text = message.subject, message.text_body or ""
+        user_id = str(user.id)
+    await enforce_public_rate_limit(settings, category="support-draft", identifier=user_id, limit=5)
+    draft = await draft_support_reply(settings, subject=subject, text=text)
+    return {"draft": draft, "sent": False, "review_required": True}

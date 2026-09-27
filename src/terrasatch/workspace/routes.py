@@ -88,6 +88,7 @@ STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
 
 
 class SatchyPreferenceSettings(BaseModel):
+    work_context: str = Field(default="", max_length=1000)
     response_detail: Literal["brief", "balanced", "detailed"] = "brief"
     preferred_workflows: list[str] = Field(default_factory=list, max_length=32)
     preferred_map_layers: list[str] = Field(default_factory=list, max_length=64)

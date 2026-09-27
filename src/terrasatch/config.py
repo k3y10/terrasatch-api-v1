@@ -8,6 +8,7 @@ from email.utils import parseaddr
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import (
     AliasChoices,
@@ -127,6 +128,12 @@ class Settings(BaseSettings):
             "resend_api_key",
             "TERRASATCH_RESEND_API_KEY",
             "RESEND_API_KEY",
+        ),
+    )
+    workspace_email_organization_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "workspace_email_organization_id", "TERRASATCH_WORKSPACE_EMAIL_ORGANIZATION_ID"
         ),
     )
     # Receiving requires Resend Full access; outbound may retain its send-only key.

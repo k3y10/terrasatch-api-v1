@@ -52,7 +52,7 @@ email workspace. General organization roles do not grant blanket access to every
 | `support@terrasatch.com` | operator, admin, owner | operator, admin, owner | customer/user support |
 | `ops@terrasatch.com` | admin, owner | admin, owner | company/field operations |
 | `legal@terrasatch.com` | owner | owner | legal, contracts, privileged/sensitive correspondence |
-| `billing@terrasatch.com` | admin, owner | **human sending disabled** | Stripe/billing lifecycle automation and billing visibility |
+| `billing@terrasatch.com` | admin, owner | read-only by default; owner can explicitly delegate send/reply | Stripe/billing lifecycle automation and billing visibility |
 
 Personal mailboxes are private by default even when another user is an organization admin or owner.
 A mailbox owner can explicitly delegate their own personal mailbox to another enabled internal
@@ -60,10 +60,7 @@ organization member with view-only or view-and-send access. Organization owners 
 delegate shared company mailboxes. Delegation is additive and stored in
 `workspace_email_delegates`; it does not change the user's general organization role.
 
-`billing@terrasatch.com` is intentionally different: the existing Stripe/billing outbox owns
-billing lifecycle sending. Human workspace users may be granted visibility, but the workspace will
-not send manually as `billing@`. This keeps billing automation, idempotency, retries, and
-delivery/bounce reconciliation isolated from normal human correspondence.
+Billing lifecycle automation continues to use the separate durable outbox. Human Billing replies require explicit send delegation and do not modify invoices or subscriptions.
 
 A user cannot send as another person's mailbox unless that mailbox owner explicitly delegated send
 permission. Incoming HTML is stored for archival fidelity, but the server-rendered portal displays
@@ -155,7 +152,7 @@ TerraSatch.
 The human workspace at `/portal/email` includes a **Mailbox Access** panel for mailboxes the signed-in
 user is allowed to manage. Personal mailbox owners can grant/revoke view-only or view-and-send
 access. Organization owners can manage shared mailbox delegation. The panel makes
-`billing@terrasatch.com` explicitly view-only and never offers human send permission.
+Billing read-only by default and offers explicit owner-granted human send permission.
 
 ## Delegation API
 
@@ -176,8 +173,7 @@ Create/update payload:
 ```
 
 Personal mailbox delegation can only be managed by the owner of that mailbox. Shared mailbox
-delegation can only be managed by an organization owner. Any requested send permission for
-`billing@terrasatch.com` is forced off.
+delegation can only be managed by an organization owner. Billing send/reply requires an explicit owner-granted delegation.
 
 ## Operational boundary
 
@@ -208,3 +204,15 @@ external sender
 
 Both paths intentionally share Resend transport and webhook verification but do not share human
 mailbox authorization or billing-send authority.
+
+## Daily workspace and organization boundary
+
+Set `TERRASATCH_WORKSPACE_EMAIL_ORGANIZATION_ID` to the trusted internal organization UUID. Both portal and JSON email routes fail closed if it is missing or a different organization is selected. A matching email domain alone does not grant access. Existing role defaults above apply only inside this organization. Explicit grants are additive; removing a grant does not remove access already granted by a member's role.
+
+`satchy@terrasatch.com` is an owner/admin shared sender; owners may delegate it. It supports reviewed human messages, not unattended campaigns. Marketing audiences, consent/unsubscribe handling, scheduling, and automatic support sending remain disabled/unimplemented.
+
+The inbox has Inbox/Sent/All mail filters, an assigned-mailbox selector, and search over the latest bounded set of messages. The From selector includes only send-authorized mailboxes. Personal mail remains private unless its owner delegates it.
+
+Draft with Satchy prepares a support reply through the configured private Ollama service. The endpoint checks organization, message visibility, send/reply permission, CSRF, and rate limits. It releases its database session before model inference. Drafts never send automatically and cannot execute tools. Users must verify facts and explicitly send. Model availability is required; manual replies remain available if inference fails.
+
+The workspace Satchy rail uses the existing authenticated chat API. Panel preferences and work context are saved per organization/user. Map panels load external OpenStreetMap only after selecting a recorded location. Briefings reflect stored workspace snapshots; Monday.com and calendar ingestion are not connected by this change.

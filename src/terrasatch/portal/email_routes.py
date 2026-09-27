@@ -16,6 +16,7 @@ from terrasatch.identity.access import get_user_organization_access, list_user_a
 from terrasatch.identity.models import Membership, User
 from terrasatch.portal.email_ui import render_email_detail, render_email_inbox
 from terrasatch.portal.routes import _enabled, _require_user, _verify_csrf
+from terrasatch.workspace.email_routes import require_email_organization
 from terrasatch.workspace.email_service import (
     get_workspace_attachment,
     get_workspace_email,
@@ -29,6 +30,7 @@ from terrasatch.workspace.email_service import (
     send_workspace_email,
     sendable_mailboxes,
     set_mailbox_delegate,
+    visible_mailboxes,
 )
 
 router = APIRouter(tags=["portal-email"])
@@ -82,6 +84,7 @@ async def _email_context(request: Request, organization: str):
             user_id=user.id,
             organization_id=selected_access.organization_id,
         )
+        require_email_organization(settings, membership.organization_id)
         request.session["portal_organization"] = str(membership.organization_id)
         return user, membership
 
@@ -111,6 +114,7 @@ async def portal_email_inbox(
             user=user,
             role=membership.role,
         )
+        assigned_mailboxes = await visible_mailboxes(session, user=user, role=membership.role)
         managed_mailboxes = manageable_mailboxes(user, membership.role)
         member_rows = list(
             await session.scalars(
@@ -149,6 +153,7 @@ async def portal_email_inbox(
             organization_name=membership.organization_name,
             messages=messages,
             senders=senders,
+            mailboxes=assigned_mailboxes,
             manageable_mailboxes=managed_mailboxes,
             organization_members=[
                 {"email": item.email, "display_name": item.display_name}

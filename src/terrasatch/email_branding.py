@@ -8,6 +8,7 @@ TERRASATCH_SITE = "https://terrasatch.com"
 TERRASATCH_TAGLINE = "LISTEN. WATCH. LEARN. ADAPT."
 
 _SHARED_IDENTITIES = {
+    "satchy@terrasatch.com": "Satchy | TerraSatch",
     "ops@terrasatch.com": "TerraSatch Operations",
     "support@terrasatch.com": "TerraSatch Support",
     "legal@terrasatch.com": "TerraSatch Legal",

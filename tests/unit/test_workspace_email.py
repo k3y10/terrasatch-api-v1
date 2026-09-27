@@ -422,6 +422,6 @@ def test_email_inbox_renders_mailbox_access_panel() -> None:
     assert "keaton@terrasatch.com" in html
     assert "ericka@terrasatch.com" in html
     assert "view only" in html
-    assert "Billing access is view-only" in html
+    assert "Allow send and reply" in html
     assert "/portal/email/access/delegate" in html
     assert "/portal/email/access/revoke" in html

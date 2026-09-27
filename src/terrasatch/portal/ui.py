@@ -190,6 +190,7 @@ def render_portal(
         overview=overview,
         devices=device_panel,
         billing=billing_html,
+        csrf_token=csrf_token,
     )
 
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(selected_name)} · TerraSatch workspace</title>{_styles()}{workspace_styles()}</head><body><a class="skip-link" href="#overview">Skip to workspace</a><div class="shell"><header><a class="brand" href="/portal"><img src="{escape(SATCHY_ASSET_URL)}" alt=""><span><strong>TERRASATCH</strong><b>CONNECTED WORKSPACE</b></span></a><div class="who"><strong>{escape(display_name)}</strong><span>{escape(email)} · {escape(role.upper())}</span></div><form method="post" action="/portal/logout"><input type="hidden" name="csrf_token" value="{_attr(csrf_token)}"><button class="ghost">Sign out</button></form></header><main><section class="headline"><div><h1>{escape(selected_name)}</h1><p>Your team, tools, and field systems in one place.</p></div><form id="organization-form" class="organization-controls" method="get" action="/portal"><label>Organization<select name="organization">{options}</select></label><button type="submit">Switch</button></form></section>{content}</main></div></body></html>'''

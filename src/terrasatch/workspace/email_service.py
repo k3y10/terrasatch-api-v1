@@ -27,7 +27,8 @@ OPS_MAILBOX = f"ops@{TERRASATCH_EMAIL_DOMAIN}"
 SUPPORT_MAILBOX = f"support@{TERRASATCH_EMAIL_DOMAIN}"
 LEGAL_MAILBOX = f"legal@{TERRASATCH_EMAIL_DOMAIN}"
 BILLING_MAILBOX = f"billing@{TERRASATCH_EMAIL_DOMAIN}"
-_SHARED_MAILBOXES = {OPS_MAILBOX, SUPPORT_MAILBOX, LEGAL_MAILBOX, BILLING_MAILBOX}
+SATCHY_MAILBOX = f"satchy@{TERRASATCH_EMAIL_DOMAIN}"
+_SHARED_MAILBOXES = {OPS_MAILBOX, SUPPORT_MAILBOX, LEGAL_MAILBOX, BILLING_MAILBOX, SATCHY_MAILBOX}
 _MAX_TEXT_BODY = 2_000_000
 _MAX_HTML_BODY = 4_000_000
 
@@ -73,6 +74,7 @@ def _base_mailbox_permissions(
         permissions[SUPPORT_MAILBOX] = True
     if role in {MembershipRole.OWNER, MembershipRole.ADMIN}:
         permissions[OPS_MAILBOX] = True
+        permissions[SATCHY_MAILBOX] = True
         permissions[BILLING_MAILBOX] = False
     if role == MembershipRole.OWNER:
         permissions[LEGAL_MAILBOX] = True
@@ -101,8 +103,6 @@ async def mailbox_permissions(
         if not mailbox.endswith(f"@{TERRASATCH_EMAIL_DOMAIN}"):
             continue
         can_send = bool(item.can_send)
-        if mailbox == BILLING_MAILBOX:
-            can_send = False
         permissions[mailbox] = permissions.get(mailbox, False) or can_send
     return permissions
 
@@ -138,6 +138,7 @@ def mailbox_label(address: str) -> str:
         SUPPORT_MAILBOX: "Support",
         OPS_MAILBOX: "Operations",
         LEGAL_MAILBOX: "Legal",
+        SATCHY_MAILBOX: "Satchy",
     }
     return labels.get(normalized, normalized.split("@", 1)[0].replace(".", " ").title())
 
@@ -186,8 +187,6 @@ async def set_mailbox_delegate(
         raise InvalidConfiguration("You are not allowed to manage this mailbox")
     if not is_internal_workspace_user(delegate):
         raise InvalidConfiguration("Mailbox delegates must use an internal TerraSatch account")
-    if normalized == BILLING_MAILBOX:
-        can_send = False
 
     existing = await session.scalar(
         select(WorkspaceEmailDelegate).where(
