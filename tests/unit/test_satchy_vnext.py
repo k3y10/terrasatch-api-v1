@@ -13,6 +13,7 @@ from terrasatch.satchy_vnext.corpus import seed_benchmark_cases
 from terrasatch.satchy_vnext.domains import infer_domain
 from terrasatch.satchy_vnext.evals import EvalCase, evaluate_run, promotion_report
 from terrasatch.satchy_vnext.impact import ImpactMeasurement, summarize_impact
+from terrasatch.satchy_vnext.observability import JsonlTraceStore
 from terrasatch.satchy_vnext.policy import PolicyEngine
 from terrasatch.satchy_vnext.providers import ModelRouter, ProviderRegistry, StaticModelProvider
 from terrasatch.satchy_vnext.quality import QualityIssueType, inspect_context_quality
@@ -808,3 +809,54 @@ def test_seed_benchmark_corpus_covers_all_operational_domains() -> None:
     assert DomainProfile.INFRA in domains
     assert DomainProfile.GENERAL in domains
     assert len({case.name for case in cases}) == len(cases)
+
+
+@pytest.mark.asyncio
+async def test_jsonl_trace_store_persists_sandbox_run(tmp_path) -> None:
+    trace_path = tmp_path / "satchy-runs.jsonl"
+    store = JsonlTraceStore(trace_path)
+    providers = ProviderRegistry()
+    providers.register(
+        StaticModelProvider(
+            {
+                "answer": "Natural avalanche observed.",
+                "confidence": 0.95,
+                "claims": [
+                    {
+                        "claim_type": "fact",
+                        "text": "Natural avalanche observed.",
+                        "confidence": 0.95,
+                        "evidence_ids": ["obs-1"],
+                    }
+                ],
+                "evidence_ids": ["obs-1"],
+                "missing_context": [],
+                "tool_requests": [],
+                "proposed_actions": [],
+                "follow_up_required": False,
+            }
+        )
+    )
+    runtime = SatchyRuntime(
+        config=SatchyRuntimeConfig(
+            enabled=True,
+            mode=ExecutionMode.SANDBOX,
+            refine_after_read_tools=False,
+        ),
+        router=ModelRouter(providers),
+        tools=ToolRegistry(),
+        traces=store,
+    )
+    run = await runtime.run(
+        AgentRequest(
+            message="Summarize.",
+            context=_context(),
+            task_type=TaskType.SUMMARIZE,
+        )
+    )
+    loaded = await store.get(run.run_id)
+    assert trace_path.exists()
+    assert loaded is not None
+    assert loaded.run_id == run.run_id
+    assert loaded.plan is not None
+    assert loaded.plan.evidence_ids == ["obs-1"]
