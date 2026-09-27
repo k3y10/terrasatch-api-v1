@@ -204,7 +204,7 @@ Authorized tool contracts for this turn:
         candidates: list[ModelProvider] = [primary]
         for entry in self.router.registry.entries():
             provider = entry.provider
-            if provider.name == primary.name:
+            if provider is primary:
                 continue
             if request.context.connectivity.value == "offline" and not provider.local:
                 continue
