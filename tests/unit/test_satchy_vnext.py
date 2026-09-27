@@ -17,6 +17,7 @@ from terrasatch.satchy_vnext.quality import QualityIssueType, inspect_context_qu
 from terrasatch.satchy_vnext.runtime import SatchyRuntime, SatchyRuntimeConfig
 from terrasatch.satchy_vnext.schemas import (
     AgentRequest,
+    ClaimType,
     Connectivity,
     ContextPacket,
     DomainProfile,
@@ -25,6 +26,7 @@ from terrasatch.satchy_vnext.schemas import (
     ExecutionMode,
     RiskLevel,
     RunStatus,
+    Sensitivity,
     TaskType,
     ToolEffect,
 )
@@ -63,6 +65,7 @@ async def test_disabled_runtime_never_calls_model() -> None:
             {
                 "answer": "should never run",
                 "confidence": 1.0,
+                "claims": [],
                 "evidence_ids": [],
             }
         )
@@ -84,6 +87,7 @@ async def test_write_tool_is_only_proposed_and_never_executed() -> None:
     response = {
         "answer": "I can prepare a team notification for review.",
         "confidence": 0.91,
+        "claims": [],
         "evidence_ids": ["obs-1"],
         "missing_context": [],
         "tool_requests": [
@@ -144,6 +148,14 @@ async def test_unauthorized_evidence_is_removed_and_warned() -> None:
             {
                 "answer": "A report exists.",
                 "confidence": 0.99,
+                "claims": [
+                    {
+                        "claim_type": "fact",
+                        "text": "A report exists.",
+                        "confidence": 0.99,
+                        "evidence_ids": ["invented-id"],
+                    }
+                ],
                 "evidence_ids": ["invented-id"],
                 "missing_context": [],
                 "tool_requests": [],
@@ -194,6 +206,14 @@ async def test_eval_gate_rewards_grounding_and_approval() -> None:
             {
                 "answer": "Natural avalanche observed.",
                 "confidence": 0.95,
+                "claims": [
+                    {
+                        "claim_type": "fact",
+                        "text": "Natural avalanche observed.",
+                        "confidence": 0.95,
+                        "evidence_ids": ["obs-1"],
+                    }
+                ],
                 "evidence_ids": ["obs-1"],
                 "missing_context": [],
                 "tool_requests": [],
@@ -363,6 +383,14 @@ async def test_runtime_surfaces_context_quality_warnings_without_side_effects() 
             {
                 "answer": "The sources conflict on current road status.",
                 "confidence": 0.80,
+                "claims": [
+                    {
+                        "claim_type": "inference",
+                        "text": "The sources conflict on current road status.",
+                        "confidence": 0.80,
+                        "evidence_ids": ["field-1", "official-1"],
+                    }
+                ],
                 "evidence_ids": ["field-1", "official-1"],
                 "missing_context": [],
                 "tool_requests": [],
@@ -391,3 +419,113 @@ async def test_runtime_surfaces_context_quality_warnings_without_side_effects() 
     assert run.status == RunStatus.COMPLETED
     assert any("contradiction" in warning for warning in run.warnings)
     assert run.proposed_actions == []
+
+
+@pytest.mark.asyncio
+async def test_restricted_evidence_never_routes_to_remote_provider() -> None:
+    class RemoteProvider:
+        name = "remote-test"
+        model = "remote-test-v1"
+        local = False
+        capabilities = frozenset({"fast", "reasoning", "structured"})
+
+        def __init__(self) -> None:
+            self.called = False
+
+        async def generate(self, _request):
+            self.called = True
+            await asyncio.sleep(0)
+            raise AssertionError("restricted context must not reach remote provider")
+
+    remote = RemoteProvider()
+    local = StaticModelProvider(
+        {
+            "answer": "Restricted observation acknowledged.",
+            "confidence": 0.90,
+            "claims": [
+                {
+                    "claim_type": "fact",
+                    "text": "Restricted observation acknowledged.",
+                    "confidence": 0.90,
+                    "evidence_ids": ["restricted-1"],
+                }
+            ],
+            "evidence_ids": ["restricted-1"],
+            "missing_context": [],
+            "tool_requests": [],
+            "proposed_actions": [],
+            "follow_up_required": False,
+        }
+    )
+    providers = ProviderRegistry()
+    providers.register(remote, priority=0)
+    providers.register(local, priority=10)
+
+    context = ContextPacket(
+        organization_id=uuid4(),
+        site_id=uuid4(),
+        evidence=[
+            EvidenceRef(
+                id="restricted-1",
+                evidence_class=EvidenceClass.OBSERVED,
+                source_type="private_record",
+                summary="Restricted operational observation.",
+                sensitivity=Sensitivity.RESTRICTED,
+            )
+        ],
+    )
+    runtime = SatchyRuntime(
+        config=SatchyRuntimeConfig(
+            enabled=True,
+            mode=ExecutionMode.SHADOW,
+            refine_after_read_tools=False,
+        ),
+        router=ModelRouter(providers),
+        tools=ToolRegistry(),
+    )
+    run = await runtime.run(
+        AgentRequest(
+            message="Summarize this restricted observation.",
+            context=context,
+            prefer_local_model=False,
+        )
+    )
+    assert run.status == RunStatus.COMPLETED
+    assert run.route is not None
+    assert run.route.provider == "static"
+    assert remote.called is False
+
+
+def test_tool_scope_policy_fails_closed() -> None:
+    context = ContextPacket(
+        organization_id=uuid4(),
+        site_id=uuid4(),
+        policy_context={"scopes": ["echo:read"]},
+    )
+    spec = ToolSpec(
+        name="grid.resolve_context",
+        description="Resolve terrain context.",
+        effect=ToolEffect.READ,
+        required_scopes=["grid:read"],
+    )
+    decision = PolicyEngine().evaluate_tool(
+        spec=spec,
+        context=context,
+        mode=ExecutionMode.SHADOW,
+    )
+    assert decision.allowed is False
+    assert decision.approval_required is True
+    assert "grid:read" in decision.reason
+
+
+def test_grounded_claim_requires_evidence() -> None:
+    with pytest.raises(ValueError, match="evidence"):
+        __import__(
+            "terrasatch.satchy_vnext.schemas",
+            fromlist=["GroundedClaim"],
+        ).GroundedClaim(
+            claim_type=ClaimType.FACT,
+            text="Unsupported operational fact.",
+            confidence=0.9,
+            evidence_ids=[],
+        )
