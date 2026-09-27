@@ -9,6 +9,7 @@ from typing import Annotated
 
 import typer
 
+from .observability import JsonlTraceStore
 from .providers import ModelRouter, OllamaModelProvider, ProviderRegistry, StaticModelProvider
 from .quality import inspect_context_quality
 from .runtime import SatchyRuntime, SatchyRuntimeConfig
@@ -38,6 +39,7 @@ def _runtime(
     provider: str,
     model: str,
     ollama_url: str,
+    trace_file: Path | None,
 ) -> SatchyRuntime:
     providers = ProviderRegistry()
     if provider == "ollama":
@@ -59,6 +61,7 @@ def _runtime(
         ),
         router=ModelRouter(providers),
         tools=_tools(),
+        traces=JsonlTraceStore(trace_file) if trace_file is not None else None,
     )
 
 
@@ -78,11 +81,17 @@ def run_sandbox(
     model: Annotated[str, typer.Option("--model")] = "qwen3:1.7b",
     ollama_url: Annotated[str, typer.Option("--ollama-url")] = "http://127.0.0.1:11434",
     task: Annotated[TaskType, typer.Option("--task")] = TaskType.QUESTION,
+    trace_file: Annotated[Path | None, typer.Option("--trace-file")] = None,
 ) -> None:
     """Run one isolated Satchy request against a saved ContextPacket."""
 
     context = _load_context(context_file)
-    runtime = _runtime(provider=provider, model=model, ollama_url=ollama_url)
+    runtime = _runtime(
+        provider=provider,
+        model=model,
+        ollama_url=ollama_url,
+        trace_file=trace_file,
+    )
     request = AgentRequest(
         message=message,
         context=context,
