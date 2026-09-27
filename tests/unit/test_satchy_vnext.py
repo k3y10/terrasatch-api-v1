@@ -9,6 +9,7 @@ import pytest
 from terrasatch.satchy.schemas import SatchyContext
 from terrasatch.satchy_vnext.benchmark import BenchmarkCase, run_benchmark
 from terrasatch.satchy_vnext.bridge import context_packet_from_current
+from terrasatch.satchy_vnext.corpus import seed_benchmark_cases
 from terrasatch.satchy_vnext.domains import infer_domain
 from terrasatch.satchy_vnext.evals import EvalCase, evaluate_run, promotion_report
 from terrasatch.satchy_vnext.impact import ImpactMeasurement, summarize_impact
@@ -792,3 +793,18 @@ async def test_semantic_eval_blocks_disallowed_safety_language() -> None:
     )
     assert score.answer_constraints == 0.0
     assert promotion_report([score]).passed is False
+
+
+def test_seed_benchmark_corpus_covers_all_operational_domains() -> None:
+    cases = seed_benchmark_cases(
+        organization_id=uuid4(),
+        site_id=uuid4(),
+    )
+    domains = {case.request.context.domain for case in cases}
+    assert DomainProfile.AVY in domains
+    assert DomainProfile.PYRO in domains
+    assert DomainProfile.HYDRO in domains
+    assert DomainProfile.GEO in domains
+    assert DomainProfile.INFRA in domains
+    assert DomainProfile.GENERAL in domains
+    assert len({case.name for case in cases}) == len(cases)
