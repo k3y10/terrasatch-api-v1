@@ -445,10 +445,7 @@ async def records(session, organization_id):
 def _connection_scopes(connections) -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
     for connection in connections:
-        if (
-            connection.enabled
-            and connection.status == IntegrationStatus.CONNECTED.value
-        ):
+        if connection.enabled and connection.status == IntegrationStatus.CONNECTED.value:
             result.setdefault(connection.provider, set()).add(connection.scope_type)
     return result
 
@@ -511,12 +508,8 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             integration_scope = action_payload.get("integration_scope", "user")
             if requester == str(user.id):
                 visible_actions.append(action)
-            elif (
-                integration_scope == "organization"
-                or (
-                    integration_scope == "team"
-                    and role_allows(membership.role, MembershipRole.ADMIN)
-                )
+            elif integration_scope == "organization" or (
+                integration_scope == "team" and role_allows(membership.role, MembershipRole.ADMIN)
             ):
                 visible_actions.append(action)
         messages = list(
@@ -726,9 +719,7 @@ async def query_integration(
         return jsonable_encoder(result)
 
 
-@router.post(
-    "/organizations/{organization_id}/integrations/{connection_id}/credentials"
-)
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/credentials")
 async def configure_integration_credentials(
     organization_id: UUID,
     connection_id: UUID,
@@ -748,10 +739,7 @@ async def configure_integration_credentials(
             user_id=user.id,
             role=membership.role,
             connection_id=connection_id,
-            values={
-                key: value.get_secret_value()
-                for key, value in payload.values.items()
-            },
+            values={key: value.get_secret_value() for key, value in payload.values.items()},
         )
         await session.commit()
         return jsonable_encoder(connection_payload(connection))
@@ -1122,7 +1110,48 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                 .limit(1)
             )
         if selected_site is None:
-            raise HTTPException(404, "No enabled site is available for Satchy context")
+            if payload.site_id is not None or payload.transmission_id is not None:
+                raise HTTPException(404, "No enabled site is available for Satchy context")
+            preference = await session.get(WorkspacePreference, (organization_id, user.id))
+            general_context = {
+                "organization_id": str(organization_id),
+                "membership_role": membership.role.value,
+                "workspace_modules": preference.modules if preference else STARTER_MODULES,
+                "user_preferences": dict(preference.satchy_preferences or {}) if preference else {},
+                "objective": payload.objective,
+                "limitations": "No field site is configured. Provide workspace guidance only. "
+                "No integrations, emails, tasks, or deadlines have been loaded in this context. "
+                "No actions can be executed. Suggest panels and ask clarifying questions. "
+                "Panel changes require the user to save Workspace panels. "
+                "Monday.com is not connected.",
+            }
+            answer, model = await answer_workspace(
+                settings=settings, context=general_context, message=payload.message
+            )
+            session.add_all(
+                [
+                    WorkspaceMessage(
+                        organization_id=organization_id,
+                        user_id=user.id,
+                        role="user",
+                        content=payload.message,
+                    ),
+                    WorkspaceMessage(
+                        organization_id=organization_id,
+                        user_id=user.id,
+                        role="assistant",
+                        content=answer[:16000],
+                        model=model,
+                    ),
+                ]
+            )
+            await session.commit()
+            return {
+                "answer": answer[:16000],
+                "action_id": None,
+                "action_status": None,
+                "approval_required": False,
+            }
 
         preference = await session.get(
             WorkspacePreference,
@@ -1166,10 +1195,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         )
         request_id = payload.request_id or uuid4()
         existing_by_id = await session.get(SatchyAction, request_id)
-        if (
-            existing_by_id is not None
-            and existing_by_id.organization_id != organization_id
-        ):
+        if existing_by_id is not None and existing_by_id.organization_id != organization_id:
             raise HTTPException(409, "Satchy request ID is already in use")
         existing_action = existing_by_id
         planned_action = None
@@ -1182,16 +1208,10 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                 context=planner_context,
             )
         action = existing_action
-        if (
-            action is None
-            and planned_action is not None
-            and planned_action.action_type != "none"
-        ):
+        if action is None and planned_action is not None and planned_action.action_type != "none":
             if planned_action.missing_context:
                 missing = ", ".join(planned_action.missing_context)
-                answer = (
-                    f"I need {missing} before I can prepare that integration action."
-                )
+                answer = f"I need {missing} before I can prepare that integration action."
                 model = "satchy-integration-planner"
             else:
                 action_type = (
@@ -1264,8 +1284,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                 context=context,
                 message=payload.message,
                 history=[
-                    {"role": item.role, "content": item.content}
-                    for item in reversed(history)
+                    {"role": item.role, "content": item.content} for item in reversed(history)
                 ],
             )
         session.add_all(

@@ -312,14 +312,17 @@ async def resolve_radio_intent(
 async def answer_workspace(
     *,
     settings,
-    context: SatchyContext,
+    context: SatchyContext | dict[str, object],
     message: str,
     history: list[dict[str, str]] | None = None,
 ) -> tuple[str, str]:
     if settings.intelligence_provider != "ollama":
         raise ProviderUnavailable("Satchy model service is not configured")
 
-    context_json = json.dumps(context.model_dump(mode="json"), ensure_ascii=False)[:60000]
+    context_json = json.dumps(
+        context if isinstance(context, dict) else context.model_dump(mode="json"),
+        ensure_ascii=False,
+    )[:60000]
     messages = [
         {
             "role": "system",
