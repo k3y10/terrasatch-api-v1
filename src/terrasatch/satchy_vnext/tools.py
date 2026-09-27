@@ -98,7 +98,8 @@ class ToolRegistry:
                 error=f"{type(exc).__name__}: {exc}",
             )
 
-        evidence_raw = raw.pop("evidence", []) if isinstance(raw, dict) else []
+        payload = dict(raw) if isinstance(raw, dict) else {"value": raw}
+        evidence_raw = payload.pop("evidence", [])
         evidence: list[EvidenceRef] = []
         for item in evidence_raw if isinstance(evidence_raw, list) else []:
             evidence.append(
@@ -109,7 +110,7 @@ class ToolRegistry:
         return ToolResult(
             tool_name=name,
             status=ToolStatus.COMPLETED,
-            content=raw if isinstance(raw, dict) else {"value": raw},
+            content=payload,
             evidence=evidence,
         )
 
