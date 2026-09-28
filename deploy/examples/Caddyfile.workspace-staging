@@ -20,11 +20,6 @@ staging-api.terrasatch.com {
         respond "Forbidden" 403
     }
 
-    @feedback path /api/v1/feedback/*
-    handle @feedback {
-        reverse_proxy 127.0.0.1:8012
-    }
-
     @workspace path /api/v1/workspace/*
     handle @workspace {
         reverse_proxy 127.0.0.1:8012
