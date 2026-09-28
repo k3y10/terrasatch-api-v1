@@ -1,4 +1,6 @@
-"""Native feedback IDs, first-party distribution, and founding-team access tests."""
+"""Native adaptive feedback, first-party distribution, and founding-team access tests."""
+
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -17,6 +19,36 @@ from terrasatch.identity.models import (
     User,
 )
 from terrasatch.main import create_app
+
+
+def recreation_payload(distribution_id: str = "BRIGHTON-QR-01") -> dict[str, object]:
+    return {
+        "distribution_id": distribution_id,
+        "audience": "recreation",
+        "activity_context": "backcountry_snow",
+        "tools": ["phone_apps", "radio"],
+        "primary_hassle": "losing_service",
+        "connectivity": "often",
+        "tool_follow_up": "radio_only",
+        "pain_follow_up": "communicate",
+        "time_burden": None,
+        "spend_band": "100_249",
+        "concept_interest": "would_try",
+        "questions_shown": [
+            "audience",
+            "activity_context",
+            "tools",
+            "connectivity",
+            "primary_hassle",
+            "tool_follow_up",
+            "pain_follow_up",
+            "spend_band",
+            "concept_interest",
+        ],
+        "started_at": datetime.now(UTC).isoformat(),
+        "completion_seconds": 58,
+        "comment": "Make offline handoff easier.",
+    }
 
 
 @pytest.mark.asyncio
@@ -96,7 +128,9 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
     ) as client:
         metadata = await client.get("/api/v1/feedback/forms/OUTFIELD-CHECKIN")
         assert metadata.status_code == 200
-        assert metadata.json()["form_version"] == 1
+        assert metadata.json()["form_version"] == 2
+        assert metadata.json()["adaptive"] is True
+        assert metadata.json()["estimated_seconds"] == 60
         assert metadata.json()["advertising_trackers"] is False
 
         anonymous = await client.get("/api/v1/workspace/session")
@@ -126,26 +160,17 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert created_distribution.status_code == 201
         assert created_distribution.json()["path"] == "/check-in?d=BRIGHTON-QR-01"
 
-        payload = {
-            "distribution_id": "BRIGHTON-QR-01",
-            "audience": "recreation",
-            "primary_tool": "phone_apps",
-            "primary_hassle": "losing_service",
-            "connectivity": "often",
-            "spend_band": "100_249",
-            "concept_interest": "would_try",
-            "comment": "Make offline handoff easier.",
-        }
+        payload = recreation_payload()
         saved = await client.post(
             "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
             json=payload,
         )
         assert saved.status_code == 201
         assert saved.json()["form_id"] == "OUTFIELD-CHECKIN"
-        assert saved.json()["form_version"] == 1
+        assert saved.json()["form_version"] == 2
         assert saved.json()["distribution_id"] == "BRIGHTON-QR-01"
 
-        unknown = {**payload, "distribution_id": "UNREGISTERED-QR"}
+        unknown = recreation_payload("UNREGISTERED-QR")
         fallback = await client.post(
             "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
             json=unknown,
@@ -153,19 +178,64 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert fallback.status_code == 201
         assert fallback.json()["distribution_id"] == "DIRECT"
 
+        too_fast = recreation_payload()
+        too_fast["completion_seconds"] = 2
+        rejected = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=too_fast,
+        )
+        assert rejected.status_code == 422
+
+        with_email = {**recreation_payload(), "email": "should-not-be-collected@example.test"}
+        rejected_email = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=with_email,
+        )
+        assert rejected_email.status_code == 422
+
+        work_payload = {
+            **recreation_payload(),
+            "distribution_id": "BRIGHTON-QR-01",
+            "audience": "work",
+            "activity_context": "ski_patrol_avalanche",
+            "tools": ["radio", "phone_apps"],
+            "time_burden": "30_60m",
+            "spend_band": "10k_25k",
+            "questions_shown": [
+                "audience",
+                "activity_context",
+                "tools",
+                "connectivity",
+                "primary_hassle",
+                "tool_follow_up",
+                "pain_follow_up",
+                "time_burden",
+                "spend_band",
+                "concept_interest",
+            ],
+        }
+        work_saved = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=work_payload,
+        )
+        assert work_saved.status_code == 201
+
         async with factory() as session:
             rows = list(await session.scalars(select(SurveyResponse)))
             distributions = list(
                 await session.scalars(select(FeedbackDistribution))
             )
-            assert len(rows) == 2
+            assert len(rows) == 3
             assert {row.form_id for row in rows} == {"OUTFIELD-CHECKIN"}
-            assert {row.form_version for row in rows} == {1}
+            assert {row.form_version for row in rows} == {2}
             assert {row.distribution_id for row in rows} == {
                 "BRIGHTON-QR-01",
                 "DIRECT",
             }
             assert all("email" not in row.answers for row in rows)
+            assert all(row.answers["questions_shown"] for row in rows)
+            assert all(row.answers["branch_path"] for row in rows)
+            assert all(row.answers["completion_seconds"] >= 5 for row in rows)
             assert {item.distribution_id for item in distributions} == {
                 "BRIGHTON-QR-01",
             }
@@ -175,9 +245,12 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         )
         assert summary.status_code == 200
         assert summary.json()["form"]["id"] == "OUTFIELD-CHECKIN"
-        assert summary.json()["responses"] == 2
+        assert summary.json()["form"]["version"] == 2
+        assert summary.json()["form"]["adaptive"] is True
+        assert summary.json()["responses"] == 3
+        assert summary.json()["tools"]["radio"] == 3
         assert summary.json()["distribution"] == {
-            "BRIGHTON-QR-01": 1,
+            "BRIGHTON-QR-01": 2,
             "DIRECT": 1,
         }
 
@@ -186,7 +259,7 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
             params={"distribution_id": "BRIGHTON-QR-01"},
         )
         assert filtered.status_code == 200
-        assert len(filtered.json()["responses"]) == 1
+        assert len(filtered.json()["responses"]) == 2
 
         export = await client.get(
             f"/api/v1/workspace/organizations/{org_id}/feedback/export.csv"
@@ -196,6 +269,9 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert "form_id" in header
         assert "form_version" in header
         assert "distribution_id" in header
+        assert "questions_shown" in header
+        assert "branch_path" in header
+        assert "completion_seconds" in header
         assert "email" not in header
 
     async with httpx.AsyncClient(
