@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,47 @@ from terrasatch.portal.routes import _require_user, _verify_csrf
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 workspace_router = APIRouter(prefix="/api/v1/workspace", tags=["workspace-feedback"])
+
+_TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+_TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA"
+
+
+async def _verify_turnstile(request: Request, token: str) -> None:
+    settings = request.app.state.settings
+    configured = settings.feedback_turnstile_secret_key
+    if configured is not None:
+        secret = configured.get_secret_value()
+    elif not settings.is_production:
+        secret = _TURNSTILE_TEST_SECRET
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Human verification is not configured.",
+        )
+
+    payload = {
+        "secret": secret,
+        "response": token,
+    }
+    if request.client and request.client.host:
+        payload["remoteip"] = request.client.host
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(_TURNSTILE_VERIFY_URL, data=payload)
+            response.raise_for_status()
+            result = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Human verification is temporarily unavailable.",
+        ) from error
+
+    if result.get("success") is not True:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Human verification failed. Please try again.",
+        )
 
 
 async def _public_limit(request: Request) -> None:
@@ -71,6 +113,7 @@ async def submit_response(
     if form_id.upper() != FORM_ID:
         raise HTTPException(404, "Unknown feedback form")
     await _public_limit(request)
+    await _verify_turnstile(request, payload.turnstile_token)
     async with create_session_factory(request.app.state.settings)() as session:
         saved = await create_survey_response(session, payload)
         await session.commit()
