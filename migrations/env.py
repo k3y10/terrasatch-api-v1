@@ -16,6 +16,7 @@ from terrasatch.billing import models as billing_models
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
 from terrasatch.edge import models as edge_models
+from terrasatch.feedback import models as feedback_models
 from terrasatch.identity import models as identity_models
 from terrasatch.integrations import models as integration_models
 from terrasatch.masterdata import models as masterdata_models
@@ -30,6 +31,7 @@ _ = (
     auth_models,
     billing_models,
     edge_models,
+    feedback_models,
     identity_models,
     integration_models,
     masterdata_models,
