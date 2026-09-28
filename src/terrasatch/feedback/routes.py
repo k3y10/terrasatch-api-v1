@@ -1,7 +1,8 @@
-"""Public check-in route plus founding-team-only aggregate analytics."""
+"""Public check-in plus founding-team first-party feedback analytics."""
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -9,16 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.billing.rate_limit import enforce_public_rate_limit
 from terrasatch.database.session import create_session_factory
-from terrasatch.feedback.schemas import SurveyResponseCreate
+from terrasatch.feedback.schemas import DistributionCreate, SurveyResponseCreate
 from terrasatch.feedback.service import (
+    FORM_ID,
+    FORM_TITLE,
+    FORM_VERSION,
+    create_distribution,
     create_survey_response,
     feedback_export_csv,
     feedback_rows,
     feedback_summary,
+    list_distributions,
 )
 from terrasatch.identity.access import get_user_organization_access
 from terrasatch.identity.models import MembershipRole, User
-from terrasatch.portal.routes import _require_user
+from terrasatch.portal.routes import _require_user, _verify_csrf
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 workspace_router = APIRouter(prefix="/api/v1/workspace", tags=["workspace-feedback"])
@@ -34,15 +40,45 @@ async def _public_limit(request: Request) -> None:
     )
 
 
-@router.post("/responses", status_code=status.HTTP_201_CREATED)
-async def submit_response(payload: SurveyResponseCreate, request: Request):
-    """Store one anonymous-by-default check-in response without campaign coupling."""
+@router.get("/forms/{form_id}")
+async def form_metadata(form_id: str):
+    """Return public metadata for the implemented native form."""
 
+    if form_id.upper() != FORM_ID:
+        raise HTTPException(404, "Unknown feedback form")
+    return {
+        "form_id": FORM_ID,
+        "form_version": FORM_VERSION,
+        "title": FORM_TITLE,
+        "anonymous_by_default": True,
+        "advertising_trackers": False,
+    }
+
+
+@router.post(
+    "/forms/{form_id}/responses",
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_response(
+    form_id: str,
+    payload: SurveyResponseCreate,
+    request: Request,
+):
+    """Store a response stamped with a server-controlled form ID and version."""
+
+    if form_id.upper() != FORM_ID:
+        raise HTTPException(404, "Unknown feedback form")
     await _public_limit(request)
     async with create_session_factory(request.app.state.settings)() as session:
         saved = await create_survey_response(session, payload)
         await session.commit()
-    return {"response_id": str(saved.id), "accepted": True}
+    return {
+        "response_id": str(saved.id),
+        "form_id": saved.form_id,
+        "form_version": saved.form_version,
+        "distribution_id": saved.distribution_id,
+        "accepted": True,
+    }
 
 
 async def _founding_team_access(
@@ -65,7 +101,9 @@ async def _founding_team_access(
 async def internal_summary(organization_id: UUID, request: Request):
     async with create_session_factory(request.app.state.settings)() as session:
         await _founding_team_access(request, session, organization_id)
-        return await feedback_summary(session)
+        result = await feedback_summary(session)
+        await session.commit()
+        return result
 
 
 @workspace_router.get("/organizations/{organization_id}/feedback/responses")
@@ -73,16 +111,27 @@ async def internal_responses(
     organization_id: UUID,
     request: Request,
     limit: int = Query(default=250, ge=1, le=1000),
+    distribution_id: str | None = Query(default=None, max_length=100),
+    audience: Literal["recreation", "work", "both"] | None = None,
+    form_version: int | None = Query(default=None, ge=1),
 ):
     async with create_session_factory(request.app.state.settings)() as session:
         await _founding_team_access(request, session, organization_id)
-        rows = await feedback_rows(session, limit=limit)
+        rows = await feedback_rows(
+            session,
+            limit=limit,
+            distribution_id=distribution_id,
+            audience=audience,
+            form_version=form_version,
+        )
         return {
             "responses": [
                 {
                     "id": str(row.id),
                     "created_at": row.created_at,
-                    "source": row.source_code,
+                    "form_id": row.form_id,
+                    "form_version": row.form_version,
+                    "distribution_id": row.distribution_id,
                     "audience": row.audience,
                     **dict(row.answers or {}),
                     "concept_interest": row.concept_interest,
@@ -93,13 +142,93 @@ async def internal_responses(
         }
 
 
-@workspace_router.get("/organizations/{organization_id}/feedback/export.csv")
-async def internal_export_csv(organization_id: UUID, request: Request):
+@workspace_router.get("/organizations/{organization_id}/feedback/distributions")
+async def internal_distributions(organization_id: UUID, request: Request):
     async with create_session_factory(request.app.state.settings)() as session:
         await _founding_team_access(request, session, organization_id)
-        body = await feedback_export_csv(session)
+        items = await list_distributions(session)
+        await session.commit()
+        return {
+            "form_id": FORM_ID,
+            "form_version": FORM_VERSION,
+            "distributions": [
+                {
+                    "distribution_id": "DIRECT",
+                    "label": "Direct / unattributed",
+                    "channel": "direct",
+                    "placement": None,
+                    "audience_hint": None,
+                    "metadata": {},
+                    "enabled": True,
+                    "path": "/check-in",
+                },
+                *[
+                    {
+                        "distribution_id": item.distribution_id,
+                        "label": item.label,
+                        "channel": item.channel,
+                        "placement": item.placement,
+                        "audience_hint": item.audience_hint,
+                        "metadata": item.metadata_json,
+                        "enabled": item.enabled,
+                        "path": f"/check-in?d={item.distribution_id}",
+                    }
+                    for item in items
+                ],
+            ],
+        }
+
+
+@workspace_router.post(
+    "/organizations/{organization_id}/feedback/distributions",
+    status_code=status.HTTP_201_CREATED,
+)
+async def internal_create_distribution(
+    organization_id: UUID,
+    payload: DistributionCreate,
+    request: Request,
+):
+    _verify_csrf(request, request.headers.get("X-CSRF-Token", ""))
+    async with create_session_factory(request.app.state.settings)() as session:
+        await _founding_team_access(request, session, organization_id)
+        try:
+            item = await create_distribution(session, payload)
+            await session.commit()
+        except ValueError as exc:
+            await session.rollback()
+            raise HTTPException(409, str(exc)) from exc
+    return {
+        "distribution_id": item.distribution_id,
+        "label": item.label,
+        "channel": item.channel,
+        "placement": item.placement,
+        "audience_hint": item.audience_hint,
+        "metadata": item.metadata_json,
+        "enabled": item.enabled,
+        "path": f"/check-in?d={item.distribution_id}",
+    }
+
+
+@workspace_router.get("/organizations/{organization_id}/feedback/export.csv")
+async def internal_export_csv(
+    organization_id: UUID,
+    request: Request,
+    distribution_id: str | None = Query(default=None, max_length=100),
+    audience: Literal["recreation", "work", "both"] | None = None,
+    form_version: int | None = Query(default=None, ge=1),
+):
+    async with create_session_factory(request.app.state.settings)() as session:
+        await _founding_team_access(request, session, organization_id)
+        body = await feedback_export_csv(
+            session,
+            distribution_id=distribution_id,
+            audience=audience,
+            form_version=form_version,
+        )
     return Response(
         content=body,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="terrasatch-field-feedback.csv"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="terrasatch-field-feedback.csv"'
+        },
     )

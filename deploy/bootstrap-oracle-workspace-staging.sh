@@ -398,6 +398,10 @@ asset_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https:
 printf 'public TerraSatch brand asset: %s (expected 200)\n' "$asset_code"
 [[ "$asset_code" == "200" ]] || die "Staging TerraSatch brand assets are not reachable."
 
+feedback_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/api/v1/feedback/forms/OUTFIELD-CHECKIN || true)"
+printf 'public native feedback metadata: %s (expected 200)\n' "$feedback_code"
+[[ "$feedback_code" == "200" ]] || die "Staging native feedback API is not reachable."
+
 public_root_code="$(curl --silent --output /dev/null --write-out '%{http_code}' https://staging-api.terrasatch.com/health || true)"
 printf 'public unrelated route /health: %s (expected 404)\n' "$public_root_code"
 [[ "$public_root_code" == "404" ]] || die "Staging Caddy exposed an unrelated API route."
