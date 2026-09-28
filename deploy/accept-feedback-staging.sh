@@ -4,7 +4,7 @@ set -euo pipefail
 BASE_URL="${TERRASATCH_FEEDBACK_QA_BASE_URL:-https://staging-api.terrasatch.com}"
 COMPOSE_FILE="${TERRASATCH_STAGING_COMPOSE_FILE:-deploy/docker-compose.workspace-staging.yml}"
 FORM_ID="OUTFIELD-CHECKIN"
-EXPECTED_FORM_VERSION="1"
+EXPECTED_FORM_VERSION="2"
 QA_COMMENT="__terrasatch_feedback_staging_qa__"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -52,11 +52,18 @@ response="$(
   curl --fail --silent --show-error     -X POST     -H 'Content-Type: application/json'     -d "{
       \"distribution_id\": \"QA-STAGING-UNREGISTERED\",
       \"audience\": \"recreation\",
-      \"primary_tool\": \"phone_apps\",
+      \"activity_context\": \"backcountry_snow\",
+      \"tools\": [\"phone_apps\", \"radio\"],
       \"primary_hassle\": \"losing_service\",
       \"connectivity\": \"sometimes\",
+      \"tool_follow_up\": \"radio_only\",
+      \"pain_follow_up\": \"communicate\",
+      \"time_burden\": null,
       \"spend_band\": \"100_249\",
       \"concept_interest\": \"would_try\",
+      \"questions_shown\": [\"audience\", \"activity_context\", \"tools\", \"connectivity\", \"primary_hassle\", \"tool_follow_up\", \"pain_follow_up\", \"spend_band\", \"concept_interest\"],
+      \"started_at\": \"2026-09-28T12:00:00Z\",
+      \"completion_seconds\": 60,
       \"comment\": \"$QA_COMMENT\"
     }"     "$BASE_URL/api/v1/feedback/forms/$FORM_ID/responses"
 )"
