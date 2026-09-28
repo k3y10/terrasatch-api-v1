@@ -265,7 +265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(admin_member_router)
     application.include_router(pwa_router)
     application.mount(
-        "/workspace-assets", StaticFiles(directory=ASSET_DIRECTORY), name="workspace-assets"
+        "/assets/workspace", StaticFiles(directory=ASSET_DIRECTORY), name="workspace-assets"
     )
     application.include_router(portal_router)
     application.include_router(portal_email_router)

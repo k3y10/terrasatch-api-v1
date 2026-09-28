@@ -10,8 +10,8 @@ router = APIRouter()
 ASSET_DIRECTORY = Path(__file__).parents[1] / "static" / "workspace"
 OFFLINE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b0d"><title>TerraSatch · Offline</title><body style="margin:0;background:#080b0d;color:#edf1f0;font:16px system-ui;display:grid;min-height:100vh;place-items:center"><main style="max-width:420px;padding:24px"><h1>You're offline</h1><p>Reconnect to open your TerraSatch workspace. Email, account details, and organization data are not stored for offline access.</p><a style="color:#ffbd45" href="/portal">Try again</a></main></body></html>"""
 WORKER = r"""
-const CACHE='terrasatch-workspace-public-v1';
-const PUBLIC=['/portal/offline','/workspace-assets/icon.svg'];
+const CACHE='terrasatch-workspace-public-v2';
+const PUBLIC=['/portal/offline','/assets/workspace/icon.svg'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(PUBLIC))));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('terrasatch-workspace-public-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
@@ -40,7 +40,7 @@ async def manifest():
             "theme_color": "#080b0d",
             "icons": [
                 {
-                    "src": "/workspace-assets/icon.svg",
+                    "src": "/assets/workspace/icon.svg",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any maskable",

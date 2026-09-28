@@ -21,14 +21,14 @@ async def test_workspace_pwa_routes_and_brand_assets():
             assert asset.status_code == 200
             assert "image/" in asset.headers["content-type"]
         for asset in ["slack.png", "microsoft-icon.svg", "microsoft-teams.svg", "google-drive.svg"]:
-            assert (await client.get("/workspace-assets/integrations/" + asset)).status_code == 200
+            assert (await client.get("/assets/workspace/integrations/" + asset)).status_code == 200
         offline = await client.get("/portal/offline")
         assert offline.status_code == 200
         assert "not stored for offline access" in offline.text
         worker = await client.get("/portal/service-worker.js")
         assert worker.headers["service-worker-allowed"] == "/portal"
         assert worker.headers["cache-control"] == "no-cache"
-        assert "const PUBLIC=['/portal/offline','/workspace-assets/icon.svg']" in worker.text
+        assert "const PUBLIC=['/portal/offline','/assets/workspace/icon.svg']" in worker.text
         assert "cache.put" not in worker.text
         assert "e.request.method!=='GET'" in worker.text
         assert "fetch(e.request).catch" in worker.text

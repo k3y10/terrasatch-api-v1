@@ -3,7 +3,7 @@
 
 
 def chrome_head():
-    return '<link rel="manifest" href="/portal/manifest.webmanifest"><meta name="theme-color" content="#080b0d"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="TerraSatch"><link rel="icon" href="/workspace-assets/icon.svg"><link rel="apple-touch-icon" href="/assets/satchy.png">'
+    return '<link rel="manifest" href="/portal/manifest.webmanifest"><meta name="theme-color" content="#080b0d"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="TerraSatch"><link rel="icon" href="/assets/workspace/icon.svg"><link rel="apple-touch-icon" href="/assets/satchy.png">'
 
 
 def chrome_footer():
