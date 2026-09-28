@@ -43,6 +43,8 @@ expected = int(sys.argv[1])
 assert payload["form_id"] == "OUTFIELD-CHECKIN", payload
 assert payload["form_version"] == expected, payload
 assert payload["anonymous_by_default"] is True, payload
+assert payload["adaptive"] is True, payload
+assert payload["estimated_seconds"] == 60, payload
 assert payload["advertising_trackers"] is False, payload
 ' "$EXPECTED_FORM_VERSION" <<<"$metadata"
 printf 'Public form metadata: OK\n'
@@ -51,6 +53,7 @@ say "Submitting one disposable public QA response"
 response="$(
   curl --fail --silent --show-error     -X POST     -H 'Content-Type: application/json'     -d "{
       \"distribution_id\": \"QA-STAGING-UNREGISTERED\",
+      \"turnstile_token\": \"XXXX.DUMMY.TOKEN.XXXX\",
       \"audience\": \"recreation\",
       \"activity_context\": \"backcountry_snow\",
       \"tools\": [\"phone_apps\", \"radio\"],
