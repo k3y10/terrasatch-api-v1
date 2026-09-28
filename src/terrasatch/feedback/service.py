@@ -13,7 +13,7 @@ from terrasatch.feedback.models import FeedbackDistribution, SurveyResponse
 from terrasatch.feedback.schemas import DistributionCreate, SurveyResponseCreate
 
 FORM_ID = "OUTFIELD-CHECKIN"
-FORM_VERSION = 1
+FORM_VERSION = 2
 FORM_TITLE = "60-Second Outdoor & Field Check-In"
 DIRECT_DISTRIBUTION_ID = "DIRECT"
 
@@ -66,6 +66,23 @@ async def list_distributions(session: AsyncSession) -> list[FeedbackDistribution
     )
 
 
+def _branch_path(payload: SurveyResponseCreate) -> list[str]:
+    path = [
+        f"audience:{payload.audience}",
+        f"activity:{payload.activity_context}",
+        f"connectivity:{payload.connectivity}",
+        f"pain:{payload.primary_hassle}",
+    ]
+    path.extend(f"tool:{tool}" for tool in payload.tools)
+    if payload.tool_follow_up:
+        path.append(f"tool_follow_up:{payload.tool_follow_up}")
+    if payload.pain_follow_up:
+        path.append(f"pain_follow_up:{payload.pain_follow_up}")
+    if payload.time_burden:
+        path.append(f"time_burden:{payload.time_burden}")
+    return path
+
+
 async def create_survey_response(
     session: AsyncSession, payload: SurveyResponseCreate
 ) -> SurveyResponse:
@@ -76,10 +93,19 @@ async def create_survey_response(
         distribution_id=distribution_id,
         audience=payload.audience,
         answers={
-            "primary_tool": payload.primary_tool,
+            "activity_context": payload.activity_context,
+            "tools": payload.tools,
+            "primary_tool": payload.tools[0],
             "primary_hassle": payload.primary_hassle,
             "connectivity": payload.connectivity,
+            "tool_follow_up": payload.tool_follow_up,
+            "pain_follow_up": payload.pain_follow_up,
+            "time_burden": payload.time_burden,
             "spend_band": payload.spend_band,
+            "questions_shown": payload.questions_shown,
+            "branch_path": _branch_path(payload),
+            "started_at": payload.started_at.isoformat(),
+            "completion_seconds": payload.completion_seconds,
         },
         concept_interest=payload.concept_interest,
         comment=payload.comment,
@@ -114,6 +140,15 @@ def _count(rows, key):
     return dict(Counter(key(row) for row in rows))
 
 
+def _tool_count(rows: list[SurveyResponse]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for row in rows:
+        tools = row.answers.get("tools") or []
+        if isinstance(tools, list):
+            counter.update(str(tool) for tool in tools)
+    return dict(counter)
+
+
 async def feedback_summary(session: AsyncSession) -> dict[str, object]:
     rows = await feedback_rows(session, limit=100_000)
     distributions = await list_distributions(session)
@@ -123,14 +158,22 @@ async def feedback_summary(session: AsyncSession) -> dict[str, object]:
             "id": FORM_ID,
             "version": FORM_VERSION,
             "title": FORM_TITLE,
+            "adaptive": True,
         },
         "responses": len(rows),
         "audience": _count(rows, lambda row: row.audience),
+        "activity_context": _count(
+            rows, lambda row: row.answers.get("activity_context", "unknown")
+        ),
+        "tools": _tool_count(rows),
         "primary_hassle": _count(
             rows, lambda row: row.answers.get("primary_hassle", "unknown")
         ),
         "connectivity": _count(
             rows, lambda row: row.answers.get("connectivity", "unknown")
+        ),
+        "time_burden": _count(
+            rows, lambda row: row.answers.get("time_burden") or "not_asked"
         ),
         "spend_band": _count(
             rows, lambda row: row.answers.get("spend_band", "unknown")
@@ -187,11 +230,18 @@ async def feedback_export_csv(
             "form_version",
             "distribution_id",
             "audience",
-            "primary_tool",
+            "activity_context",
+            "tools",
             "primary_hassle",
             "connectivity",
+            "tool_follow_up",
+            "pain_follow_up",
+            "time_burden",
             "spend_band",
             "concept_interest",
+            "completion_seconds",
+            "questions_shown",
+            "branch_path",
             "comment",
         ]
     )
@@ -204,11 +254,20 @@ async def feedback_export_csv(
                 row.form_version,
                 row.distribution_id,
                 row.audience,
-                row.answers.get("primary_tool", ""),
+                row.answers.get("activity_context", ""),
+                "|".join(str(item) for item in (row.answers.get("tools") or [])),
                 row.answers.get("primary_hassle", ""),
                 row.answers.get("connectivity", ""),
+                row.answers.get("tool_follow_up", ""),
+                row.answers.get("pain_follow_up", ""),
+                row.answers.get("time_burden", ""),
                 row.answers.get("spend_band", ""),
                 row.concept_interest,
+                row.answers.get("completion_seconds", ""),
+                "|".join(
+                    str(item) for item in (row.answers.get("questions_shown") or [])
+                ),
+                "|".join(str(item) for item in (row.answers.get("branch_path") or [])),
                 row.comment or "",
             ]
         )
