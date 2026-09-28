@@ -24,6 +24,7 @@ from terrasatch.main import create_app
 def recreation_payload(distribution_id: str = "BRIGHTON-QR-01") -> dict[str, object]:
     return {
         "distribution_id": distribution_id,
+        "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX",
         "audience": "recreation",
         "activity_context": "backcountry_snow",
         "tools": ["phone_apps", "radio"],
@@ -68,6 +69,14 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
     monkeypatch.setattr(
         "terrasatch.feedback.routes.enforce_public_rate_limit",
         limiter,
+    )
+
+    async def verify_turnstile(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "terrasatch.feedback.routes._verify_turnstile",
+        verify_turnstile,
     )
 
     async with factory() as session:
@@ -177,6 +186,14 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         )
         assert fallback.status_code == 201
         assert fallback.json()["distribution_id"] == "DIRECT"
+
+        missing_turnstile = recreation_payload()
+        missing_turnstile.pop("turnstile_token")
+        rejected_turnstile = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=missing_turnstile,
+        )
+        assert rejected_turnstile.status_code == 422
 
         too_fast = recreation_payload()
         too_fast["completion_seconds"] = 2
