@@ -62,6 +62,7 @@ class SurveyResponseCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     distribution_id: str = Field(default="DIRECT", min_length=1, max_length=100)
+    turnstile_token: str = Field(min_length=1, max_length=2048)
     audience: Literal["recreation", "work", "both"]
     activity_context: ActivityContext
     tools: list[Tool] = Field(min_length=1, max_length=7)
