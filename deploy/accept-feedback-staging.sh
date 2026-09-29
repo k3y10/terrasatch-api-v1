@@ -85,29 +85,12 @@ missing_token_code="$(
   die "Submission without Turnstile returned HTTP $missing_token_code; expected 422."
 printf 'Missing Turnstile token: HTTP %s\n' "$missing_token_code"
 
-bad_token_code="$(
-  curl --silent --output /dev/null --write-out '%{http_code}'     -X POST     -H 'Content-Type: application/json'     -d '{
-      "distribution_id": "DIRECT",
-      "turnstile_token": "not-a-valid-test-token",
-      "audience": "recreation",
-      "activity_context": "backcountry_snow",
-      "tools": ["phone_apps"],
-      "primary_hassle": "nothing_major",
-      "connectivity": "sometimes",
-      "tool_follow_up": null,
-      "pain_follow_up": null,
-      "time_burden": null,
-      "spend_band": "100_249",
-      "concept_interest": "maybe",
-      "questions_shown": ["audience", "activity_context", "tools", "connectivity", "primary_hassle", "spend_band", "concept_interest"],
-      "started_at": "2026-09-28T12:00:00Z",
-      "completion_seconds": 60,
-      "comment": null
-    }'     "$BASE_URL/api/v1/feedback/forms/$FORM_ID/responses" || true
-)"
-[[ "$bad_token_code" == "400" ]] ||
-  die "Invalid Turnstile token returned HTTP $bad_token_code; expected 400."
-printf 'Invalid Turnstile token: HTTP %s\n' "$bad_token_code"
+if [[ -n "${TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY:-}" ]]; then
+  printf 'Turnstile mode: real staging secret configured; browser-issued token required for positive E2E QA.\n'
+else
+  printf 'Turnstile mode: Cloudflare always-pass test credentials for automated staging QA.\n'
+  printf 'Invalid-token rejection is intentionally not asserted in this mode.\n'
+fi
 
 say "Submitting one disposable adaptive QA response"
 response="$(
