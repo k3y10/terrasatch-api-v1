@@ -9,7 +9,6 @@ DATABASE_NAME="${TERRASATCH_FEEDBACK_DATABASE_NAME:-terrasatch_feedback_staging}
 FORM_ID="OUTFIELD-CHECKIN"
 EXPECTED_FORM_VERSION="3"
 QA_COMMENT="__terrasatch_feedback_staging_qa__"
-DUMMY_TOKEN="XXXX.DUMMY.TOKEN.XXXX"
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -26,6 +25,8 @@ source "$SOURCE_ENV"
 set +a
 
 [[ -n "${POSTGRES_PASSWORD:-}" ]] || die "POSTGRES_PASSWORD is missing from the staging environment."
+[[ -n "${TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY:-}" ]] ||
+  die "A real staging Turnstile secret is required before acceptance QA."
 
 say "Checking isolated feedback staging revision"
 health_json="$(curl --fail --silent --show-error "$LOCAL_BASE_URL/health/ready")"
@@ -86,82 +87,37 @@ missing_token_code="$(
   die "Submission without Turnstile returned HTTP $missing_token_code; expected 422."
 printf 'Missing Turnstile token: HTTP %s\n' "$missing_token_code"
 
-if [[ -n "${TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY:-}" ]]; then
-  printf 'Turnstile mode: real staging secret configured; browser-issued token required for positive E2E QA.\n'
-else
-  printf 'Turnstile mode: Cloudflare always-pass test credentials for automated staging QA.\n'
-  printf 'Invalid-token rejection is intentionally not asserted in this mode.\n'
-fi
-
-say "Submitting one disposable adaptive QA response"
-response="$(
-  curl --fail --silent --show-error     -X POST     -H 'Content-Type: application/json'     -d "{
-      \"distribution_id\": \"QA-STAGING-UNREGISTERED\",
-      \"turnstile_token\": \"$DUMMY_TOKEN\",
-      \"audience\": \"recreation\",
-      \"activity_context\": \"backcountry_snow\",
-      \"tools\": [\"phone_apps\", \"radio\"],
-      \"primary_hassle\": \"losing_service\",
-      \"connectivity\": \"sometimes\",
-      \"tool_follow_up\": \"radio_only\",
-      \"pain_follow_up\": \"communicate\",
-      \"time_burden\": null,
-      \"spend_band\": \"100_249\",
-      \"concept_interest\": \"would_try\",
-      \"contact_email\": \"qa@example.test\",
-      \"contact_phone\": \"+15550102026\",
-      \"questions_shown\": [\"audience\", \"activity_context\", \"tools\", \"connectivity\", \"primary_hassle\", \"tool_follow_up\", \"pain_follow_up\", \"spend_band\", \"concept_interest\"],
-      \"started_at\": \"2026-09-28T12:00:00Z\",
-      \"completion_seconds\": 60,
-      \"comment\": \"$QA_COMMENT\"
-    }"     "$BASE_URL/api/v1/feedback/forms/$FORM_ID/responses"
+bad_token_code="$(
+  curl --silent --output /dev/null --write-out '%{http_code}' \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "distribution_id": "DIRECT",
+      "turnstile_token": "not-a-real-turnstile-token",
+      "audience": "recreation",
+      "activity_context": "backcountry_snow",
+      "tools": ["phone_apps"],
+      "primary_hassle": "nothing_major",
+      "connectivity": "sometimes",
+      "tool_follow_up": null,
+      "pain_follow_up": null,
+      "time_burden": null,
+      "spend_band": "100_249",
+      "concept_interest": "maybe",
+      "contact_email": null,
+      "contact_phone": null,
+      "other_details": {},
+      "questions_shown": ["audience", "activity_context", "tools", "connectivity", "primary_hassle", "spend_band", "concept_interest"],
+      "started_at": "2026-09-29T12:00:00Z",
+      "completion_seconds": 60,
+      "comment": null
+    }' \
+    "$BASE_URL/api/v1/feedback/forms/$FORM_ID/responses" || true
 )"
-
-read -r response_id returned_form returned_version returned_distribution < <(
-  python3 -c '
-import json
-import sys
-payload = json.load(sys.stdin)
-assert payload["accepted"] is True, payload
-print(
-    payload["response_id"],
-    payload["form_id"],
-    payload["form_version"],
-    payload["distribution_id"],
-)
-' <<<"$response"
-)
-
-[[ "$returned_form" == "$FORM_ID" ]] || die "Unexpected form ID: $returned_form"
-[[ "$returned_version" == "$EXPECTED_FORM_VERSION" ]] ||
-  die "Unexpected form version: $returned_version"
-[[ "$returned_distribution" == "DIRECT" ]] ||
-  die "Unregistered distribution should resolve to DIRECT, got: $returned_distribution"
-
-cleanup() {
-  docker compose -f "$COMPOSE_FILE" exec -T postgres     psql -v ON_ERROR_STOP=1 -U terrasatch -d "$DATABASE_NAME"     -c "DELETE FROM feedback_survey_responses WHERE id = '$response_id'::uuid;"     >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-say "Verifying persisted discovery path"
-persisted="$(
-  docker compose -f "$COMPOSE_FILE" exec -T postgres     psql -U terrasatch -d "$DATABASE_NAME" -Atc     "SELECT
-       form_id || '|' ||
-       form_version || '|' ||
-       distribution_id || '|' ||
-       COALESCE(answers->>'completion_seconds', '') || '|' ||
-       CASE WHEN answers::jsonb ? 'questions_shown' THEN 'shown' ELSE 'missing' END || '|' ||
-       CASE WHEN answers::jsonb ? 'branch_path' THEN 'branched' ELSE 'missing' END || '|' ||
-       COALESCE(answers->>'contact_email', '') || '|' ||
-       COALESCE(answers->>'contact_phone', '') || '|' ||
-       COALESCE(comment, '')
-     FROM feedback_survey_responses
-     WHERE id = '$response_id'::uuid;"
-)"
-expected_row="$FORM_ID|$EXPECTED_FORM_VERSION|DIRECT|60|shown|branched|qa@example.test|+15550102026|$QA_COMMENT"
-[[ "$persisted" == "$expected_row" ]] ||
-  die "Persisted adaptive response did not match the expected identity/path tuple."
-printf 'Persisted response: %s\n' "$response_id"
+[[ "$bad_token_code" == "400" ]] ||
+  die "Invalid Turnstile token returned HTTP $bad_token_code; expected 400."
+printf 'Invalid Turnstile token: HTTP %s\n' "$bad_token_code"
+printf 'Positive Turnstile submission: requires a browser-issued staging token.\n'
 
 say "Checking founder analytics are not anonymous"
 probe_org="00000000-0000-0000-0000-000000000000"
@@ -174,18 +130,9 @@ case "$summary_code" in
 esac
 printf 'Unauthenticated founder endpoint: HTTP %s\n' "$summary_code"
 
-say "Removing disposable QA response"
-cleanup
-trap - EXIT
-
-remaining="$(
-  docker compose -f "$COMPOSE_FILE" exec -T postgres     psql -U terrasatch -d "$DATABASE_NAME" -Atc     "SELECT COUNT(*) FROM feedback_survey_responses WHERE id = '$response_id'::uuid;"
-)"
-[[ "$remaining" == "0" ]] || die "Disposable QA response was not removed."
-
 say "FEEDBACK STAGING ACCEPTANCE PASSED"
 printf 'Form: %s v%s\n' "$FORM_ID" "$EXPECTED_FORM_VERSION"
-printf 'Adaptive branching: persisted\n'
-printf 'Turnstile: enforced server-side\n'
-printf 'Attribution: unknown IDs -> DIRECT\n'
-printf 'QA response removed: %s\n' "$response_id"
+printf 'Schema + adaptive branching: covered by focused API tests\n'
+printf 'Turnstile: real staging secret enforced server-side\n'
+printf 'Invalid token rejection: passed\n'
+printf 'Positive browser submission: run from the Vercel preview\n'
