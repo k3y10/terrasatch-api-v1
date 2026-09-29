@@ -147,8 +147,8 @@ persisted="$(
        form_version || '|' ||
        distribution_id || '|' ||
        COALESCE(answers->>'completion_seconds', '') || '|' ||
-       CASE WHEN answers ? 'questions_shown' THEN 'shown' ELSE 'missing' END || '|' ||
-       CASE WHEN answers ? 'branch_path' THEN 'branched' ELSE 'missing' END || '|' ||
+       CASE WHEN answers::jsonb ? 'questions_shown' THEN 'shown' ELSE 'missing' END || '|' ||
+       CASE WHEN answers::jsonb ? 'branch_path' THEN 'branched' ELSE 'missing' END || '|' ||
        CASE WHEN answers::jsonb ? 'email' THEN 'email-present' ELSE 'no-email' END || '|' ||
        COALESCE(comment, '')
      FROM feedback_survey_responses
