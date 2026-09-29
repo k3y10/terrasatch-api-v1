@@ -28,6 +28,8 @@ source "$SOURCE_ENV"
 set +a
 
 [[ -n "${POSTGRES_PASSWORD:-}" ]] || die "POSTGRES_PASSWORD is missing from the staging environment."
+[[ -n "${TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY:-}" ]] ||
+  die "TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY is required for real staging CAPTCHA QA."
 
 export TERRASATCH_BUILD_SHA
 TERRASATCH_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
