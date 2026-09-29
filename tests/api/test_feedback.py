@@ -35,6 +35,8 @@ def recreation_payload(distribution_id: str = "BRIGHTON-QR-01") -> dict[str, obj
         "time_burden": None,
         "spend_band": "100_249",
         "concept_interest": "would_try",
+        "contact_email": None,
+        "contact_phone": None,
         "questions_shown": [
             "audience",
             "activity_context",
@@ -143,8 +145,9 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
     ) as client:
         metadata = await client.get("/api/v1/feedback/forms/OUTFIELD-CHECKIN")
         assert metadata.status_code == 200
-        assert metadata.json()["form_version"] == 2
+        assert metadata.json()["form_version"] == 3
         assert metadata.json()["adaptive"] is True
+        assert metadata.json()["optional_contact"] is True
         assert metadata.json()["estimated_seconds"] == 60
         assert metadata.json()["advertising_trackers"] is False
 
@@ -176,13 +179,15 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert created_distribution.json()["path"] == "/check-in?d=BRIGHTON-QR-01"
 
         payload = recreation_payload()
+        payload["contact_email"] = "qa@example.test"
+        payload["contact_phone"] = "+1 555 010 2026"
         saved = await client.post(
             "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
             json=payload,
         )
         assert saved.status_code == 201
         assert saved.json()["form_id"] == "OUTFIELD-CHECKIN"
-        assert saved.json()["form_version"] == 2
+        assert saved.json()["form_version"] == 3
         assert saved.json()["distribution_id"] == "BRIGHTON-QR-01"
 
         unknown = recreation_payload("UNREGISTERED-QR")
@@ -209,12 +214,19 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         )
         assert rejected.status_code == 422
 
-        with_email = {**recreation_payload(), "email": "should-not-be-collected@example.test"}
+        invalid_email = {**recreation_payload(), "contact_email": "not-an-email"}
         rejected_email = await client.post(
             "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
-            json=with_email,
+            json=invalid_email,
         )
         assert rejected_email.status_code == 422
+
+        invalid_phone = {**recreation_payload(), "contact_phone": "123"}
+        rejected_phone = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=invalid_phone,
+        )
+        assert rejected_phone.status_code == 422
 
         work_payload = {
             **recreation_payload(),
@@ -250,12 +262,19 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
             )
             assert len(rows) == 3
             assert {row.form_id for row in rows} == {"OUTFIELD-CHECKIN"}
-            assert {row.form_version for row in rows} == {2}
+            assert {row.form_version for row in rows} == {3}
             assert {row.distribution_id for row in rows} == {
                 "BRIGHTON-QR-01",
                 "DIRECT",
             }
-            assert all("email" not in row.answers for row in rows)
+            contact_rows = [
+                row
+                for row in rows
+                if row.answers.get("contact_email") or row.answers.get("contact_phone")
+            ]
+            assert len(contact_rows) == 1
+            assert contact_rows[0].answers["contact_email"] == "qa@example.test"
+            assert contact_rows[0].answers["contact_phone"] == "+1 555 010 2026"
             assert all(row.answers["questions_shown"] for row in rows)
             assert all(row.answers["branch_path"] for row in rows)
             assert all(row.answers["completion_seconds"] >= 5 for row in rows)
@@ -268,9 +287,10 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         )
         assert summary.status_code == 200
         assert summary.json()["form"]["id"] == "OUTFIELD-CHECKIN"
-        assert summary.json()["form"]["version"] == 2
+        assert summary.json()["form"]["version"] == 3
         assert summary.json()["form"]["adaptive"] is True
         assert summary.json()["responses"] == 3
+        assert summary.json()["contactable_responses"] == 1
         assert summary.json()["tools"]["radio"] == 3
         assert summary.json()["distribution"] == {
             "BRIGHTON-QR-01": 2,
@@ -295,7 +315,8 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert "questions_shown" in header
         assert "branch_path" in header
         assert "completion_seconds" in header
-        assert "email" not in header
+        assert "contact_email" in header
+        assert "contact_phone" in header
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -350,6 +371,7 @@ async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
         async def post(self, *args, **kwargs):
             return FailedVerificationResponse()
 
+    original_async_client = httpx.AsyncClient
     monkeypatch.setattr(
         "terrasatch.feedback.routes.httpx.AsyncClient",
         FailedVerificationClient,
@@ -363,7 +385,7 @@ async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
     )
 
     payload = recreation_payload("DIRECT")
-    async with httpx.AsyncClient(
+    async with original_async_client(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
     ) as client:
