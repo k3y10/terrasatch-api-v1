@@ -124,8 +124,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     campaign_ids = [item["distribution_id"] for item in _CAMPAIGNS]
+    distributions = _distribution_table()
     op.execute(
-        _distribution_table()
-        .delete()
-        .where(_distribution_table().c.distribution_id.in_(campaign_ids))
+        distributions.delete().where(distributions.c.distribution_id.in_(campaign_ids))
     )
