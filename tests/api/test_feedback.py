@@ -339,6 +339,7 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
 
     await engine.dispose()
 
+
 @pytest.mark.asyncio
 async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
     """A failed Siteverify response must reject the public submission."""
