@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_URL="${TERRASATCH_FEEDBACK_QA_BASE_URL:-https://staging-api.terrasatch.com}"
 LOCAL_BASE_URL="${TERRASATCH_FEEDBACK_LOCAL_BASE_URL:-http://127.0.0.1:8013}"
 COMPOSE_FILE="${TERRASATCH_FEEDBACK_COMPOSE_FILE:-deploy/docker-compose.feedback-staging.yml}"
+SOURCE_ENV="${TERRASATCH_FEEDBACK_SOURCE_ENV:-/home/ubuntu/terrasatch-workspace-staging/.env.staging}"
 DATABASE_NAME="${TERRASATCH_FEEDBACK_DATABASE_NAME:-terrasatch_feedback_staging}"
 FORM_ID="OUTFIELD-CHECKIN"
 EXPECTED_FORM_VERSION="2"
@@ -17,6 +18,14 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 [[ -f "$COMPOSE_FILE" ]] || die "Missing staging compose file: $COMPOSE_FILE"
+[[ -f "$SOURCE_ENV" ]] || die "Missing owner-only staging environment: $SOURCE_ENV"
+
+set -a
+# shellcheck disable=SC1090
+source "$SOURCE_ENV"
+set +a
+
+[[ -n "${POSTGRES_PASSWORD:-}" ]] || die "POSTGRES_PASSWORD is missing from the staging environment."
 
 say "Checking isolated feedback staging revision"
 health_json="$(curl --fail --silent --show-error "$LOCAL_BASE_URL/health/ready")"
