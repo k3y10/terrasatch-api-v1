@@ -37,6 +37,7 @@ def recreation_payload(distribution_id: str = "BRIGHTON-QR-01") -> dict[str, obj
         "concept_interest": "would_try",
         "contact_email": None,
         "contact_phone": None,
+        "other_details": {},
         "questions_shown": [
             "audience",
             "activity_context",
@@ -227,6 +228,28 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
             json=invalid_phone,
         )
         assert rejected_phone.status_code == 422
+
+        missing_other_detail = {
+            **recreation_payload(),
+            "tools": ["phone_apps", "other"],
+            "tool_follow_up": None,
+            "other_details": {},
+            "questions_shown": [
+                "audience",
+                "activity_context",
+                "tools",
+                "connectivity",
+                "primary_hassle",
+                "pain_follow_up",
+                "spend_band",
+                "concept_interest",
+            ],
+        }
+        rejected_other = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=missing_other_detail,
+        )
+        assert rejected_other.status_code == 422
 
         work_payload = {
             **recreation_payload(),
