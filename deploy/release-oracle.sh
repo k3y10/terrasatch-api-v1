@@ -14,10 +14,12 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-echo "[1/8] Updating main"
-git fetch origin
-git checkout main
-git pull --ff-only origin main
+echo "[1/8] Updating production checkout"
+git fetch origin main
+# This repository uses multiple worktrees and the main branch may already be
+# checked out elsewhere. Deploy the exact remote main revision in detached mode
+# so the production worktree does not need to own the main branch.
+git switch --detach origin/main
 
 export TERRASATCH_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
 echo "Deploying TerraSatch revision: ${TERRASATCH_BUILD_SHA}"
