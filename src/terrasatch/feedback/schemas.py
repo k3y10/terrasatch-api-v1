@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 _DISTRIBUTION_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{0,99}$")
 _QUESTION_ID_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 PERSONAL_SPEND = {
     "zero",
@@ -89,6 +90,8 @@ class SurveyResponseCreate(BaseModel):
     ] | None = None
     spend_band: str = Field(min_length=2, max_length=32)
     concept_interest: Literal["definitely", "would_try", "maybe", "probably_not"]
+    contact_email: str | None = Field(default=None, max_length=254)
+    contact_phone: str | None = Field(default=None, max_length=32)
     questions_shown: list[str] = Field(min_length=7, max_length=16)
     started_at: datetime
     completion_seconds: int = Field(ge=5, le=3600)
@@ -113,13 +116,33 @@ class SurveyResponseCreate(BaseModel):
             raise ValueError("Question IDs must use lowercase letters, numbers, or underscores")
         return normalized
 
-    @field_validator("comment", "tool_follow_up", "pain_follow_up")
+    @field_validator("comment", "tool_follow_up", "pain_follow_up", "contact_email", "contact_phone")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("contact_email")
+    @classmethod
+    def validate_contact_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.casefold()
+        if not _EMAIL_RE.fullmatch(normalized):
+            raise ValueError("Enter a valid email address")
+        return normalized
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        digits = re.sub(r"\D", "", value)
+        if not 7 <= len(digits) <= 15:
+            raise ValueError("Enter a valid phone number")
+        return value
 
     @model_validator(mode="after")
     def validate_adaptive_path(self):
