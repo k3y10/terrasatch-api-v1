@@ -92,6 +92,7 @@ class SurveyResponseCreate(BaseModel):
     concept_interest: Literal["definitely", "would_try", "maybe", "probably_not"]
     contact_email: str | None = Field(default=None, max_length=254)
     contact_phone: str | None = Field(default=None, max_length=32)
+    other_details: dict[str, str] = Field(default_factory=dict)
     questions_shown: list[str] = Field(min_length=7, max_length=16)
     started_at: datetime
     completion_seconds: int = Field(ge=5, le=3600)
@@ -144,6 +145,30 @@ class SurveyResponseCreate(BaseModel):
             raise ValueError("Enter a valid phone number")
         return value
 
+    @field_validator("other_details")
+    @classmethod
+    def validate_other_details(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed = {
+            "activity_context",
+            "tools",
+            "primary_hassle",
+            "tool_follow_up",
+            "pain_follow_up",
+        }
+        if len(value) > len(allowed):
+            raise ValueError("Too many Other details")
+        normalized: dict[str, str] = {}
+        for key, detail in value.items():
+            if key not in allowed:
+                raise ValueError("Unknown Other detail field")
+            clean = detail.strip()
+            if not clean:
+                raise ValueError("Other details cannot be blank")
+            if len(clean) > 200:
+                raise ValueError("Other details must be 200 characters or fewer")
+            normalized[key] = clean
+        return normalized
+
     @model_validator(mode="after")
     def validate_adaptive_path(self):
         allowed_spend = PERSONAL_SPEND if self.audience == "recreation" else TEAM_SPEND
@@ -181,6 +206,22 @@ class SurveyResponseCreate(BaseModel):
                 raise ValueError("Time-burden question was not recorded as shown")
         elif self.time_burden is not None:
             raise ValueError("Recreation-only responses must not include team time burden")
+
+        required_other: set[str] = set()
+        if self.activity_context == "other":
+            required_other.add("activity_context")
+        if "other" in self.tools:
+            required_other.add("tools")
+        if self.primary_hassle == "other":
+            required_other.add("primary_hassle")
+        if self.tool_follow_up == "other":
+            required_other.add("tool_follow_up")
+        if self.pain_follow_up == "other":
+            required_other.add("pain_follow_up")
+
+        missing_other = required_other - set(self.other_details)
+        if missing_other:
+            raise ValueError("Other selections require a typed description")
 
         return self
 
