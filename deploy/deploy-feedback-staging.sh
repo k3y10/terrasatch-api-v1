@@ -169,7 +169,7 @@ sudo systemctl reload caddy
 
 say "Verifying public feedback route"
 metadata="$(curl --fail --silent --show-error "$PUBLIC_FORM")"
-python3 - <<'PY' <<<"$metadata"
+python3 -c '
 import json
 import sys
 
@@ -179,7 +179,7 @@ assert payload["form_version"] == 2, payload
 assert payload["adaptive"] is True, payload
 assert payload["anonymous_by_default"] is True, payload
 assert payload["advertising_trackers"] is False, payload
-PY
+' <<<"$metadata"
 
 say "FEEDBACK-ONLY STAGING DEPLOYMENT READY"
 printf 'Local API:  http://127.0.0.1:8013\n'
