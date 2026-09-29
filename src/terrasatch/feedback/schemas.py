@@ -31,6 +31,32 @@ TEAM_SPEND = {
     "not_sure",
 }
 
+RADIO_FOLLOW_UP = {
+    "radio_only",
+    "written_down",
+    "manual_entry",
+    "recorded_system",
+    "mixed",
+    "not_sure",
+}
+SATELLITE_FOLLOW_UP = {
+    "messaging",
+    "tracking",
+    "sos",
+    "weather",
+    "mixed",
+    "other",
+}
+PAIN_FOLLOW_UP = {
+    "losing_service": {"communicate", "navigate", "capture", "sync", "coordinate", "other"},
+    "locations": {"own_position", "team_positions", "incidents", "observations", "history", "other"},
+    "recording": {"notes_app", "paper", "photos", "radio_only", "multiple_places", "nowhere_consistent"},
+    "updating_others": {"radio", "text", "group_app", "call", "in_person", "mixed"},
+    "switching_apps": {"two", "three_four", "five_six", "seven_plus"},
+    "finding_later": {"difficult", "inconsistent", "okay", "easy"},
+    "other": {"communication", "navigation", "documentation", "coordination", "handoff", "other"},
+}
+
 ActivityContext = Literal[
     "backcountry_snow",
     "hiking_climbing",
@@ -192,12 +218,26 @@ class SurveyResponseCreate(BaseModel):
             raise ValueError("Selected tools require a tool follow-up")
         if needs_tool_follow_up and "tool_follow_up" not in self.questions_shown:
             raise ValueError("Tool follow-up was not recorded as shown")
+        if not needs_tool_follow_up and self.tool_follow_up is not None:
+            raise ValueError("Tool follow-up was supplied when it was not asked")
+        if self.tool_follow_up is not None:
+            allowed_tool_follow_up = (
+                RADIO_FOLLOW_UP if "radio" in self.tools else SATELLITE_FOLLOW_UP
+            )
+            if self.tool_follow_up not in allowed_tool_follow_up:
+                raise ValueError("Tool follow-up does not match the selected tools")
 
         needs_pain_follow_up = self.primary_hassle != "nothing_major"
         if needs_pain_follow_up and not self.pain_follow_up:
             raise ValueError("Selected friction requires a pain follow-up")
         if needs_pain_follow_up and "pain_follow_up" not in self.questions_shown:
             raise ValueError("Pain follow-up was not recorded as shown")
+        if not needs_pain_follow_up and self.pain_follow_up is not None:
+            raise ValueError("Pain follow-up was supplied when it was not asked")
+        if self.pain_follow_up is not None:
+            allowed_pain_follow_up = PAIN_FOLLOW_UP[self.primary_hassle]
+            if self.pain_follow_up not in allowed_pain_follow_up:
+                raise ValueError("Pain follow-up does not match the selected hassle")
 
         if self.audience in {"work", "both"}:
             if not self.time_burden:
@@ -219,9 +259,13 @@ class SurveyResponseCreate(BaseModel):
         if self.pain_follow_up == "other":
             required_other.add("pain_follow_up")
 
-        missing_other = required_other - set(self.other_details)
+        provided_other = set(self.other_details)
+        missing_other = required_other - provided_other
         if missing_other:
             raise ValueError("Other selections require a typed description")
+        unexpected_other = provided_other - required_other
+        if unexpected_other:
+            raise ValueError("Other details were supplied for answers that were not Other")
 
         return self
 
