@@ -77,11 +77,16 @@ async def _verify_turnstile(request: Request, token: str) -> None:
 
 
 async def _public_limit(request: Request) -> None:
+    # Browser submissions arrive through the Vercel same-origin bridge, so
+    # request.client is a Vercel egress address rather than the respondent.
+    # Apply a form-wide capacity guard only after Turnstile has validated the
+    # browser token instead of accidentally rate-limiting all respondents as
+    # one proxy IP.
     await enforce_public_rate_limit(
         request.app.state.settings,
         category="feedback-response",
-        identifier=request.client.host if request.client else "unknown",
-        limit=30,
+        identifier=FORM_ID,
+        limit=2000,
         window=3600,
     )
 
@@ -117,8 +122,8 @@ async def submit_response(
 
     if form_id.upper() != FORM_ID:
         raise HTTPException(404, "Unknown feedback form")
-    await _public_limit(request)
     await _verify_turnstile(request, payload.turnstile_token)
+    await _public_limit(request)
     async with create_session_factory(request.app.state.settings)() as session:
         saved = await create_survey_response(session, payload)
         await session.commit()
