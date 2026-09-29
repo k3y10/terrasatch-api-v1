@@ -252,6 +252,47 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         )
         assert rejected_other.status_code == 422
 
+        unexpected_tool_follow_up = {
+            **recreation_payload(),
+            "tools": ["phone_apps"],
+            "tool_follow_up": "radio_only",
+            "questions_shown": [
+                "audience",
+                "activity_context",
+                "tools",
+                "connectivity",
+                "primary_hassle",
+                "pain_follow_up",
+                "spend_band",
+                "concept_interest",
+            ],
+        }
+        rejected_unasked_tool = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=unexpected_tool_follow_up,
+        )
+        assert rejected_unasked_tool.status_code == 422
+
+        wrong_pain_follow_up = {
+            **recreation_payload(),
+            "pain_follow_up": "seven_plus",
+        }
+        rejected_wrong_pain = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=wrong_pain_follow_up,
+        )
+        assert rejected_wrong_pain.status_code == 422
+
+        unexpected_other_detail = {
+            **recreation_payload(),
+            "other_details": {"tools": "Something extra"},
+        }
+        rejected_unexpected_other = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=unexpected_other_detail,
+        )
+        assert rejected_unexpected_other.status_code == 422
+
         work_payload = {
             **recreation_payload(),
             "distribution_id": "BRIGHTON-QR-01",
