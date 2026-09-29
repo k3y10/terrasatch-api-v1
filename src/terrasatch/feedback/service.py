@@ -13,8 +13,8 @@ from terrasatch.feedback.models import FeedbackDistribution, SurveyResponse
 from terrasatch.feedback.schemas import DistributionCreate, SurveyResponseCreate
 
 FORM_ID = "OUTFIELD-CHECKIN"
-FORM_VERSION = 2
-FORM_TITLE = "60-Second Outdoor & Field Check-In"
+FORM_VERSION = 3
+FORM_TITLE = "Quick Outdoor & Field Check-In"
 DIRECT_DISTRIBUTION_ID = "DIRECT"
 
 
@@ -106,6 +106,8 @@ async def create_survey_response(
             "branch_path": _branch_path(payload),
             "started_at": payload.started_at.isoformat(),
             "completion_seconds": payload.completion_seconds,
+            "contact_email": payload.contact_email,
+            "contact_phone": payload.contact_phone,
         },
         concept_interest=payload.concept_interest,
         comment=payload.comment,
@@ -179,6 +181,11 @@ async def feedback_summary(session: AsyncSession) -> dict[str, object]:
             rows, lambda row: row.answers.get("spend_band", "unknown")
         ),
         "concept_interest": _count(rows, lambda row: row.concept_interest),
+        "contactable_responses": sum(
+            1
+            for row in rows
+            if row.answers.get("contact_email") or row.answers.get("contact_phone")
+        ),
         "distribution": dict(counts),
         "distribution_catalog": [
             {
@@ -240,6 +247,8 @@ async def feedback_export_csv(
             "spend_band",
             "concept_interest",
             "completion_seconds",
+            "contact_email",
+            "contact_phone",
             "questions_shown",
             "branch_path",
             "comment",
@@ -264,6 +273,8 @@ async def feedback_export_csv(
                 row.answers.get("spend_band", ""),
                 row.concept_interest,
                 row.answers.get("completion_seconds", ""),
+                row.answers.get("contact_email", ""),
+                row.answers.get("contact_phone", ""),
                 "|".join(
                     str(item) for item in (row.answers.get("questions_shown") or [])
                 ),
