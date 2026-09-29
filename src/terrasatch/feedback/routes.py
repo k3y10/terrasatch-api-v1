@@ -37,9 +37,12 @@ _TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA"
 async def _verify_turnstile(request: Request, token: str) -> None:
     settings = request.app.state.settings
     configured = settings.feedback_turnstile_secret_key
-    using_test_secret = configured is None and settings.environment == "local"
-    if configured is not None:
-        secret = configured.get_secret_value()
+    configured_secret = (
+        configured.get_secret_value().strip() if configured is not None else ""
+    )
+    using_test_secret = not configured_secret and settings.environment == "local"
+    if configured_secret:
+        secret = configured_secret
     elif using_test_secret:
         secret = _TURNSTILE_TEST_SECRET
     else:
