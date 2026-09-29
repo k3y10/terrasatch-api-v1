@@ -108,6 +108,7 @@ async def create_survey_response(
             "completion_seconds": payload.completion_seconds,
             "contact_email": payload.contact_email,
             "contact_phone": payload.contact_phone,
+            "other_details": payload.other_details,
         },
         concept_interest=payload.concept_interest,
         comment=payload.comment,
@@ -249,6 +250,7 @@ async def feedback_export_csv(
             "completion_seconds",
             "contact_email",
             "contact_phone",
+            "other_details",
             "questions_shown",
             "branch_path",
             "comment",
@@ -275,6 +277,7 @@ async def feedback_export_csv(
                 row.answers.get("completion_seconds", ""),
                 row.answers.get("contact_email", ""),
                 row.answers.get("contact_phone", ""),
+                repr(row.answers.get("other_details", {})),
                 "|".join(
                     str(item) for item in (row.answers.get("questions_shown") or [])
                 ),
