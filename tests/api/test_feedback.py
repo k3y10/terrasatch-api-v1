@@ -317,3 +317,61 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert denied.status_code == 403
 
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
+    """A failed Siteverify response must reject the public submission."""
+
+    async def limiter(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "terrasatch.feedback.routes.enforce_public_rate_limit",
+        limiter,
+    )
+
+    class FailedVerificationResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"success": False, "error-codes": ["invalid-input-response"]}
+
+    class FailedVerificationClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, *args, **kwargs):
+            return FailedVerificationResponse()
+
+    monkeypatch.setattr(
+        "terrasatch.feedback.routes.httpx.AsyncClient",
+        FailedVerificationClient,
+    )
+
+    app = create_app(
+        Settings(
+            environment="local",
+            feedback_turnstile_secret_key="test-secret",
+        )
+    )
+
+    payload = recreation_payload("DIRECT")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        rejected = await client.post(
+            "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
+            json=payload,
+        )
+
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Human verification failed. Please try again."
+
