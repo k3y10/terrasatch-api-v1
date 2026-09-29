@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from collections import Counter
 
 from sqlalchemy import select
@@ -143,6 +144,13 @@ def _count(rows, key):
     return dict(Counter(key(row) for row in rows))
 
 
+def _csv_safe(value: object) -> str:
+    """Keep user-provided spreadsheet cells from being interpreted as formulas."""
+
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+
+
 def _tool_count(rows: list[SurveyResponse]) -> dict[str, int]:
     counter: Counter[str] = Counter()
     for row in rows:
@@ -275,14 +283,20 @@ async def feedback_export_csv(
                 row.answers.get("spend_band", ""),
                 row.concept_interest,
                 row.answers.get("completion_seconds", ""),
-                row.answers.get("contact_email", ""),
-                row.answers.get("contact_phone", ""),
-                repr(row.answers.get("other_details", {})),
+                _csv_safe(row.answers.get("contact_email", "")),
+                _csv_safe(row.answers.get("contact_phone", "")),
+                _csv_safe(
+                    json.dumps(
+                        row.answers.get("other_details", {}),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                ),
                 "|".join(
                     str(item) for item in (row.answers.get("questions_shown") or [])
                 ),
                 "|".join(str(item) for item in (row.answers.get("branch_path") or [])),
-                row.comment or "",
+                _csv_safe(row.comment or ""),
             ]
         )
     return output.getvalue()
