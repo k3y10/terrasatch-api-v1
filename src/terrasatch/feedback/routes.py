@@ -37,9 +37,10 @@ _TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA"
 async def _verify_turnstile(request: Request, token: str) -> None:
     settings = request.app.state.settings
     configured = settings.feedback_turnstile_secret_key
+    using_test_secret = configured is None and settings.environment == "local"
     if configured is not None:
         secret = configured.get_secret_value()
-    elif settings.environment == "local":
+    elif using_test_secret:
         secret = _TURNSTILE_TEST_SECRET
     else:
         raise HTTPException(
@@ -65,7 +66,9 @@ async def _verify_turnstile(request: Request, token: str) -> None:
             detail="Human verification is temporarily unavailable.",
         ) from error
 
-    if result.get("success") is not True or result.get("action") != "field-checkin":
+    if result.get("success") is not True or (
+        not using_test_secret and result.get("action") != "field-checkin"
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Human verification failed. Please try again.",
