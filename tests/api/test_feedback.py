@@ -369,7 +369,11 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
 async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
     """A failed Siteverify response must reject the public submission."""
 
+    limiter_calls = 0
+
     async def limiter(*args, **kwargs):
+        nonlocal limiter_calls
+        limiter_calls += 1
         return None
 
     monkeypatch.setattr(
@@ -422,4 +426,5 @@ async def test_turnstile_rejection_blocks_before_persistence(monkeypatch):
 
     assert rejected.status_code == 400
     assert rejected.json()["detail"] == "Human verification failed. Please try again."
+    assert limiter_calls == 0
 
