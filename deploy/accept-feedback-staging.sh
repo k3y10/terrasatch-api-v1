@@ -7,7 +7,7 @@ COMPOSE_FILE="${TERRASATCH_FEEDBACK_COMPOSE_FILE:-deploy/docker-compose.feedback
 SOURCE_ENV="${TERRASATCH_FEEDBACK_SOURCE_ENV:-/home/ubuntu/terrasatch-workspace-staging/.env.staging}"
 DATABASE_NAME="${TERRASATCH_FEEDBACK_DATABASE_NAME:-terrasatch_feedback_staging}"
 FORM_ID="OUTFIELD-CHECKIN"
-EXPECTED_FORM_VERSION="2"
+EXPECTED_FORM_VERSION="3"
 QA_COMMENT="__terrasatch_feedback_staging_qa__"
 DUMMY_TOKEN="XXXX.DUMMY.TOKEN.XXXX"
 
@@ -55,6 +55,7 @@ expected = int(sys.argv[1])
 assert payload["form_id"] == "OUTFIELD-CHECKIN", payload
 assert payload["form_version"] == expected, payload
 assert payload["anonymous_by_default"] is True, payload
+assert payload["optional_contact"] is True, payload
 assert payload["adaptive"] is True, payload
 assert payload["estimated_seconds"] == 60, payload
 assert payload["advertising_trackers"] is False, payload
@@ -107,6 +108,8 @@ response="$(
       \"time_burden\": null,
       \"spend_band\": \"100_249\",
       \"concept_interest\": \"would_try\",
+      \"contact_email\": \"qa@example.test\",
+      \"contact_phone\": \"+15550102026\",
       \"questions_shown\": [\"audience\", \"activity_context\", \"tools\", \"connectivity\", \"primary_hassle\", \"tool_follow_up\", \"pain_follow_up\", \"spend_band\", \"concept_interest\"],
       \"started_at\": \"2026-09-28T12:00:00Z\",
       \"completion_seconds\": 60,
@@ -149,12 +152,13 @@ persisted="$(
        COALESCE(answers->>'completion_seconds', '') || '|' ||
        CASE WHEN answers::jsonb ? 'questions_shown' THEN 'shown' ELSE 'missing' END || '|' ||
        CASE WHEN answers::jsonb ? 'branch_path' THEN 'branched' ELSE 'missing' END || '|' ||
-       CASE WHEN answers::jsonb ? 'email' THEN 'email-present' ELSE 'no-email' END || '|' ||
+       COALESCE(answers->>'contact_email', '') || '|' ||
+       COALESCE(answers->>'contact_phone', '') || '|' ||
        COALESCE(comment, '')
      FROM feedback_survey_responses
      WHERE id = '$response_id'::uuid;"
 )"
-expected_row="$FORM_ID|$EXPECTED_FORM_VERSION|DIRECT|60|shown|branched|no-email|$QA_COMMENT"
+expected_row="$FORM_ID|$EXPECTED_FORM_VERSION|DIRECT|60|shown|branched|qa@example.test|+15550102026|$QA_COMMENT"
 [[ "$persisted" == "$expected_row" ]] ||
   die "Persisted adaptive response did not match the expected identity/path tuple."
 printf 'Persisted response: %s\n' "$response_id"
