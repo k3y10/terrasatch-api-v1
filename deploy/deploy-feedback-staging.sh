@@ -175,9 +175,10 @@ import sys
 
 payload = json.load(sys.stdin)
 assert payload["form_id"] == "OUTFIELD-CHECKIN", payload
-assert payload["form_version"] == 2, payload
+assert payload["form_version"] == 3, payload
 assert payload["adaptive"] is True, payload
 assert payload["anonymous_by_default"] is True, payload
+assert payload["optional_contact"] is True, payload
 assert payload["advertising_trackers"] is False, payload
 ' <<<"$metadata"
 
