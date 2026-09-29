@@ -62,6 +62,12 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         "terrasatch.feedback.routes.create_session_factory",
         lambda settings: factory,
     )
+    # Workspace login/session endpoints used by this test must share the same
+    # in-memory SQLite factory instead of falling back to the default Postgres URL.
+    monkeypatch.setattr(
+        "terrasatch.workspace.routes.create_session_factory",
+        lambda settings: factory,
+    )
 
     async def limiter(*args, **kwargs):
         return None
