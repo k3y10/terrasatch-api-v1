@@ -39,7 +39,7 @@ async def _verify_turnstile(request: Request, token: str) -> None:
     configured = settings.feedback_turnstile_secret_key
     if configured is not None:
         secret = configured.get_secret_value()
-    elif not settings.is_production:
+    elif settings.environment == "local":
         secret = _TURNSTILE_TEST_SECRET
     else:
         raise HTTPException(
