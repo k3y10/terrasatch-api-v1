@@ -55,8 +55,6 @@ async def _verify_turnstile(request: Request, token: str) -> None:
         "secret": secret,
         "response": token,
     }
-    if request.client and request.client.host:
-        payload["remoteip"] = request.client.host
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
