@@ -161,6 +161,8 @@ class Settings(BaseSettings):
 
     max_edge_devices: int = Field(default=100, ge=1, le=100_000)
     max_portal_users: int = Field(default=250, ge=1, le=1_000_000)
+    feedback_internal_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    feedback_turnstile_secret_key: SecretStr | None = None
     admin_email: str | None = None
     admin_password_hash: SecretStr | None = None
     admin_session_secret: SecretStr | None = None
@@ -172,6 +174,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         return [origin.strip().rstrip("/") for origin in value]
+
+    @field_validator("feedback_internal_emails", mode="before")
+    @classmethod
+    def parse_feedback_internal_emails(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            values = value.split(",")
+        else:
+            values = value
+        return sorted({item.strip().casefold() for item in values if item.strip()})
 
     @field_validator("log_level")
     @classmethod
@@ -206,6 +217,7 @@ class Settings(BaseSettings):
         "billing_activation_signing_secret",
         "integration_encryption_key",
         "integration_provider_config_json",
+        "feedback_turnstile_secret_key",
         "google_oauth_client_secret",
         "slack_oauth_client_secret",
         "arcgis_oauth_client_secret",

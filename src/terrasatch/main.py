@@ -38,6 +38,8 @@ from terrasatch.brand import (
 from terrasatch.config import Environment, Settings, get_settings
 from terrasatch.edge.api import router as edge_router
 from terrasatch.errors import TerraSatchError
+from terrasatch.feedback.routes import router as feedback_router
+from terrasatch.feedback.routes import workspace_router as workspace_feedback_router
 from terrasatch.field_inputs.api import router as field_input_router
 from terrasatch.landing_v3 import build_landing_page
 from terrasatch.network.status import get_public_network_status
@@ -229,6 +231,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(control_plane_router)
     api_v1.include_router(edge_router)
     api_v1.include_router(field_input_router)
+    api_v1.include_router(feedback_router)
     api_v1.include_router(radio_router)
     api_v1.include_router(uac_archive_router)
     api_v1.include_router(billing_router)
@@ -260,6 +263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(admin_member_router)
     application.include_router(portal_router)
     application.include_router(workspace_router)
+    application.include_router(workspace_feedback_router)
     return application
 
 

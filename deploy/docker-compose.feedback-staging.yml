@@ -1,0 +1,74 @@
+name: terrasatch-feedback-staging
+
+services:
+  postgres:
+    image: imresamu/postgis:16-3.6.1-alpine3.22@sha256:8fcc73f4afd381738dea98a0b0b17212c4d46f59f1eec40808e40710fd66dfda
+    environment:
+      POSTGRES_DB: terrasatch_feedback_staging
+      POSTGRES_USER: terrasatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set staging database password}
+    volumes:
+      - feedback_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -U terrasatch -d terrasatch_feedback_staging",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 384m
+    cpus: 0.1
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "64mb",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    volumes:
+      - feedback_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    mem_limit: 128m
+    cpus: 0.05
+    restart: unless-stopped
+
+  api:
+    image: terrasatch-feedback-staging:local
+    build:
+      context: ..
+    environment:
+      TERRASATCH_ENV: staging
+      TERRASATCH_DEPLOYMENT_NAME: feedback-staging
+      TERRASATCH_BUILD_SHA: ${TERRASATCH_BUILD_SHA:-unknown}
+      TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:${POSTGRES_PASSWORD:?Set staging database password}@postgres:5432/terrasatch_feedback_staging
+      TERRASATCH_REDIS_URL: redis://redis:6379/0
+      TERRASATCH_API_BASE_URL: https://staging-api.terrasatch.com
+      TERRASATCH_ENABLE_DOCS: "false"
+      TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY: ${TERRASATCH_FEEDBACK_TURNSTILE_SECRET_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8013:8000"
+    mem_limit: 384m
+    cpus: 0.15
+    restart: unless-stopped
+
+volumes:
+  feedback_postgres:
+  feedback_redis:
