@@ -93,6 +93,7 @@ async def form_metadata(form_id: str):
         "form_version": FORM_VERSION,
         "title": FORM_TITLE,
         "anonymous_by_default": True,
+        "optional_contact": True,
         "adaptive": True,
         "estimated_seconds": 60,
         "advertising_trackers": False,
