@@ -65,7 +65,7 @@ async def _verify_turnstile(request: Request, token: str) -> None:
             detail="Human verification is temporarily unavailable.",
         ) from error
 
-    if result.get("success") is not True:
+    if result.get("success") is not True or result.get("action") != "field-checkin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Human verification failed. Please try again.",
