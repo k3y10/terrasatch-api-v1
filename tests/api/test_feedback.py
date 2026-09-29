@@ -182,6 +182,7 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         payload = recreation_payload()
         payload["contact_email"] = "qa@example.test"
         payload["contact_phone"] = "+1 555 010 2026"
+        payload["comment"] = "=2+2"
         saved = await client.post(
             "/api/v1/feedback/forms/OUTFIELD-CHECKIN/responses",
             json=payload,
@@ -340,6 +341,7 @@ async def test_native_feedback_first_party_attribution_and_founder_access(monkey
         assert "completion_seconds" in header
         assert "contact_email" in header
         assert "contact_phone" in header
+        assert "'=2+2" in export.text
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
