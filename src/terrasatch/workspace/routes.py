@@ -23,6 +23,7 @@ from terrasatch.billing.service import get_stripe_customer_id, get_subscription_
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.database.session import create_session_factory
 from terrasatch.edge.models import EdgeDevice
+from terrasatch.errors import ProviderUnavailable
 from terrasatch.field_inputs.schemas import (
     MobileObservationRequest,
     MobileObservationResponse,
@@ -75,11 +76,20 @@ from terrasatch.satchy.assets import (
 )
 from terrasatch.satchy.context import build_satchy_context
 from terrasatch.satchy.intents import resolve_intent
+from terrasatch.satchy.models import SatchyRun
+from terrasatch.satchy.runs import (
+    append_run_step,
+    finish_run,
+    get_or_create_run,
+    run_payload,
+    sync_action_review,
+)
 from terrasatch.satchy.schemas import (
     ActiveMapContext,
     FieldAssetCreate,
     FieldAssetUpdate,
     SatchyIntent,
+    SatchyRunResponse,
 )
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
@@ -1014,6 +1024,58 @@ async def patch_asset(
         return jsonable_encoder(_asset_payload(asset))
 
 
+@router.get(
+    "/organizations/{organization_id}/runs",
+    response_model=list[SatchyRunResponse],
+)
+async def list_satchy_runs(
+    organization_id: UUID,
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """List the signed-in member's recent inspectable Satchy runs."""
+
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, _ = await access(request, session, organization_id)
+        runs = list(
+            await session.scalars(
+                select(SatchyRun)
+                .where(
+                    SatchyRun.organization_id == organization_id,
+                    SatchyRun.user_id == user.id,
+                )
+                .order_by(SatchyRun.created_at.desc())
+                .limit(limit)
+            )
+        )
+        return [await run_payload(session, run=run) for run in runs]
+
+
+@router.get(
+    "/organizations/{organization_id}/runs/{run_id}",
+    response_model=SatchyRunResponse,
+)
+async def get_satchy_run(
+    organization_id: UUID,
+    run_id: UUID,
+    request: Request,
+):
+    """Return one tenant- and member-scoped Satchy activity trace."""
+
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, _ = await access(request, session, organization_id)
+        run = await session.scalar(
+            select(SatchyRun).where(
+                SatchyRun.id == run_id,
+                SatchyRun.organization_id == organization_id,
+                SatchyRun.user_id == user.id,
+            )
+        )
+        if run is None:
+            raise HTTPException(404, "Satchy run not found")
+        return await run_payload(session, run=run)
+
+
 @router.post("/organizations/{organization_id}/actions/{action_id}")
 async def review(organization_id: UUID, action_id: UUID, payload: Decision, request: Request):
     csrf(request)
@@ -1049,14 +1111,23 @@ async def review(organization_id: UUID, action_id: UUID, payload: Decision, requ
                 approver_user_id=user.id,
                 notes=payload.notes,
             )
+        integration_execution = dict(
+            (action.structured_payload or {}).get("integration_execution") or {}
+        )
+        await sync_action_review(
+            session,
+            organization_id=organization_id,
+            action_id=action.id,
+            decision=payload.decision,
+            action_status=action.status,
+            integration_execution=integration_execution,
+        )
         await session.commit()
         return {
             "id": str(action.id),
             "status": action.status,
             "integration_detail": integration_detail,
-            "integration_execution": dict(
-                (action.structured_payload or {}).get("integration_execution") or {}
-            ),
+            "integration_execution": integration_execution,
         }
 
 
