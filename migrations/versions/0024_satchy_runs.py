@@ -67,7 +67,7 @@ def upgrade() -> None:
         ["organization_id", "user_id", "created_at"],
     )
     op.create_index(
-        "ix_satchy_runs_status",
+        "ix_satchy_runs_status_recent",
         "satchy_runs",
         ["organization_id", "status", "created_at"],
     )
