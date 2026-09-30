@@ -10,7 +10,7 @@ die() {
 }
 
 command -v docker >/dev/null 2>&1 || die "Docker is required."
-docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."\n\nbash -n scripts/qa-suite.sh scripts/qa-oracle.sh
 
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [[ "${TERRASATCH_QA_ALLOW_DIRTY:-0}" != "1" ]]; then
