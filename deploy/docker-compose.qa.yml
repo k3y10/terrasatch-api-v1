@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: imresamu/postgis:16-3.6.1-alpine3.22@sha256:8fcc73f4afd381738dea98a0b0b17212c4d46f59f1eec40808e40710fd66dfda
+    environment:
+      POSTGRES_DB: terrasatch_qa
+      POSTGRES_USER: terrasatch
+      POSTGRES_PASSWORD: terrasatch-qa
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terrasatch -d terrasatch_qa"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - qa_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - qa_redis_data:/data
+
+  qa:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.qa
+    environment:
+      TERRASATCH_ENV: local
+      TERRASATCH_ENVIRONMENT: local
+      TERRASATCH_DEPLOYMENT_NAME: oracle-qa
+      TERRASATCH_BUILD_SHA: qa
+      TERRASATCH_API_BASE_URL: http://127.0.0.1:18000
+      TERRASATCH_DATABASE_URL: postgresql+asyncpg://terrasatch:terrasatch-qa@postgres:5432/terrasatch_qa
+      TERRASATCH_REDIS_URL: redis://redis:6379/15
+      TERRASATCH_INTELLIGENCE_PROVIDER: deterministic
+      TERRASATCH_BILLING_ENABLED: "false"
+      TERRASATCH_BILLING_ALLOW_LIVEMODE: "false"
+      TERRASATCH_ENABLE_DOCS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["bash", "scripts/qa-suite.sh"]
+
+volumes:
+  qa_postgres_data:
+  qa_redis_data:
