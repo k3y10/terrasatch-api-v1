@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -124,6 +125,37 @@ class SatchyDecision(BaseModel):
     approval_required: bool = False
     radio_response: str = Field(min_length=1, max_length=2000)
     provenance: dict[str, object] = Field(default_factory=dict)
+
+
+class SatchyRunStepResponse(BaseModel):
+    id: UUID
+    sequence: int
+    type: str
+    status: str
+    label: str
+    detail: dict[str, object] = Field(default_factory=dict)
+    source_refs: list[dict[str, object]] = Field(default_factory=list)
+    action_id: UUID | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class SatchyRunResponse(BaseModel):
+    id: UUID
+    request_id: UUID
+    organization_id: UUID
+    site_id: UUID
+    user_id: UUID | None = None
+    objective: str | None = None
+    input_text: str
+    response_text: str | None = None
+    model: str | None = None
+    status: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    steps: list[SatchyRunStepResponse] = Field(default_factory=list)
 
 
 class FieldAssetCreate(BaseModel):
