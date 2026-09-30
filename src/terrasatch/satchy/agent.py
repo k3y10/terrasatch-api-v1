@@ -322,7 +322,7 @@ async def answer_workspace(
     if settings.intelligence_provider != "ollama":
         raise ProviderUnavailable("Satchy model service is not configured")
 
-    context_json = json.dumps(context.model_dump(mode="json"), ensure_ascii=False)[:60000]
+    context_json = json.dumps(context.model_context_payload(), ensure_ascii=False)[:60000]
     messages = [
         {
             "role": "system",
