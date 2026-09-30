@@ -111,6 +111,65 @@ async def run_steps(session: AsyncSession, *, run_id: UUID) -> list[SatchyRunSte
     )
 
 
+async def sync_action_review(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    action_id: UUID,
+    decision: str,
+    action_status: str,
+    integration_execution: dict[str, object] | None = None,
+) -> None:
+    """Reflect a human action decision back into the owning run activity."""
+
+    step = await session.scalar(
+        select(SatchyRunStep)
+        .where(
+            SatchyRunStep.organization_id == organization_id,
+            SatchyRunStep.action_id == action_id,
+        )
+        .order_by(SatchyRunStep.sequence.desc())
+        .limit(1)
+    )
+    if step is None:
+        return
+
+    now = datetime.now(UTC)
+    execution = dict(integration_execution or {})
+    step.status = "completed" if decision == "approve" else "rejected"
+    step.completed_at = now
+    step.detail = {
+        **dict(step.detail or {}),
+        "decision": decision,
+        "action_status": action_status,
+        "execution_status": execution.get("status"),
+    }
+
+    run = await session.get(SatchyRun, step.run_id)
+    if run is None:
+        return
+
+    execution_status = execution.get("status")
+    run_status = (
+        "failed"
+        if decision == "approve" and execution_status in {"blocked", "failed"}
+        else "completed"
+    )
+    finish_run(run, status=run_status)
+    await append_run_step(
+        session,
+        run=run,
+        step_type="review",
+        status="completed" if decision == "approve" else "rejected",
+        label="Action approved" if decision == "approve" else "Action rejected",
+        detail={
+            "action_status": action_status,
+            "execution_status": execution_status,
+        },
+        action_id=action_id,
+    )
+
+
 def step_payload(step: SatchyRunStep) -> dict[str, object]:
     return {
         "id": str(step.id),
