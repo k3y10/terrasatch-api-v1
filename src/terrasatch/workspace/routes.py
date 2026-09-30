@@ -1242,103 +1242,254 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             and existing_by_id.organization_id != organization_id
         ):
             raise HTTPException(409, "Satchy request ID is already in use")
+
+        subscription_context = dict(context.subscription or {})
+        run, run_created = await get_or_create_run(
+            session,
+            organization_id=organization_id,
+            site_id=selected_site.id,
+            user_id=user.id,
+            request_id=request_id,
+            input_text=payload.message,
+            objective=payload.objective,
+            run_metadata={
+                "service_access": subscription_context.get("service_access"),
+                "subscription_status": subscription_context.get("status"),
+                "plan_code": subscription_context.get("plan_code"),
+                "connected_providers": list(context.connected_providers),
+                "available_capabilities": list(context.available_capabilities),
+                "active_map": payload.active_map is not None,
+            },
+        )
+        if not run_created:
+            action = existing_by_id
+            return {
+                "answer": run.response_text
+                or "That Satchy request already exists and is still being processed.",
+                "action_id": str(action.id) if action is not None else None,
+                "action_status": action.status if action is not None else None,
+                "approval_required": bool(
+                    action is not None and action.approval_required
+                ),
+                "run_id": str(run.id),
+                "run_status": run.status,
+            }
+
+        await append_run_step(
+            session,
+            run=run,
+            step_type="context",
+            status="completed",
+            label="Authorized workspace context loaded",
+            detail={
+                "site_id": str(selected_site.id),
+                "site_name": selected_site.name,
+                "evidence_count": len(context.evidence),
+                "connected_providers": list(context.connected_providers),
+                "available_capabilities": list(context.available_capabilities),
+                "service_access": subscription_context.get("service_access"),
+            },
+        )
+        source_refs = [
+            {
+                "id": str(item.get("id") or item.get("transmission_id")),
+                "type": "operational_event" if item.get("id") else "transmission",
+            }
+            for item in context.evidence
+            if item.get("id") or item.get("transmission_id")
+        ]
+        if source_refs:
+            await append_run_step(
+                session,
+                run=run,
+                step_type="sources",
+                status="completed",
+                label=f"Reviewed {len(source_refs)} authorized field source(s)",
+                detail={"count": len(source_refs)},
+                source_refs=source_refs,
+            )
+
         existing_action = existing_by_id
         planned_action = None
-        if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
-            planner_context = context.model_dump(mode="json")
-            planner_context["request_source"] = "workspace"
-            planned_action = await plan_integration_action(
-                settings=settings,
-                text=payload.message,
-                context=planner_context,
-            )
-        action = existing_action
-        if (
-            action is None
-            and planned_action is not None
-            and planned_action.action_type != "none"
-        ):
-            if planned_action.missing_context:
-                missing = ", ".join(planned_action.missing_context)
+        needs_input = False
+        try:
+            if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
+                planner_context = context.model_dump(mode="json")
+                planner_context["request_source"] = "workspace"
+                planned_action = await plan_integration_action(
+                    settings=settings,
+                    text=payload.message,
+                    context=planner_context,
+                )
+            action = existing_action
+            if (
+                action is None
+                and planned_action is not None
+                and planned_action.action_type != "none"
+            ):
+                if planned_action.missing_context:
+                    missing = ", ".join(planned_action.missing_context)
+                    answer = (
+                        f"I need {missing} before I can prepare that integration action."
+                    )
+                    model = "satchy-integration-planner"
+                    needs_input = True
+                    await append_run_step(
+                        session,
+                        run=run,
+                        step_type="clarification",
+                        status="blocked",
+                        label="More context required",
+                        detail={"missing_context": planned_action.missing_context},
+                    )
+                else:
+                    action_type = (
+                        ActionType.NOTIFY_TEAM
+                        if planned_action.action_type == "notify_team"
+                        else ActionType.GENERATE_REPORT
+                    )
+                    if action_type == ActionType.NOTIFY_TEAM:
+                        proposed_message = planned_action.notification_text
+                        structured_payload = {
+                            "origin": "workspace_chat",
+                            "requester_user_id": str(user.id),
+                            "capability": "notification.send",
+                            "integration_scope": planned_action.audience_scope,
+                            "text": planned_action.notification_text,
+                            "workflow_key": "satchy.action.notify_team",
+                            "planner_confidence": planned_action.confidence,
+                        }
+                        preview = "team notification"
+                    else:
+                        proposed_message = planned_action.document_content
+                        structured_payload = {
+                            "origin": "workspace_chat",
+                            "requester_user_id": str(user.id),
+                            "capability": "document.create",
+                            "integration_scope": planned_action.audience_scope,
+                            "name": planned_action.document_name,
+                            "content": planned_action.document_content,
+                            "mime_type": planned_action.mime_type,
+                            "workflow_key": "satchy.action.generate_report",
+                            "planner_confidence": planned_action.confidence,
+                        }
+                        preview = "report"
+                    if context.team_id is not None:
+                        structured_payload["team_id"] = str(context.team_id)
+                    action = SatchyAction(
+                        id=request_id,
+                        organization_id=organization_id,
+                        site_id=selected_site.id,
+                        conversation_id=None,
+                        source_transmission_id=None,
+                        evaluation_id=None,
+                        action_type=action_type.value,
+                        risk_level="low",
+                        reason=planned_action.summary,
+                        proposed_message=proposed_message,
+                        structured_payload=structured_payload,
+                        confidence=planned_action.confidence,
+                        approval_required=True,
+                        status=ActionStatus.PROPOSED.value,
+                        expires_at=datetime.now(UTC) + timedelta(minutes=15),
+                    )
+                    session.add(action)
+                    await session.flush()
+                    transition_action(action, ActionStatus.AWAITING_APPROVAL)
+                    await append_run_step(
+                        session,
+                        run=run,
+                        step_type="action",
+                        status="awaiting_approval",
+                        label=f"Prepared {preview}",
+                        detail={
+                            "capability": structured_payload["capability"],
+                            "scope": planned_action.audience_scope,
+                            "risk_level": action.risk_level,
+                        },
+                        action_id=action.id,
+                        completed=False,
+                    )
+                    answer = (
+                        f"I prepared that {preview} for human approval. "
+                        "Nothing has been sent or created yet. Review it in Workflows."
+                    )
+                    model = "satchy-integration-planner"
+            elif action is not None:
+                await append_run_step(
+                    session,
+                    run=run,
+                    step_type="action",
+                    status=action.status,
+                    label="Existing reviewable action found",
+                    detail={
+                        "action_type": action.action_type,
+                        "risk_level": action.risk_level,
+                    },
+                    action_id=action.id,
+                    completed=action.status
+                    not in {
+                        ActionStatus.PROPOSED.value,
+                        ActionStatus.AWAITING_APPROVAL.value,
+                    },
+                )
                 answer = (
-                    f"I need {missing} before I can prepare that integration action."
+                    f"That integration action already exists with status {action.status}. "
+                    "Review it in Workflows."
                 )
                 model = "satchy-integration-planner"
             else:
-                action_type = (
-                    ActionType.NOTIFY_TEAM
-                    if planned_action.action_type == "notify_team"
-                    else ActionType.GENERATE_REPORT
+                answer, model = await answer_workspace(
+                    settings=settings,
+                    context=context,
+                    message=payload.message,
+                    history=[
+                        {"role": item.role, "content": item.content}
+                        for item in reversed(history)
+                    ],
                 )
-                if action_type == ActionType.NOTIFY_TEAM:
-                    proposed_message = planned_action.notification_text
-                    structured_payload = {
-                        "origin": "workspace_chat",
-                        "requester_user_id": str(user.id),
-                        "capability": "notification.send",
-                        "integration_scope": planned_action.audience_scope,
-                        "text": planned_action.notification_text,
-                        "workflow_key": "satchy.action.notify_team",
-                        "planner_confidence": planned_action.confidence,
-                    }
-                    preview = "team notification"
-                else:
-                    proposed_message = planned_action.document_content
-                    structured_payload = {
-                        "origin": "workspace_chat",
-                        "requester_user_id": str(user.id),
-                        "capability": "document.create",
-                        "integration_scope": planned_action.audience_scope,
-                        "name": planned_action.document_name,
-                        "content": planned_action.document_content,
-                        "mime_type": planned_action.mime_type,
-                        "workflow_key": "satchy.action.generate_report",
-                        "planner_confidence": planned_action.confidence,
-                    }
-                    preview = "report"
-                if context.team_id is not None:
-                    structured_payload["team_id"] = str(context.team_id)
-                action = SatchyAction(
-                    id=request_id,
-                    organization_id=organization_id,
-                    site_id=selected_site.id,
-                    conversation_id=None,
-                    source_transmission_id=None,
-                    evaluation_id=None,
-                    action_type=action_type.value,
-                    risk_level="low",
-                    reason=planned_action.summary,
-                    proposed_message=proposed_message,
-                    structured_payload=structured_payload,
-                    confidence=planned_action.confidence,
-                    approval_required=True,
-                    status=ActionStatus.PROPOSED.value,
-                    expires_at=datetime.now(UTC) + timedelta(minutes=15),
-                )
-                session.add(action)
-                await session.flush()
-                transition_action(action, ActionStatus.AWAITING_APPROVAL)
-                answer = (
-                    f"I prepared that {preview} for human approval. "
-                    "Nothing has been sent or created yet. Review it in Workflows."
-                )
-                model = "satchy-integration-planner"
-        elif action is not None:
-            answer = (
-                f"That integration action already exists with status {action.status}. "
-                "Review it in Workflows."
+        except ProviderUnavailable:
+            await append_run_step(
+                session,
+                run=run,
+                step_type="error",
+                status="failed",
+                label="Satchy model service unavailable",
+                detail={"retryable": True},
             )
-            model = "satchy-integration-planner"
+            finish_run(run, status="failed")
+            await session.commit()
+            raise
+
+        await append_run_step(
+            session,
+            run=run,
+            step_type="response",
+            status="completed",
+            label="Response prepared",
+            detail={"model": model},
+        )
+        if needs_input:
+            run_status = "needs_input"
+        elif (
+            action is not None
+            and action.approval_required
+            and action.status
+            in {
+                ActionStatus.PROPOSED.value,
+                ActionStatus.AWAITING_APPROVAL.value,
+            }
+        ):
+            run_status = "awaiting_approval"
         else:
-            answer, model = await answer_workspace(
-                settings=settings,
-                context=context,
-                message=payload.message,
-                history=[
-                    {"role": item.role, "content": item.content}
-                    for item in reversed(history)
-                ],
-            )
+            run_status = "completed"
+        finish_run(
+            run,
+            status=run_status,
+            response_text=answer[:16000],
+            model=model,
+        )
+
         session.add_all(
             [
                 WorkspaceMessage(
@@ -1362,6 +1513,8 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             "action_id": str(action.id) if action is not None else None,
             "action_status": action.status if action is not None else None,
             "approval_required": bool(action is not None and action.approval_required),
+            "run_id": str(run.id),
+            "run_status": run.status,
         }
 
 
