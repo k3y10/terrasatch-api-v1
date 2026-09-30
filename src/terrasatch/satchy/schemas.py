@@ -101,6 +101,8 @@ class SatchyContext(BaseModel):
     subscription: dict[str, object] = Field(default_factory=dict)
     available_capabilities: list[str] = Field(default_factory=list)
     connected_providers: list[str] = Field(default_factory=list)
+    workspace_profile: dict[str, object] = Field(default_factory=dict)
+    capability_manifest: dict[str, object] = Field(default_factory=dict)
     operational_profile: dict[str, object] = Field(default_factory=dict)
     edge_context: dict[str, object] = Field(default_factory=dict)
     rf_context: dict[str, object] = Field(default_factory=dict)
