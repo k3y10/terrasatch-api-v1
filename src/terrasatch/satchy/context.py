@@ -7,9 +7,15 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from terrasatch.billing.service import get_subscription_for_organization
+from terrasatch.config import Settings
 from terrasatch.edge.models import EdgeDevice
 from terrasatch.errors import ResourceNotFound, TenantAccessDenied
-from terrasatch.identity.models import Membership, Organization, Site, Team, User
+from terrasatch.identity.access import role_allows
+from terrasatch.identity.models import Membership, MembershipRole, Organization, Site, Team, User
+from terrasatch.integrations.catalog import provider_catalog
+from terrasatch.integrations.models import IntegrationStatus
+from terrasatch.integrations.service import list_visible_connections
 from terrasatch.organizations.profiles import get_operational_profile
 from terrasatch.radio.models import (
     Callsign,
@@ -33,6 +39,7 @@ async def build_satchy_context(
     transmission_id: UUID | None = None,
     objective: str | None = None,
     active_map: ActiveMapContext | None = None,
+    settings: Settings | None = None,
 ) -> SatchyContext:
     """Build the smallest useful context while enforcing tenant/site ownership."""
 
@@ -56,6 +63,7 @@ async def build_satchy_context(
         raise ResourceNotFound("Site was not found in the Satchy organization context")
 
     user: User | None = None
+    membership: Membership | None = None
     role: str | None = None
     modules: list[str] = []
     user_preferences: dict[str, object] = {}
@@ -211,6 +219,65 @@ async def build_satchy_context(
             }
         )
 
+    subscription = await get_subscription_for_organization(
+        session,
+        organization_id=organization_id,
+    )
+    subscription_payload: dict[str, object] = {
+        "managed": subscription.managed,
+        "plan_code": subscription.plan_code.value if subscription.plan_code else None,
+        "billing_interval": (
+            subscription.billing_interval.value
+            if subscription.billing_interval
+            else None
+        ),
+        "status": subscription.status,
+        "service_access": subscription.service_access,
+        "trial_ends_at": (
+            subscription.trial_ends_at.isoformat()
+            if subscription.trial_ends_at
+            else None
+        ),
+        "current_period_end": (
+            subscription.current_period_end.isoformat()
+            if subscription.current_period_end
+            else None
+        ),
+        "entitlements": (
+            subscription.entitlements.model_dump()
+            if subscription.entitlements is not None
+            else None
+        ),
+    }
+
+    available_capabilities: set[str] = set()
+    connected_providers: list[str] = []
+    if settings is not None and user is not None and membership is not None:
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+        )
+        connected_scopes: dict[str, set[str]] = {}
+        for connection in connections:
+            if (
+                connection.enabled
+                and connection.status == IntegrationStatus.CONNECTED.value
+            ):
+                connected_scopes.setdefault(connection.provider, set()).add(
+                    connection.scope_type
+                )
+        catalog = provider_catalog(
+            settings,
+            admin_access=role_allows(membership.role, MembershipRole.ADMIN),
+            connected_scopes=connected_scopes,
+        )
+        for provider in catalog:
+            if provider["connected"] and provider["runtime_ready"]:
+                connected_providers.append(provider["key"])
+                available_capabilities.update(provider["capabilities"])
+
     return SatchyContext(
         organization_id=organization_id,
         organization_name=organization.name,
@@ -233,6 +300,9 @@ async def build_satchy_context(
         active_map=active_map,
         workspace_modules=modules,
         user_preferences=user_preferences,
+        subscription=subscription_payload,
+        available_capabilities=sorted(available_capabilities),
+        connected_providers=sorted(connected_providers),
         operational_profile=profile_payload,
         edge_context=edge_context,
         rf_context=dict(transmission.rf_metadata or {}) if transmission else {},

@@ -1162,6 +1162,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             transmission_id=payload.transmission_id,
             objective=payload.objective,
             active_map=payload.active_map,
+            settings=settings,
         )
         request_id = payload.request_id or uuid4()
         existing_by_id = await session.get(SatchyAction, request_id)

@@ -28,8 +28,11 @@ Never claim to have executed, transmitted, deployed, approved, or changed physic
 Consequential actions and physical missions must go through TerraSatch policy and approval gates.
 External notifications, reports, and other integration outputs are proposals until an authorized
 human approves them. Never claim an integration output was sent or created unless execution status
-explicitly says it was delivered. When information is missing, ask only for the missing fact that
-materially affects correctness.
+explicitly says it was delivered. Treat subscription service access and available_capabilities in
+context as hard execution boundaries: stay helpful and reason about the user's goal, but never imply
+an unavailable capability is enabled. During a trial, identify useful workflow opportunities without
+turning trial activity into operational evidence or inventing savings. When information is missing,
+ask only for the missing fact that materially affects correctness.
 """
 
 _INTEGRATION_ACTION_SYSTEM = """Plan one provider-neutral TerraSatch integration action.

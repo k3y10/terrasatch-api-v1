@@ -97,6 +97,9 @@ class SatchyContext(BaseModel):
     active_map: ActiveMapContext | None = None
     workspace_modules: list[str] = Field(default_factory=list)
     user_preferences: dict[str, object] = Field(default_factory=dict)
+    subscription: dict[str, object] = Field(default_factory=dict)
+    available_capabilities: list[str] = Field(default_factory=list)
+    connected_providers: list[str] = Field(default_factory=list)
     operational_profile: dict[str, object] = Field(default_factory=dict)
     edge_context: dict[str, object] = Field(default_factory=dict)
     rf_context: dict[str, object] = Field(default_factory=dict)
