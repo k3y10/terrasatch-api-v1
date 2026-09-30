@@ -23,6 +23,14 @@ class WorkspaceRuntimeMode(StrEnum):
 DEFAULT_DISCOVERY_STATE: dict[str, object] = {"status": "not_started"}
 
 
+def _is_physical_edge_capability(capability: str) -> bool:
+    normalized = capability.strip().lower()
+    return any(
+        token in normalized
+        for token in (":transmit", ".transmit", "mission", "command", "actuate")
+    )
+
+
 def workspace_profile_payload(profile: WorkspaceProfile | None) -> dict[str, object]:
     """Return a stable profile contract even before an organization customizes it."""
 
@@ -119,12 +127,18 @@ def build_capability_manifest(
                 write_capabilities.add(capability)
 
     edge_devices = []
+    edge_capabilities: set[str] = set()
     physical_capabilities: set[str] = set()
     for device in devices:
         if not device.enabled:
             continue
         capabilities = sorted(set(device.capabilities or []))
-        physical_capabilities.update(capabilities)
+        edge_capabilities.update(capabilities)
+        physical_capabilities.update(
+            capability
+            for capability in capabilities
+            if _is_physical_edge_capability(capability)
+        )
         edge_devices.append(
             {
                 "id": str(device.id),
@@ -142,6 +156,7 @@ def build_capability_manifest(
         "runtime_mode": runtime_mode,
         "read": sorted(read_capabilities),
         "write": sorted(write_capabilities),
+        "edge": sorted(edge_capabilities),
         "physical": sorted(physical_capabilities),
         "connected_providers": sorted(connected_providers),
         "edge_devices": edge_devices,
