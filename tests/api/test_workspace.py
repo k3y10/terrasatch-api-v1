@@ -264,7 +264,32 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert proposal.json()["action_id"] == str(satchy_request_id)
         assert proposal.json()["action_status"] == "awaiting_approval"
         assert proposal.json()["approval_required"] is True
+        assert proposal.json()["run_status"] == "awaiting_approval"
         assert "Nothing has been sent" in proposal.json()["answer"]
+
+        run_id = proposal.json()["run_id"]
+        run_detail = await client.get(
+            f"/api/v1/workspace/organizations/{organization_id}/runs/{run_id}"
+        )
+        assert run_detail.status_code == 200
+        assert run_detail.json()["request_id"] == str(satchy_request_id)
+        assert run_detail.json()["status"] == "awaiting_approval"
+        assert run_detail.json()["input_text"].startswith("Satchy, notify")
+        assert [
+            step["type"] for step in run_detail.json()["steps"]
+        ] == ["context", "action", "response"]
+        action_step = next(
+            step for step in run_detail.json()["steps"] if step["type"] == "action"
+        )
+        assert action_step["status"] == "awaiting_approval"
+        assert action_step["action_id"] == str(satchy_request_id)
+        assert action_step["detail"]["capability"] == "notification.send"
+
+        recent_runs = await client.get(
+            f"/api/v1/workspace/organizations/{organization_id}/runs?limit=5"
+        )
+        assert recent_runs.status_code == 200
+        assert recent_runs.json()[0]["id"] == run_id
 
         proposed_workspace = (
             await client.get(f"/api/v1/workspace/organizations/{organization_id}")
@@ -288,6 +313,14 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert approved_action.status_code == 200
         assert approved_action.json()["status"] == "approved"
         assert approved_action.json()["integration_execution"]["status"] == "blocked"
+
+        reviewed_run = await client.get(
+            f"/api/v1/workspace/organizations/{organization_id}/runs/{run_id}"
+        )
+        assert reviewed_run.status_code == 200
+        assert reviewed_run.json()["status"] == "failed"
+        assert reviewed_run.json()["steps"][-1]["type"] == "review"
+        assert reviewed_run.json()["steps"][-1]["detail"]["execution_status"] == "blocked"
 
         revoked = await client.post(
             f"{integration_url}/{personal.json()['id']}/revoke",

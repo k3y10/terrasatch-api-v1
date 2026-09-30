@@ -1,10 +1,12 @@
 name: Satchy QA
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feat/satchy-agent-context-missions
       - feat/integration-scope-foundation
+      - feat/satchy-runs-workspace-foundation
   pull_request:
     branches:
       - main
@@ -15,30 +17,10 @@ permissions:
 jobs:
   qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install
-        run: python -m pip install -e ".[dev]"
-
-      - name: Compile
-        run: python -m compileall -q src tests
-
-      - name: Ruff
-        run: python -m ruff check src tests
-
-      - name: Alembic single head
-        run: |
-          test "$(python -m alembic heads | wc -l)" -eq 1
-          python -m alembic heads
-
-      - name: Tests
-        run: python -m pytest -q
+      - name: Run isolated full QA
+        run: bash scripts/qa-oracle.sh

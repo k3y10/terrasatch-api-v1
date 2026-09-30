@@ -23,6 +23,7 @@ from terrasatch.masterdata import models as masterdata_models
 from terrasatch.organizations import models as organization_models
 from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
+from terrasatch.satchy import models as satchy_models
 from terrasatch.workspace import models as workspace_models
 
 _ = (
@@ -38,6 +39,7 @@ _ = (
     organization_models,
     outbound_models,
     radio_models,
+    satchy_models,
 )
 
 config = context.config
