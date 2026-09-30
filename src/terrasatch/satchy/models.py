@@ -1,15 +1,93 @@
-"""Persistent field assets and Satchy-planned missions."""
+"""Persistent Satchy runs, field assets, and planned missions."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
 from terrasatch.database.types import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class SatchyRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Persistent workspace-agent run without storing hidden reasoning."""
+
+    __tablename__ = "satchy_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "request_id",
+            name="uq_satchy_runs_request",
+        ),
+        Index(
+            "ix_satchy_runs_user_recent",
+            "organization_id",
+            "user_id",
+            "created_at",
+        ),
+        Index(
+            "ix_satchy_runs_status",
+            "organization_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    site_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sites.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    request_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    objective: Mapped[str | None] = mapped_column(Text)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response_text: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), default="running", nullable=False, index=True)
+    run_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SatchyRunStep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Inspectable operational activity for one Satchy run."""
+
+    __tablename__ = "satchy_run_steps"
+    __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="uq_satchy_run_steps_sequence"),
+        Index(
+            "ix_satchy_run_steps_run",
+            "organization_id",
+            "run_id",
+            "sequence",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("satchy_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("satchy_actions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    detail: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    source_refs: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FieldAsset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
