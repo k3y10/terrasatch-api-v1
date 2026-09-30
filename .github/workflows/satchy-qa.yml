@@ -5,6 +5,7 @@ on:
     branches:
       - feat/satchy-agent-context-missions
       - feat/integration-scope-foundation
+      - feat/satchy-runs-workspace-foundation
   pull_request:
     branches:
       - main
