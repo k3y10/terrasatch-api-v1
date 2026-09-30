@@ -49,7 +49,7 @@ if sys.version_info < (3, 12):
     raise SystemExit(f"Python 3.12+ required, found {sys.version}")
 PY
 
-python -m pip check
+uv pip check
 
 printf '\n[1/10] Ruff\n'
 ruff check src tests migrations
