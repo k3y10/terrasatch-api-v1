@@ -91,6 +91,12 @@ from terrasatch.satchy.schemas import (
     SatchyIntent,
     SatchyRunResponse,
 )
+from terrasatch.workspace.convergence import (
+    build_capability_manifest,
+    get_or_create_workspace_profile,
+    get_workspace_profile,
+    workspace_profile_payload,
+)
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
@@ -108,6 +114,19 @@ class ModulePreferences(BaseModel):
         max_length=5
     )
     satchy: SatchyPreferenceSettings | None = None
+
+
+class WorkspaceConvergenceUpdate(BaseModel):
+    operational_domain: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[a-z0-9_.-]+$"
+    )
+    workspace_template: str | None = Field(
+        default=None, min_length=1, max_length=100, pattern=r"^[a-z0-9_.-]+$"
+    )
+    runtime_mode: Literal["legacy", "shadow", "agent_read", "agent_propose"] | None = None
+    recommended_modules: list[str] | None = Field(default=None, max_length=32)
+    preferred_map_layers: list[str] | None = Field(default=None, max_length=64)
+    workflow_preferences: list[str] | None = Field(default=None, max_length=64)
 
 
 @router.post(
@@ -179,6 +198,82 @@ async def save_preferences(organization_id: UUID, payload: ModulePreferences, re
             "modules": preference.modules,
             "satchy": dict(preference.satchy_preferences or {}),
         }
+
+
+@router.get("/organizations/{organization_id}/convergence")
+async def workspace_convergence(
+    organization_id: UUID,
+    request: Request,
+    response: Response,
+):
+    """Return the shared workspace/runtime contract without changing runtime behavior."""
+
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        profile = await get_workspace_profile(session, organization_id=organization_id)
+        devices = list(
+            await session.scalars(
+                select(EdgeDevice)
+                .where(EdgeDevice.organization_id == organization_id)
+                .order_by(EdgeDevice.name)
+            )
+        )
+        connections = await list_visible_connections(
+            session,
+            organization_id=organization_id,
+            user_id=user.id,
+            role=membership.role,
+        )
+        catalog = provider_catalog(
+            request.app.state.settings,
+            admin_access=role_allows(membership.role, MembershipRole.ADMIN),
+            connected_scopes=_connection_scopes(connections),
+        )
+        return jsonable_encoder(
+            {
+                "profile": workspace_profile_payload(profile),
+                "capability_manifest": build_capability_manifest(
+                    profile=profile,
+                    catalog=catalog,
+                    devices=devices,
+                ),
+            }
+        )
+
+
+@router.patch("/organizations/{organization_id}/convergence")
+async def update_workspace_convergence(
+    organization_id: UUID,
+    payload: WorkspaceConvergenceUpdate,
+    request: Request,
+):
+    """Update organization workspace defaults; agent modes remain explicit opt-ins."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        _, membership = await access(request, session, organization_id)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Admin access required")
+        await writable(session, membership)
+        profile = await get_or_create_workspace_profile(
+            session,
+            organization_id=organization_id,
+        )
+        if payload.operational_domain is not None:
+            profile.operational_domain = payload.operational_domain
+        if payload.workspace_template is not None:
+            profile.workspace_template = payload.workspace_template
+        if payload.runtime_mode is not None:
+            profile.runtime_mode = payload.runtime_mode
+        if payload.recommended_modules is not None:
+            profile.recommended_modules = list(dict.fromkeys(payload.recommended_modules))
+        if payload.preferred_map_layers is not None:
+            profile.preferred_map_layers = list(dict.fromkeys(payload.preferred_map_layers))
+        if payload.workflow_preferences is not None:
+            profile.workflow_preferences = list(dict.fromkeys(payload.workflow_preferences))
+        await session.commit()
+        return {"profile": workspace_profile_payload(profile)}
 
 
 class Login(BaseModel):
@@ -502,6 +597,20 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             user_id=user.id,
             role=membership.role,
         )
+        catalog = provider_catalog(
+            request.app.state.settings,
+            admin_access=role_allows(membership.role, MembershipRole.ADMIN),
+            connected_scopes=_connection_scopes(connections),
+        )
+        convergence_profile = await get_workspace_profile(
+            session,
+            organization_id=organization_id,
+        )
+        capability_manifest = build_capability_manifest(
+            profile=convergence_profile,
+            catalog=catalog,
+            devices=devices,
+        )
         actions = list(
             await session.scalars(
                 select(SatchyAction)
@@ -556,6 +665,10 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                 "satchy_preferences": (
                     dict(preference.satchy_preferences or {}) if preference is not None else {}
                 ),
+                "convergence": {
+                    "profile": workspace_profile_payload(convergence_profile),
+                    "capability_manifest": capability_manifest,
+                },
                 "integrations": {
                     "devices": [
                         {
@@ -571,14 +684,7 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
                         "provider": request.app.state.settings.intelligence_provider,
                         "model": request.app.state.settings.ollama_model,
                     },
-                    "catalog": provider_catalog(
-                        request.app.state.settings,
-                        admin_access=role_allows(
-                            membership.role,
-                            MembershipRole.ADMIN,
-                        ),
-                        connected_scopes=_connection_scopes(connections),
-                    ),
+                    "catalog": catalog,
                     "connections": [connection_payload(connection) for connection in connections],
                 },
                 "subscription": subscription,
