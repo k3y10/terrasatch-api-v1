@@ -40,7 +40,7 @@ class SatchyRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "created_at",
         ),
         Index(
-            "ix_satchy_runs_status",
+            "ix_satchy_runs_status_recent",
             "organization_id",
             "status",
             "created_at",
