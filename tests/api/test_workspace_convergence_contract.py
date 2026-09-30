@@ -69,7 +69,8 @@ def test_capability_manifest_only_exposes_runtime_ready_connections_and_edge_cap
     assert manifest["runtime_mode"] == "legacy"
     assert manifest["read"] == ["weather.forecast.read"]
     assert manifest["write"] == []
-    assert manifest["physical"] == ["radio:receive", "radio:transmit"]
+    assert manifest["edge"] == ["radio:receive", "radio:transmit"]
+    assert manifest["physical"] == ["radio:transmit"]
     assert manifest["connected_providers"] == ["nws_forecast"]
     assert manifest["policy"] == {
         "agent_reads_enabled": False,
