@@ -27,7 +27,8 @@ from terrasatch.billing.service import (
 from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Settings
 from terrasatch.database.session import create_session_factory
-from terrasatch.edge.service import list_devices
+from terrasatch.edge.schemas import EdgeDeviceUpdateRequest
+from terrasatch.edge.service import get_device, list_devices, update_device
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.access import (
     authenticate_user,
@@ -38,9 +39,11 @@ from terrasatch.identity.access import (
 )
 from terrasatch.identity.models import MembershipRole
 from terrasatch.identity.recovery import create_password_reset_intent, reset_password
+from terrasatch.masterdata.service import write_audit_log
 from terrasatch.organizations.service import list_sites
 from terrasatch.portal.ui import (
     render_portal,
+    render_portal_edge_device,
     render_portal_forgot_password,
     render_portal_login,
     render_portal_resend_activation,
@@ -510,8 +513,169 @@ async def portal_dashboard(
             summary=summary,
             billing=subscription.model_dump(mode="json"),
             billing_manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
+            edge_troubleshoot_allowed=role_allows(selected.role, MembershipRole.OPERATOR),
+            edge_manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
             csrf_token=issue_csrf_token(request.session),
         )
+    )
+
+
+@router.get(
+    "/portal/edge/{device_id}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    response_model=None,
+)
+async def portal_edge_device(
+    request: Request,
+    device_id: UUID,
+    organization: str = "",
+) -> HTMLResponse:
+    """Show organization-scoped Edge diagnostics to operators and above."""
+
+    settings: Settings = request.app.state.settings
+    user_id = await _require_user(request, settings)
+    access = await _run_database(
+        settings,
+        lambda session: list_user_access(session, user_id=user_id),
+    )
+    if not access:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization access")
+
+    remembered = str(request.session.get("portal_organization") or "")
+    selector = organization or remembered
+    selected = next(
+        (item for item in access if str(item.organization_id) == selector),
+        access[0],
+    )
+    if not role_allows(selected.role, MembershipRole.OPERATOR):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operator access is required for Edge diagnostics",
+        )
+
+    request.session["portal_organization"] = str(selected.organization_id)
+    device = await _run_database(
+        settings,
+        lambda session: get_device(
+            session,
+            organization_id=selected.organization_id,
+            device_id=device_id,
+        ),
+    )
+    _, sites = await _run_database(
+        settings,
+        lambda session: list_sites(
+            session,
+            organization_selector=str(selected.organization_id),
+            enabled=None,
+        ),
+    )
+    detail = device_status_payload(device)
+    detail["telemetry"] = getattr(device, "telemetry", {}) or {}
+    detail["remote_config"] = getattr(device, "remote_config", {}) or {}
+    return HTMLResponse(
+        render_portal_edge_device(
+            display_name=str(request.session.get("portal_display_name") or "TerraSatch User"),
+            role=selected.role.value,
+            organization_id=str(selected.organization_id),
+            organization_name=selected.organization_name,
+            device=detail,
+            sites=sites,
+            manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
+            csrf_token=issue_csrf_token(request.session),
+        )
+    )
+
+
+@router.post("/portal/edge/{device_id}", include_in_schema=False, response_model=None)
+async def portal_edge_device_update(
+    request: Request,
+    device_id: UUID,
+    organization: Annotated[UUID, Form()],
+    name: Annotated[str, Form()],
+    site_id: Annotated[UUID, Form()],
+    enabled: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Allow organization admins/owners to perform bounded Edge lifecycle changes."""
+
+    settings: Settings = request.app.state.settings
+    user_id = await _require_user(request, settings)
+    _verify_csrf(request, csrf_token)
+    selected = await _run_database(
+        settings,
+        lambda session: get_user_organization_access(
+            session,
+            user_id=user_id,
+            organization_id=organization,
+        ),
+    )
+    if not role_allows(selected.role, MembershipRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization admin or owner access is required to manage Edge devices",
+        )
+
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Edge device name cannot be empty",
+        )
+    if enabled not in {"true", "false"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Edge enabled state",
+        )
+    payload = EdgeDeviceUpdateRequest(
+        name=normalized_name,
+        site_id=site_id,
+        enabled=enabled == "true",
+    )
+    async def manage_device(session: AsyncSession):
+        current = await get_device(
+            session,
+            organization_id=selected.organization_id,
+            device_id=device_id,
+        )
+        before = {
+            "name": current.name,
+            "site_id": str(current.site_id),
+            "enabled": bool(current.enabled),
+        }
+        updated = await update_device(
+            session,
+            organization_id=selected.organization_id,
+            device_id=device_id,
+            payload=payload,
+        )
+        after = {
+            "name": updated.name,
+            "site_id": str(updated.site_id),
+            "enabled": bool(updated.enabled),
+        }
+        await write_audit_log(
+            session,
+            organization_id=selected.organization_id,
+            actor_type="portal_user",
+            actor_id=str(user_id),
+            action="edge_device.update",
+            target_type="edge_device",
+            target_id=str(device_id),
+            request_id=getattr(request.state, "request_id", None),
+            details={
+                "role": selected.role.value,
+                "before": before,
+                "after": after,
+            },
+        )
+        return updated
+
+    await _run_database(settings, manage_device)
+    return RedirectResponse(
+        f"/portal/edge/{device_id}?organization={selected.organization_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
