@@ -1420,7 +1420,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         needs_input = False
         try:
             if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
-                planner_context = context.model_dump(mode="json")
+                planner_context = context.model_context_payload()
                 planner_context["request_source"] = "workspace"
                 planned_action = await plan_integration_action(
                     settings=settings,
