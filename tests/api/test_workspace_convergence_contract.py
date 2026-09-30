@@ -8,6 +8,7 @@ import pytest
 
 from terrasatch.config import Settings
 from terrasatch.main import create_app
+from terrasatch.satchy.schemas import SatchyContext
 from terrasatch.workspace.convergence import (
     build_capability_manifest,
     workspace_profile_payload,
@@ -21,6 +22,39 @@ def test_default_workspace_profile_is_legacy_and_discovery_safe() -> None:
     assert payload["operational_domain"] == "general"
     assert payload["workspace_template"] == "general"
     assert payload["discovery_state"] == {"status": "not_started"}
+
+
+def test_legacy_and_shadow_keep_convergence_out_of_model_context() -> None:
+    organization_id = uuid4()
+    site_id = uuid4()
+
+    legacy = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "legacy"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+    shadow = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "shadow"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+    agent_read = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "agent_read"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+
+    assert "workspace_profile" not in legacy.model_context_payload()
+    assert "capability_manifest" not in legacy.model_context_payload()
+    assert "workspace_profile" not in shadow.model_context_payload()
+    assert "capability_manifest" not in shadow.model_context_payload()
+    assert agent_read.model_context_payload()["workspace_profile"]["runtime_mode"] == "agent_read"
+    assert agent_read.model_context_payload()["capability_manifest"]["read"] == [
+        "weather.forecast.read"
+    ]
 
 
 def test_capability_manifest_only_exposes_runtime_ready_connections_and_edge_caps() -> None:
