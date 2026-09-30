@@ -49,8 +49,22 @@ SATELLITE_FOLLOW_UP = {
 }
 PAIN_FOLLOW_UP = {
     "losing_service": {"communicate", "navigate", "capture", "sync", "coordinate", "other"},
-    "locations": {"own_position", "team_positions", "incidents", "observations", "history", "other"},
-    "recording": {"notes_app", "paper", "photos", "radio_only", "multiple_places", "nowhere_consistent"},
+    "locations": {
+        "own_position",
+        "team_positions",
+        "incidents",
+        "observations",
+        "history",
+        "other",
+    },
+    "recording": {
+        "notes_app",
+        "paper",
+        "photos",
+        "radio_only",
+        "multiple_places",
+        "nowhere_consistent",
+    },
     "updating_others": {"radio", "text", "group_app", "call", "in_person", "mixed"},
     "switching_apps": {"two", "three_four", "five_six", "seven_plus"},
     "finding_later": {"difficult", "inconsistent", "okay", "easy"},
@@ -143,7 +157,13 @@ class SurveyResponseCreate(BaseModel):
             raise ValueError("Question IDs must use lowercase letters, numbers, or underscores")
         return normalized
 
-    @field_validator("comment", "tool_follow_up", "pain_follow_up", "contact_email", "contact_phone")
+    @field_validator(
+        "comment",
+        "tool_follow_up",
+        "pain_follow_up",
+        "contact_email",
+        "contact_phone",
+    )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
