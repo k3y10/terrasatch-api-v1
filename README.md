@@ -250,6 +250,28 @@ uv run terrasatch serve
 uv run terrasatch worker
 ```
 
+### Full isolated QA on Oracle
+
+Use the dedicated QA harness when validating a branch on the Oracle host:
+
+```bash
+cd /opt/terrasatch/api
+bash scripts/qa-oracle.sh
+```
+
+The harness builds a separate QA image and starts fresh PostGIS and Redis containers under an
+isolated Compose project. It does not publish host ports, does not load the production `.env`,
+does not touch the production database/Redis containers, and removes its QA containers and volumes
+after the run.
+
+The gate validates Ruff, Python compilation/imports, a single Alembic head, a fresh PostgreSQL
+migration through `head`, the complete pytest suite, the existing intelligence/STT and Edge
+coverage gates, OpenAPI/CLI contracts, deterministic fallback behavior, and the Satchy run schema.
+
+Set `TERRASATCH_QA_KEEP=1` to retain failed QA containers for inspection. The harness refuses a
+dirty Git working tree by default; `TERRASATCH_QA_ALLOW_DIRTY=1` is available only for deliberate
+local experiments.
+
 ## Oracle production deployment
 
 Production topology:
