@@ -61,6 +61,15 @@ def test_workspace_openapi_responses_are_explicitly_typed() -> None:
         assert response["$ref"].endswith(f"/{schema_name}")
 
 
+def test_checked_in_declarations_match_openapi_generator_exactly() -> None:
+    openapi = _openapi()
+    first = render_typescript_declarations(openapi)
+    second = render_typescript_declarations(openapi)
+
+    assert first == second
+    assert SDK_DTS.read_text(encoding="utf-8") == first
+
+
 def test_generated_declarations_cover_workspace_and_discovery_contracts() -> None:
     declarations = render_typescript_declarations(_openapi())
 
