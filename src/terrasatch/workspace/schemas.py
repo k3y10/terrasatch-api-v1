@@ -347,6 +347,7 @@ class DiscoveryPhaseEvidence(BaseModel):
 
 class DiscoveryEvidenceSummaryResponse(BaseModel):
     event_count: int = Field(ge=0)
+    active_event_count: int = Field(ge=0)
     signal_count: int = Field(ge=0)
     context_count: int = Field(ge=0)
     workflow_counts: DiscoveryEvidenceWorkflowCounts
