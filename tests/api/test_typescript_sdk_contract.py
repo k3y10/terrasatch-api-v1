@@ -1,7 +1,7 @@
 """OpenAPI and runtime contract gates for the shared TypeScript SDK."""
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 from terrasatch.config import Settings
 from terrasatch.main import create_app
@@ -79,7 +79,12 @@ def test_generated_declarations_cover_workspace_and_discovery_contracts() -> Non
     snapshot = declarations.split("export type WorkspaceSnapshotResponse =", 1)[1].split(
         "\n\n", 1
     )[0]
+    integrations = declarations.split(
+        "export type WorkspaceIntegrationCatalogItem =", 1
+    )[1].split("\n\n", 1)[0]
     assert "unknown" not in snapshot
+    assert "runtime_ready" in integrations
+    assert "capability_details" in integrations
 
 
 def test_checked_in_sdk_runtime_keeps_existing_workspace_and_realtime_paths() -> None:
