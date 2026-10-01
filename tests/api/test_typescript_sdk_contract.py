@@ -1,6 +1,7 @@
 """OpenAPI and runtime contract gates for the shared TypeScript SDK."""
 
 from pathlib import Path
+import json
 
 from terrasatch.config import Settings
 from terrasatch.main import create_app
@@ -9,6 +10,7 @@ from terrasatch.sdk.typescript import render_typescript_declarations
 ROOT = Path(__file__).resolve().parents[2]
 SDK_JS = ROOT / "sdk" / "typescript" / "index.js"
 SDK_DTS = ROOT / "sdk" / "typescript" / "index.d.ts"
+PACKAGE_JSON = ROOT / "package.json"
 
 
 def _openapi() -> dict[str, object]:
@@ -103,3 +105,13 @@ def test_checked_in_sdk_runtime_keeps_existing_workspace_and_realtime_paths() ->
 
     assert "resolveUrl?: (path: string) => string;" in declarations
     assert 'RealtimeTopic = "events" | "transmissions" | "transcripts"' in declarations
+
+
+def test_repository_exports_sdk_as_installable_package() -> None:
+    package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+
+    assert package["name"] == "@terrasatch/sdk"
+    assert package["type"] == "module"
+    assert package["sideEffects"] is False
+    assert package["exports"]["."]["types"] == "./sdk/typescript/index.d.ts"
+    assert package["exports"]["."]["import"] == "./sdk/typescript/index.js"
