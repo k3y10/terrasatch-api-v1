@@ -1,5 +1,5 @@
 // AUTO-GENERATED FROM TERRASATCH OPENAPI. DO NOT EDIT BY HAND.
-// schema-sha256: c50d99c7b852dd4d700b1ab13360224593807b376c50b5bb5657ca10001dcd80
+// schema-sha256: 900f19a96681c55d3fbe04a5530770cfbb798b8b5e16077bb24e4c141bfc936b
 
 export type ActiveMapContext = {
   center_latitude?: number | null;
@@ -63,8 +63,8 @@ export type Observation = {
 export type PlanCode = "field" | "team" | "operations" | "enterprise";
 
 export type SatchyChatResponse = {
-  action_id?: string | null;
-  action_status?: string | null;
+  action_id: string | null;
+  action_status: string | null;
   answer: string;
   approval_required: boolean;
   run_id: string;
@@ -72,32 +72,32 @@ export type SatchyChatResponse = {
 };
 
 export type SatchyRunResponse = {
-  completed_at?: string | null;
+  completed_at: string | null;
   created_at: string;
   id: string;
   input_text: string;
-  metadata?: Record<string, unknown>;
-  model?: string | null;
-  objective?: string | null;
+  metadata: Record<string, unknown>;
+  model: string | null;
+  objective: string | null;
   organization_id: string;
   request_id: string;
-  response_text?: string | null;
+  response_text: string | null;
   site_id: string;
   status: string;
-  steps?: SatchyRunStepResponse[];
+  steps: SatchyRunStepResponse[];
   updated_at: string;
-  user_id?: string | null;
+  user_id: string | null;
 };
 
 export type SatchyRunStepResponse = {
-  action_id?: string | null;
-  completed_at?: string | null;
+  action_id: string | null;
+  completed_at: string | null;
   created_at: string;
-  detail?: Record<string, unknown>;
+  detail: Record<string, unknown>;
   id: string;
   label: string;
   sequence: number;
-  source_refs?: Record<string, unknown>[];
+  source_refs: Record<string, unknown>[];
   status: string;
   type: string;
 };
@@ -118,30 +118,30 @@ export type SubscriptionResponse = {
 
 export type WorkspaceActionResponse = {
   id: string;
-  integration_execution?: Record<string, unknown>;
-  message?: string | null;
+  integration_execution: Record<string, unknown>;
+  message: string | null;
   reason: string;
-  source_id?: string | null;
+  source_id: string | null;
   status: string;
   type: string;
 };
 
 export type WorkspaceActionReviewResponse = {
   id: string;
-  integration_detail?: unknown | null;
-  integration_execution?: Record<string, unknown>;
+  integration_detail: unknown | null;
+  integration_execution: Record<string, unknown>;
   status: string;
 };
 
 export type WorkspaceCapabilityManifest = {
-  connected_providers?: string[];
-  edge?: string[];
-  edge_devices?: WorkspaceEdgeCapabilityDevice[];
-  physical?: string[];
+  connected_providers: string[];
+  edge: string[];
+  edge_devices: WorkspaceEdgeCapabilityDevice[];
+  physical: string[];
   policy: WorkspaceCapabilityPolicy;
-  read?: string[];
+  read: string[];
   runtime_mode: "legacy" | "shadow" | "agent_read" | "agent_propose";
-  write?: string[];
+  write: string[];
 };
 
 export type WorkspaceCapabilityPolicy = {
@@ -178,10 +178,10 @@ export type WorkspaceConvergenceUpdateResponse = {
 };
 
 export type WorkspaceDeviceSummary = {
-  agent_version?: string | null;
+  agent_version: string | null;
   enabled: boolean;
   id: string;
-  last_seen_at?: string | null;
+  last_seen_at: string | null;
   name: string;
 };
 
@@ -207,10 +207,10 @@ export type WorkspaceDiscoveryWorkflowCounts = {
 };
 
 export type WorkspaceEdgeCapabilityDevice = {
-  agent_version?: string | null;
-  capabilities?: string[];
+  agent_version: string | null;
+  capabilities: string[];
   id: string;
-  last_seen_at?: string | null;
+  last_seen_at: string | null;
   name: string;
   site_id: string;
 };
@@ -221,46 +221,46 @@ export type WorkspaceEngineSummary = {
 };
 
 export type WorkspaceFieldAssetResponse = {
-  capabilities?: string[];
-  controller_edge_device_id?: string | null;
+  capabilities: string[];
+  controller_edge_device_id: string | null;
   enabled: boolean;
   id: string;
-  location?: Record<string, unknown>;
+  location: Record<string, unknown>;
   name: string;
-  owner_user_id?: string | null;
-  policy?: Record<string, unknown>;
+  owner_user_id: string | null;
+  policy: Record<string, unknown>;
   provider: string;
-  site_id?: string | null;
+  site_id: string | null;
   state: string;
-  team_id?: string | null;
+  team_id: string | null;
   type: string;
 };
 
 export type WorkspaceIntegrationCatalogItem = {
   allowed: boolean;
-  allowed_scopes?: string[];
+  allowed_scopes: string[];
   auth: string;
   can_connect: boolean;
-  capabilities?: string[];
-  capability_details?: WorkspaceCapabilityResponse[];
+  capabilities: string[];
+  capability_details: WorkspaceCapabilityResponse[];
   category: string;
   connect_status: "managed" | "available" | "external_setup_required" | "needs_configuration" | "partner_required" | "coming_soon";
   connected: boolean;
-  connected_scopes?: string[];
+  connected_scopes: string[];
   description: string;
   key: string;
   name: string;
   requires_admin: boolean;
   runtime_ready: boolean;
-  scopes?: string[];
+  scopes: string[];
   setup_status: "managed" | "planned" | "available";
   support_status: "managed" | "supported" | "partner_required" | "coming_soon";
 };
 
 export type WorkspaceIntegrationsResponse = {
-  catalog?: WorkspaceIntegrationCatalogItem[];
-  connections?: Record<string, unknown>[];
-  devices?: WorkspaceDeviceSummary[];
+  catalog: WorkspaceIntegrationCatalogItem[];
+  connections: Record<string, unknown>[];
+  devices: WorkspaceDeviceSummary[];
   engine: WorkspaceEngineSummary;
 };
 
@@ -269,7 +269,7 @@ export type WorkspaceLoginResponse = {
 };
 
 export type WorkspaceLogoutResponse = {
-  signed_out?: boolean;
+  signed_out: boolean;
 };
 
 export type WorkspaceMessageResponse = {
@@ -291,37 +291,37 @@ export type WorkspaceOrganizationSummary = {
 export type WorkspaceProfileResponse = {
   discovery_state: WorkspaceDiscoveryState;
   operational_domain: string;
-  preferred_map_layers?: string[];
-  recommended_modules?: string[];
+  preferred_map_layers: string[];
+  recommended_modules: string[];
   runtime_mode: "legacy" | "shadow" | "agent_read" | "agent_propose";
-  workflow_preferences?: string[];
+  workflow_preferences: string[];
   workspace_template: string;
 };
 
 export type WorkspaceRecordInterpretation = {
   confidence: number;
   id: string;
-  latitude?: number | null;
-  location?: string | null;
-  longitude?: number | null;
-  spatial_status?: string | null;
+  latitude: number | null;
+  location: string | null;
+  longitude: number | null;
+  spatial_status: string | null;
   summary: string;
   type: string;
 };
 
 export type WorkspaceRecordResponse = {
   id: string;
-  interpretations?: WorkspaceRecordInterpretation[];
-  location?: unknown | null;
-  original?: string | null;
+  interpretations: WorkspaceRecordInterpretation[];
+  location: unknown | null;
+  original: string | null;
   source: string;
-  speaker?: string | null;
+  speaker: string | null;
   timestamp: string;
 };
 
 export type WorkspaceSessionResponse = {
   csrf_token: string;
-  organizations?: WorkspaceOrganizationSummary[];
+  organizations: WorkspaceOrganizationSummary[];
   user: WorkspaceUserSummary | null;
 };
 
@@ -331,24 +331,24 @@ export type WorkspaceSiteSummary = {
 };
 
 export type WorkspaceSnapshotResponse = {
-  actions?: WorkspaceActionResponse[];
-  assets?: WorkspaceFieldAssetResponse[];
+  actions: WorkspaceActionResponse[];
+  assets: WorkspaceFieldAssetResponse[];
   convergence: WorkspaceConvergenceResponse;
   integrations: WorkspaceIntegrationsResponse;
-  messages?: WorkspaceMessageResponse[];
-  modules?: string[];
-  records?: WorkspaceRecordResponse[];
+  messages: WorkspaceMessageResponse[];
+  modules: string[];
+  records: WorkspaceRecordResponse[];
   role: string;
-  satchy_preferences?: Record<string, unknown>;
-  sites?: WorkspaceSiteSummary[];
+  satchy_preferences: Record<string, unknown>;
+  sites: WorkspaceSiteSummary[];
   subscription: SubscriptionResponse;
-  teams?: WorkspaceTeamSummary[];
+  teams: WorkspaceTeamSummary[];
 };
 
 export type WorkspaceTeamSummary = {
   id: string;
   name: string;
-  site_id?: string | null;
+  site_id: string | null;
 };
 
 export type WorkspaceUserSummary = {
