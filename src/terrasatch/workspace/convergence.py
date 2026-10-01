@@ -109,7 +109,9 @@ def normalize_discovery_state(value: dict[str, object] | None) -> dict[str, obje
         phases = dict(normalized["phases"])
         for phase in _DISCOVERY_PHASES:
             candidate = raw_phases.get(phase)
-            if candidate in {item.value for item in DiscoveryPhaseState}:
+            if isinstance(candidate, str) and candidate in {
+                item.value for item in DiscoveryPhaseState
+            }:
                 phases[phase] = candidate
         normalized["phases"] = phases
 
