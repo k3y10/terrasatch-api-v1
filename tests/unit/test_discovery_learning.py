@@ -1,5 +1,6 @@
 """Bounded workflow-pattern learning for Satchy Discovery."""
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ async def _signal(
     site_id,
     index: int,
     event_type: str = "OBSERVATION",
+    occurred_at: datetime | None = None,
 ) -> WorkspaceDiscoveryEvent:
     event, duplicate = await record_discovery_event(
         session,
@@ -41,6 +43,7 @@ async def _signal(
             "agent_id": None,
             "channel_id": None,
         },
+        occurred_at=occurred_at,
     )
     assert duplicate is False
     return event
@@ -310,3 +313,69 @@ async def test_learning_ignores_generic_signals_without_specific_event_pattern()
         await session.commit()
 
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_learning_ignores_signal_support_older_than_discovery_window() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Stale learning account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Stale learning org",
+            slug=f"stale-learn-{uuid4().hex[:8]}",
+        )
+        session.add(organization)
+        await session.flush()
+        site = Site(
+            organization_id=organization.id,
+            name="Stale learning site",
+            slug=f"stale-site-{uuid4().hex[:8]}",
+        )
+        session.add(site)
+        await session.flush()
+
+        await record_discovery_event(
+            session,
+            organization_id=organization.id,
+            site_id=site.id,
+            event_type="context_observed",
+            source_type="satchy_workspace",
+            source_ref="satchy_run:current-context",
+            dedupe_key="auto:context:satchy_run:current-context",
+            evidence={},
+        )
+        stale_at = datetime.now(UTC) - timedelta(days=15)
+        for index in range(1, 4):
+            await _signal(
+                session,
+                organization_id=organization.id,
+                site_id=site.id,
+                index=index,
+                occurred_at=stale_at,
+            )
+
+        created = await detect_discovery_workflow_candidates(
+            session,
+            organization_id=organization.id,
+            site_id=site.id,
+        )
+        assert created == []
+
+        summary = await discovery_evidence_summary(
+            session,
+            organization_id=organization.id,
+        )
+        assert summary["signal_count"] == 3
+        assert summary["phase_evidence"]["listen"] is True
+        assert summary["phase_evidence"]["learn"] is False
+
+        await session.commit()
+
+    await engine.dispose()
+
