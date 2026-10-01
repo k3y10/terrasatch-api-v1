@@ -119,6 +119,33 @@ Automatic capture is best-effort and isolated in a database savepoint. Discovery
 
 This phase still does not automatically create `workflow_identified`, `workflow_testing`, `workflow_approved`, or `workflow_rejected` events. Workflow learning remains a separate bounded pattern-detection phase.
 
+## Bounded LEARN detection
+
+Satchy may create a `workflow_identified` candidate only when a repeated pattern is supported by both LISTEN and WATCH evidence.
+
+The first detector is intentionally conservative:
+
+- at least **3** matching canonical signal events
+- all matching signals are scoped to the same site
+- the signals share the same original source classification and specific structured operational-event type set
+- at least one active `context_observed` event exists for that site
+- generic-only `GENERAL_UPDATE` and `RADIO_TRANSMISSION` classifications are ignored
+- at most 12 strongest signal patterns per site are considered
+- workflow keys are deterministic hashes of site + source + structured event types
+
+Automatic LEARN evidence contains references and counts, not transcript/chat content. The first candidate starts at confidence 0.65 and can be revised only at bounded support milestones:
+
+- 3 observations → 0.65
+- 5 observations → 0.72
+- 10 observations → 0.80
+- 20 observations → 0.88
+
+A milestone revision supersedes the prior `workflow_identified` evidence while preserving the complete history. Intermediate observations do not create new workflow events.
+
+Once a reviewer moves a candidate to `workflow_testing`, `workflow_approved`, or `workflow_rejected`, the automatic detector stops revising that workflow. LEARN never moves a candidate into testing, approval, rejection, or execution by itself.
+
+The detector runs after either a newly captured signal or newly captured workspace-context event. This means LISTEN may occur before WATCH or WATCH may occur before the threshold-crossing signal; either direction can unlock the same bounded candidate.
+
 ## Workspace API
 
 Authenticated members may read:
