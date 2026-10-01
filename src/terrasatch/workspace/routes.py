@@ -206,7 +206,10 @@ async def submit_mobile_observation(
     )
 
 
-@router.post("/organizations/{organization_id}/preferences", response_model=WorkspacePreferencesResponse)
+@router.post(
+    "/organizations/{organization_id}/preferences",
+    response_model=WorkspacePreferencesResponse,
+)
 async def save_preferences(organization_id: UUID, payload: ModulePreferences, request: Request):
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
@@ -234,7 +237,10 @@ async def save_preferences(organization_id: UUID, payload: ModulePreferences, re
         }
 
 
-@router.get("/organizations/{organization_id}/convergence", response_model=WorkspaceConvergenceResponse)
+@router.get(
+    "/organizations/{organization_id}/convergence",
+    response_model=WorkspaceConvergenceResponse,
+)
 async def workspace_convergence(
     organization_id: UUID,
     request: Request,
