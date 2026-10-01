@@ -80,7 +80,7 @@ def test_generated_declarations_cover_workspace_and_discovery_contracts() -> Non
         "export type SatchyChatResponse =",
         "export type SatchyRunResponse =",
         "export class TerraSatchClient",
-        "connectEvents(options:",
+        "connectEvents(options?:",
     }
     for marker in required:
         assert marker in declarations
@@ -94,6 +94,12 @@ def test_generated_declarations_cover_workspace_and_discovery_contracts() -> Non
     assert "unknown" not in snapshot
     assert "runtime_ready" in integrations
     assert "capability_details" in integrations
+
+    runs = declarations.split("export type SatchyRunResponse =", 1)[1].split(
+        "\n\n", 1
+    )[0]
+    assert "steps: SatchyRunStepResponse[];" in runs
+    assert "steps?:" not in runs
 
 
 def test_checked_in_sdk_runtime_keeps_existing_workspace_and_realtime_paths() -> None:
