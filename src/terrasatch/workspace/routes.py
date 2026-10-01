@@ -95,6 +95,7 @@ from terrasatch.workspace.convergence import (
     build_capability_manifest,
     get_or_create_workspace_profile,
     get_workspace_profile,
+    update_discovery_state,
     workspace_profile_payload,
 )
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
@@ -116,6 +117,26 @@ class ModulePreferences(BaseModel):
     satchy: SatchyPreferenceSettings | None = None
 
 
+class DiscoveryPhaseUpdate(BaseModel):
+    listen: Literal["off", "active", "testing", "ready"] | None = None
+    watch: Literal["off", "active", "testing", "ready"] | None = None
+    learn: Literal["off", "active", "testing", "ready"] | None = None
+    adapt: Literal["off", "active", "testing", "ready"] | None = None
+
+
+class DiscoveryWorkflowCountUpdate(BaseModel):
+    identified: int | None = Field(default=None, ge=0)
+    testing: int | None = Field(default=None, ge=0)
+    approved: int | None = Field(default=None, ge=0)
+
+
+class DiscoveryStateUpdate(BaseModel):
+    status: Literal["not_started", "active", "complete", "integrated"] | None = None
+    day: int | None = Field(default=None, ge=0, le=14)
+    phases: DiscoveryPhaseUpdate | None = None
+    workflow_counts: DiscoveryWorkflowCountUpdate | None = None
+
+
 class WorkspaceConvergenceUpdate(BaseModel):
     operational_domain: str | None = Field(
         default=None, min_length=1, max_length=64, pattern=r"^[a-z0-9_.-]+$"
@@ -127,6 +148,7 @@ class WorkspaceConvergenceUpdate(BaseModel):
     recommended_modules: list[str] | None = Field(default=None, max_length=32)
     preferred_map_layers: list[str] | None = Field(default=None, max_length=64)
     workflow_preferences: list[str] | None = Field(default=None, max_length=64)
+    discovery: DiscoveryStateUpdate | None = None
 
 
 @router.post(
@@ -272,6 +294,22 @@ async def update_workspace_convergence(
             profile.preferred_map_layers = list(dict.fromkeys(payload.preferred_map_layers))
         if payload.workflow_preferences is not None:
             profile.workflow_preferences = list(dict.fromkeys(payload.workflow_preferences))
+        if payload.discovery is not None:
+            profile.discovery_state = update_discovery_state(
+                profile.discovery_state,
+                status=payload.discovery.status,
+                day=payload.discovery.day,
+                phase_updates=(
+                    payload.discovery.phases.model_dump(exclude_none=True)
+                    if payload.discovery.phases is not None
+                    else None
+                ),
+                workflow_count_updates=(
+                    payload.discovery.workflow_counts.model_dump(exclude_none=True)
+                    if payload.discovery.workflow_counts is not None
+                    else None
+                ),
+            )
         await session.commit()
         return {"profile": workspace_profile_payload(profile)}
 
