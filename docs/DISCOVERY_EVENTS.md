@@ -103,6 +103,22 @@ The summary also reports whether evidence exists for each Satchy phase:
 
 These evidence flags do **not** grant runtime permissions or authorize consequential actions.
 
+## Automatic capture
+
+The first automatic capture layer records evidence only from already-authorized, canonical TerraSatch flows:
+
+- a successful, non-duplicate canonical transmission records one `signal_observed` event
+- a newly created Satchy workspace run records one `context_observed` event after authorized context is loaded
+- retries reuse stable transmission/run identities and do not increase Discovery counts
+
+Canonical signal capture therefore covers inputs that already converge through `ingest_transmission`, including Edge/radio, Garmin inReach, TerraSatch Mobile, simulator inputs, and future STT submissions using the same pipeline.
+
+Automatic evidence intentionally avoids duplicating source content. Signal evidence stores IDs, source classification, event counts/types, and agent/channel references; it does not copy transcript text. Workspace context evidence stores run/request IDs, source/provider/capability counts, and whether an active map was present; it does not copy chat messages, map coordinates, or selected map content.
+
+Automatic capture is best-effort and isolated in a database savepoint. Discovery evidence failure is logged but must not break the canonical ingest or Satchy request that produced the evidence.
+
+This phase still does not automatically create `workflow_identified`, `workflow_testing`, `workflow_approved`, or `workflow_rejected` events. Workflow learning remains a separate bounded pattern-detection phase.
+
 ## Workspace API
 
 Authenticated members may read:

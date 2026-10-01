@@ -75,6 +75,7 @@ from terrasatch.satchy.assets import (
     update_field_asset,
 )
 from terrasatch.satchy.context import build_satchy_context
+from terrasatch.satchy.discovery_capture import capture_workspace_context_discovery_evidence
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.models import SatchyRun
 from terrasatch.satchy.runs import (
@@ -1571,6 +1572,19 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                 "run_id": str(run.id),
                 "run_status": run.status,
             }
+
+        await capture_workspace_context_discovery_evidence(
+            session,
+            organization_id=organization_id,
+            site_id=selected_site.id,
+            user_id=user.id,
+            run_id=run.id,
+            request_id=request_id,
+            active_map=payload.active_map is not None,
+            field_source_count=len(context.evidence),
+            connected_provider_count=len(context.connected_providers),
+            available_capability_count=len(context.available_capabilities),
+        )
 
         await append_run_step(
             session,

@@ -45,6 +45,7 @@ from terrasatch.radio.schemas import (
     ChannelUpdateRequest,
     TransmissionCreateRequest,
 )
+from terrasatch.satchy.discovery_capture import capture_transmission_discovery_evidence
 
 
 async def _site_for_org(
@@ -638,6 +639,12 @@ async def ingest_transmission(
         callsign_hint=payload.callsign,
         operational_event=events[0] if events else None,
         settings=settings,
+    )
+    await capture_transmission_discovery_evidence(
+        session,
+        transmission=transmission,
+        transcript=transcript,
+        events=events,
     )
     return transmission, transcript, events, False
 
