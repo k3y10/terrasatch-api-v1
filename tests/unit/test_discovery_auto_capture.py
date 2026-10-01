@@ -167,6 +167,40 @@ async def test_canonical_signal_and_workspace_context_are_captured_idempotently(
             "adapt": False,
         }
 
+        for index in (2, 3):
+            extra_payload = TransmissionCreateRequest(
+                site_id=site.id,
+                text="Recent shooting cracks below the ridgeline.",
+                source="terrasatch-edge-radio",
+                source_message_id=f"auto-discovery-signal-00{index}",
+            )
+            extra = await ingest_transmission(
+                session,
+                settings=settings,
+                organization_id=organization.id,
+                payload=extra_payload,
+            )
+            assert extra[3] is False
+
+        learned = await discovery_evidence_summary(
+            session,
+            organization_id=organization.id,
+        )
+        assert learned["signal_count"] == 3
+        assert learned["context_count"] == 1
+        assert learned["workflow_counts"] == {
+            "identified": 1,
+            "testing": 0,
+            "approved": 0,
+            "rejected": 0,
+        }
+        assert learned["phase_evidence"] == {
+            "listen": True,
+            "watch": True,
+            "learn": True,
+            "adapt": False,
+        }
+
         await session.commit()
 
     await engine.dispose()
@@ -228,6 +262,93 @@ async def test_discovery_capture_failure_does_not_break_parent_transaction(monke
         refreshed = await session.get(Organization, organization.id)
         assert refreshed is not None
         assert refreshed.name == "Capture resilience org still writable"
+
+    await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_context_capture_unlocks_preexisting_signal_pattern() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Context-triggered learning account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Context-triggered learning org",
+            slug=f"context-learn-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Context learning user",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        site = Site(
+            organization_id=organization.id,
+            name="Context-triggered site",
+            slug=f"context-learn-site-{uuid4().hex[:8]}",
+        )
+        session.add(site)
+        await session.flush()
+
+        for index in range(1, 4):
+            session.add(
+                WorkspaceDiscoveryEvent(
+                    organization_id=organization.id,
+                    site_id=site.id,
+                    event_type="signal_observed",
+                    source_type="canonical_transmission",
+                    source_ref=f"transmission:pre-context-{index}",
+                    dedupe_key=f"auto:signal:transmission:pre-context-{index}",
+                    evidence={
+                        "transmission_id": f"pre-context-{index}",
+                        "transcript_id": f"pre-context-transcript-{index}",
+                        "source_type": "terrasatch-edge-radio",
+                        "operational_event_count": 1,
+                        "operational_event_types": ["OBSERVATION"],
+                        "agent_id": None,
+                        "channel_id": None,
+                    },
+                )
+            )
+        await session.flush()
+
+        before = await discovery_evidence_summary(
+            session,
+            organization_id=organization.id,
+        )
+        assert before["signal_count"] == 3
+        assert before["context_count"] == 0
+        assert before["phase_evidence"]["learn"] is False
+
+        captured = await capture_workspace_context_discovery_evidence(
+            session,
+            organization_id=organization.id,
+            site_id=site.id,
+            user_id=user.id,
+            run_id=uuid4(),
+            request_id=uuid4(),
+            active_map=False,
+            field_source_count=3,
+            connected_provider_count=0,
+            available_capability_count=0,
+        )
+        assert captured is not None
+
+        after = await discovery_evidence_summary(
+            session,
+            organization_id=organization.id,
+        )
+        assert after["context_count"] == 1
+        assert after["workflow_counts"]["identified"] == 1
+        assert after["phase_evidence"]["learn"] is True
+
+        await session.commit()
 
     await engine.dispose()
 
