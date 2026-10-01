@@ -189,10 +189,43 @@ export type WorkspaceEngineSummary = {
   model: string;
 };
 
+export type WorkspaceCapabilityResponse = {
+  key: string;
+  label: string;
+  access: "read" | "write";
+};
+
+export type WorkspaceIntegrationCatalogItem = {
+  key: string;
+  name: string;
+  category: string;
+  auth: string;
+  setup_status: "managed" | "planned" | "available";
+  support_status: "managed" | "supported" | "partner_required" | "coming_soon";
+  connect_status:
+    | "managed"
+    | "available"
+    | "external_setup_required"
+    | "needs_configuration"
+    | "partner_required"
+    | "coming_soon";
+  scopes: string[];
+  allowed_scopes: string[];
+  allowed: boolean;
+  can_connect: boolean;
+  requires_admin: boolean;
+  connected: boolean;
+  connected_scopes: string[];
+  runtime_ready: boolean;
+  capabilities: string[];
+  capability_details: WorkspaceCapabilityResponse[];
+  description: string;
+};
+
 export type WorkspaceIntegrationsResponse = {
   devices: WorkspaceDeviceSummary[];
   engine: WorkspaceEngineSummary;
-  catalog: Record<string, unknown>[];
+  catalog: WorkspaceIntegrationCatalogItem[];
   connections: Record<string, unknown>[];
 };
 
