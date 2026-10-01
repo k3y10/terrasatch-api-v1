@@ -142,7 +142,22 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             "recommended_modules": [],
             "preferred_map_layers": [],
             "workflow_preferences": [],
-            "discovery_state": {"status": "not_started"},
+            "discovery_state": {
+                "status": "not_started",
+                "duration_days": 14,
+                "day": 0,
+                "phases": {
+                    "listen": "off",
+                    "watch": "off",
+                    "learn": "off",
+                    "adapt": "off",
+                },
+                "workflow_counts": {
+                    "identified": 0,
+                    "testing": 0,
+                    "approved": 0,
+                },
+            },
         }
         assert own.json()["convergence"]["capability_manifest"]["runtime_mode"] == "legacy"
         assert own.json()["convergence"]["capability_manifest"]["policy"][
@@ -362,11 +377,33 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
                 "recommended_modules": ["Map", "Radio Log", "Observations"],
                 "preferred_map_layers": ["forecast", "observations"],
                 "workflow_preferences": ["observation_review", "handoff"],
+                "discovery": {
+                    "status": "active",
+                    "day": 5,
+                    "workflow_counts": {
+                        "identified": 3,
+                        "testing": 1,
+                    },
+                },
             },
             headers=headers,
         )
         assert convergence_changed.status_code == 200
-        assert convergence_changed.json()["profile"]["runtime_mode"] == "shadow"
+        changed_profile = convergence_changed.json()["profile"]
+        assert changed_profile["runtime_mode"] == "shadow"
+        assert changed_profile["discovery_state"]["status"] == "active"
+        assert changed_profile["discovery_state"]["day"] == 5
+        assert changed_profile["discovery_state"]["phases"] == {
+            "listen": "active",
+            "watch": "active",
+            "learn": "active",
+            "adapt": "testing",
+        }
+        assert changed_profile["discovery_state"]["workflow_counts"] == {
+            "identified": 3,
+            "testing": 1,
+            "approved": 0,
+        }
 
         converged_workspace = (
             await client.get(f"/api/v1/workspace/organizations/{organization_id}")
