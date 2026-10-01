@@ -182,10 +182,10 @@ class WorkspaceTeamSummary(BaseModel):
 
 class WorkspaceFieldAssetResponse(BaseModel):
     id: UUID
-    site_id: UUID | None = None
-    team_id: UUID | None = None
-    owner_user_id: UUID | None = None
-    controller_edge_device_id: UUID | None = None
+    site_id: UUID | None
+    team_id: UUID | None
+    owner_user_id: UUID | None
+    controller_edge_device_id: UUID | None
     name: str
     type: str
     provider: str
@@ -250,8 +250,8 @@ class WorkspaceSnapshotResponse(BaseModel):
 
 class SatchyChatResponse(BaseModel):
     answer: str
-    action_id: UUID | None = None
-    action_status: str | None = None
+    action_id: UUID | None
+    action_status: str | None
     approval_required: bool
     run_id: UUID
     run_status: str
@@ -261,7 +261,7 @@ class WorkspaceActionReviewResponse(BaseModel):
     id: UUID
     status: str
     integration_detail: object | None
-    integration_execution: dict[str, object] = Field(default_factory=dict)
+    integration_execution: dict[str, object]
 
 
 class WorkspaceObservationResponse(BaseModel):
