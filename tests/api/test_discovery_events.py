@@ -242,6 +242,14 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
         }
         labels = {item["key"]: item["label"] for item in summary["workflows"]}
         assert labels["radio_to_record"] == "Radio to supervisor review to archived record"
+        radio_workflow = next(
+            item
+            for item in summary["workflows"]
+            if item["key"] == "radio_to_record"
+        )
+        assert radio_workflow["state_event_id"] == str(approved_event.id)
+        assert radio_workflow["latest_event_id"] == str(late_revision.id)
+        assert radio_workflow["revision_count"] == 2
 
         approved = await list_discovery_events(
             session,
