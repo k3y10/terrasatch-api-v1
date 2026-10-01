@@ -22,6 +22,7 @@ def upgrade() -> None:
         sa.Column("organization_id", sa.Uuid(), nullable=False),
         sa.Column("site_id", sa.Uuid(), nullable=True),
         sa.Column("actor_user_id", sa.Uuid(), nullable=True),
+        sa.Column("supersedes_event_id", sa.Uuid(), nullable=True),
         sa.Column("event_type", sa.String(length=48), nullable=False),
         sa.Column("workflow_key", sa.String(length=128), nullable=True),
         sa.Column("workflow_label", sa.String(length=255), nullable=True),
@@ -68,11 +69,21 @@ def upgrade() -> None:
             ["users.id"],
             ondelete="SET NULL",
         ),
+        sa.ForeignKeyConstraint(
+            ["supersedes_event_id"],
+            ["workspace_discovery_events.id"],
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "organization_id",
             "dedupe_key",
             name="uq_workspace_discovery_events_org_dedupe",
+        ),
+        sa.UniqueConstraint(
+            "organization_id",
+            "supersedes_event_id",
+            name="uq_workspace_discovery_events_org_supersedes",
         ),
     )
     op.create_index(
