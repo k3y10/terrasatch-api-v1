@@ -98,8 +98,19 @@ from terrasatch.workspace.convergence import (
     update_discovery_state,
     workspace_profile_payload,
 )
+from terrasatch.workspace.discovery import (
+    DiscoveryEventType,
+    discovery_event_payload,
+    discovery_evidence_summary,
+    list_discovery_events,
+    record_discovery_event,
+)
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 from terrasatch.workspace.schemas import (
+    DiscoveryEventCreate,
+    DiscoveryEventCreateResponse,
+    DiscoveryEventResponse,
+    DiscoveryEvidenceSummaryResponse,
     SatchyChatResponse,
     WorkspaceActionReviewResponse,
     WorkspaceConvergenceResponse,
@@ -333,6 +344,117 @@ async def update_workspace_convergence(
             )
         await session.commit()
         return {"profile": workspace_profile_payload(profile)}
+
+
+@router.get(
+    "/organizations/{organization_id}/discovery",
+    response_model=DiscoveryEvidenceSummaryResponse,
+)
+async def discovery_summary(
+    organization_id: UUID,
+    request: Request,
+    response: Response,
+):
+    """Return evidence-derived Discovery counts without mutating lifecycle state."""
+
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        await access(request, session, organization_id)
+        return jsonable_encoder(
+            await discovery_evidence_summary(
+                session,
+                organization_id=organization_id,
+            )
+        )
+
+
+@router.get(
+    "/organizations/{organization_id}/discovery/events",
+    response_model=list[DiscoveryEventResponse],
+)
+async def discovery_events(
+    organization_id: UUID,
+    request: Request,
+    response: Response,
+    event_type: DiscoveryEventType | None = Query(default=None),
+    workflow_key: str | None = Query(default=None, max_length=128),
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    """List append-only Discovery evidence visible to this workspace member."""
+
+    response.headers["Cache-Control"] = "no-store"
+    async with create_session_factory(request.app.state.settings)() as session:
+        await access(request, session, organization_id)
+        events = await list_discovery_events(
+            session,
+            organization_id=organization_id,
+            event_type=event_type,
+            workflow_key=workflow_key,
+            limit=limit,
+        )
+        return jsonable_encoder([discovery_event_payload(event) for event in events])
+
+
+@router.post(
+    "/organizations/{organization_id}/discovery/events",
+    response_model=DiscoveryEventCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_discovery_event(
+    organization_id: UUID,
+    payload: DiscoveryEventCreate,
+    request: Request,
+):
+    """Append manually certified Discovery evidence; system capture uses the service directly."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Admin access required")
+        await writable(session, membership)
+
+        if payload.site_id is not None:
+            site = await session.scalar(
+                select(Site).where(
+                    Site.id == payload.site_id,
+                    Site.organization_id == organization_id,
+                    Site.enabled.is_(True),
+                )
+            )
+            if site is None:
+                raise HTTPException(404, "Site not found")
+
+        if (
+            payload.event_type.startswith("workflow_")
+            and payload.workflow_key is None
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "workflow_key is required for workflow Discovery events",
+            )
+
+        event, duplicate = await record_discovery_event(
+            session,
+            organization_id=organization_id,
+            event_type=payload.event_type,
+            source_type="manual",
+            site_id=payload.site_id,
+            actor_user_id=user.id,
+            workflow_key=payload.workflow_key,
+            workflow_label=payload.workflow_label,
+            source_ref=payload.source_ref,
+            dedupe_key=payload.dedupe_key,
+            confidence=payload.confidence,
+            evidence=payload.evidence,
+        )
+        await session.commit()
+        return jsonable_encoder(
+            {
+                "event": discovery_event_payload(event),
+                "duplicate": duplicate,
+            }
+        )
 
 
 class Login(BaseModel):
