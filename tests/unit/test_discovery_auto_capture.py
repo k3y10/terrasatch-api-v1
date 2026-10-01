@@ -78,7 +78,7 @@ async def test_canonical_signal_and_workspace_context_are_captured_idempotently(
         assert len(signal_events) == 1
         signal = signal_events[0]
         assert signal.site_id == site.id
-        assert signal.source_type == "terrasatch-edge-radio"
+        assert signal.source_type == "canonical_transmission"
         assert signal.source_ref == f"transmission:{transmission.id}"
         assert signal.dedupe_key == f"auto:signal:transmission:{transmission.id}"
         assert signal.evidence == {
