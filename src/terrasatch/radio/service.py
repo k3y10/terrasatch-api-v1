@@ -36,7 +36,6 @@ from terrasatch.radio.models import (
     Transcript,
     Transmission,
 )
-from terrasatch.satchy.discovery_capture import capture_transmission_discovery_evidence
 from terrasatch.radio.schemas import (
     AgentCreateRequest,
     AgentUpdateRequest,
@@ -46,6 +45,7 @@ from terrasatch.radio.schemas import (
     ChannelUpdateRequest,
     TransmissionCreateRequest,
 )
+from terrasatch.satchy.discovery_capture import capture_transmission_discovery_evidence
 
 
 async def _site_for_org(
