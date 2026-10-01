@@ -51,10 +51,10 @@ PY
 
 uv pip check
 
-printf '\n[1/10] Ruff\n'
+printf '\n[1/11] Ruff\n'
 ruff check src tests migrations
 
-printf '\n[2/10] Compile/import smoke\n'
+printf '\n[2/11] Compile/import smoke\n'
 python -m compileall -q src tests migrations
 python - <<'PY'
 import terrasatch
@@ -78,28 +78,31 @@ print(f"Transmission contract: {TransmissionCreateRequest.__name__}")
 print(f"Satchy run models: {SatchyRun.__name__}, {SatchyRunStep.__name__}")
 PY
 
-printf '\n[3/10] Alembic single-head graph\n'
+printf '\n[3/11] Alembic single-head graph\n'
 head_count="$(alembic heads | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
 [[ "$head_count" == "1" ]] || die "Expected exactly one Alembic head, found $head_count."
 alembic heads
 
-printf '\n[4/10] Fresh PostgreSQL migration to head\n'
+printf '\n[4/11] Fresh PostgreSQL migration to head\n'
 alembic upgrade head
 alembic current
 
-printf '\n[5/10] Complete repository regression suite\n'
+printf '\n[5/11] Complete repository regression suite\n'
 pytest
 
 QA_CACHE_ROOT="${XDG_CACHE_HOME:-/tmp}/terrasatch"
 mkdir -p "$QA_CACHE_ROOT"
 
-printf '\n[6/10] Satchy intelligence/STT contract coverage gate (>=80%%)\n'
+printf '\n[6/11] Satchy intelligence/STT contract coverage gate (>=80%%)\n'
 pytest   tests/unit/test_intelligence.py   tests/unit/test_ollama_provider.py   tests/unit/test_spatial.py   tests/unit/test_transmission_stt_provenance.py   --cov=terrasatch.intelligence.core   --cov=terrasatch.intelligence.providers   --cov=terrasatch.intelligence.spatial   --cov=terrasatch.radio.schemas   --cov-report=term-missing   --cov-report="xml:$QA_CACHE_ROOT/api-changed-code-coverage.xml"   --cov-fail-under=80
 
-printf '\n[7/10] Edge command lifecycle coverage gate (>=80%%)\n'
+printf '\n[7/11] Edge command lifecycle coverage gate (>=80%%)\n'
 COVERAGE_FILE="$QA_CACHE_ROOT/api-command-lifecycle.coverage" pytest   --cov=terrasatch.edge.command_service   --cov=terrasatch.edge.schemas   --cov=terrasatch.actions.state   --cov-report=term-missing   --cov-fail-under=80
 
-printf '\n[8/10] CLI/OpenAPI smoke\n'
+printf '\n[8/11] TypeScript SDK/OpenAPI contract gate\n'
+pytest tests/api/test_typescript_sdk_contract.py
+
+printf '\n[9/11] CLI/OpenAPI smoke\n'
 terrasatch --help >/dev/null
 python - <<'PY'
 from terrasatch.config import Settings
@@ -120,7 +123,7 @@ if missing:
 print("OpenAPI smoke OK")
 PY
 
-printf '\n[9/10] Deterministic fallback smoke\n'
+printf '\n[10/11] Deterministic fallback smoke\n'
 python - <<'PY'
 import asyncio
 from terrasatch.config import Settings
@@ -140,7 +143,7 @@ async def main() -> None:
 asyncio.run(main())
 PY
 
-printf '\n[10/10] Satchy run schema smoke\n'
+printf '\n[11/11] Satchy run schema smoke\n'
 python - <<'PY'
 from terrasatch.satchy.schemas import SatchyRunResponse, SatchyRunStepResponse
 
