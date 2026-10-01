@@ -78,7 +78,7 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             source_ref="map-1",
             dedupe_key="context:map-1",
         )
-        await record_discovery_event(
+        identified, _ = await record_discovery_event(
             session,
             organization_id=organization.id,
             event_type="workflow_identified",
@@ -86,14 +86,61 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             workflow_key="radio_to_record",
             workflow_label="Radio observation to record",
             dedupe_key="workflow:radio_to_record:identified",
+            evidence={"steps": ["radio", "record"]},
         )
+        revised, revised_duplicate = await record_discovery_event(
+            session,
+            organization_id=organization.id,
+            event_type="workflow_identified",
+            source_type="satchy",
+            workflow_key="radio_to_record",
+            workflow_label="Radio to supervisor review to record",
+            dedupe_key="workflow:radio_to_record:identified:v2",
+            evidence={"steps": ["radio", "supervisor_review", "record"]},
+            supersedes_event_id=identified.id,
+        )
+        assert revised_duplicate is False
+        assert revised.supersedes_event_id == identified.id
+
+        with pytest.raises(ValueError, match="same workflow_key"):
+            await record_discovery_event(
+                session,
+                organization_id=organization.id,
+                event_type="workflow_identified",
+                source_type="satchy",
+                workflow_key="different_workflow",
+                dedupe_key="workflow:different:bad-revision",
+                supersedes_event_id=identified.id,
+            )
+
+        with pytest.raises(ValueError, match="not found in this organization"):
+            await record_discovery_event(
+                session,
+                organization_id=uuid4(),
+                event_type="workflow_identified",
+                source_type="satchy",
+                workflow_key="radio_to_record",
+                dedupe_key="workflow:cross-org:bad-revision",
+                supersedes_event_id=revised.id,
+            )
+
+        with pytest.raises(ValueError, match="already been superseded"):
+            await record_discovery_event(
+                session,
+                organization_id=organization.id,
+                event_type="workflow_identified",
+                source_type="satchy",
+                workflow_key="radio_to_record",
+                dedupe_key="workflow:radio_to_record:branch",
+                supersedes_event_id=identified.id,
+            )
+
         testing, duplicate = await record_discovery_event(
             session,
             organization_id=organization.id,
             event_type="workflow_testing",
             source_type="satchy",
             workflow_key="radio_to_record",
-            workflow_label="Radio observation to record",
             dedupe_key="workflow:radio_to_record:testing",
         )
         retry, duplicate_retry = await record_discovery_event(
@@ -142,7 +189,7 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             session,
             organization_id=organization.id,
         )
-        assert summary["event_count"] == 7
+        assert summary["event_count"] == 8
         assert summary["signal_count"] == 1
         assert summary["context_count"] == 1
         assert summary["workflow_counts"] == {
@@ -163,7 +210,7 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             "shift_handoff": "rejected",
         }
         labels = {item["key"]: item["label"] for item in summary["workflows"]}
-        assert labels["radio_to_record"] == "Radio observation to record"
+        assert labels["radio_to_record"] == "Radio to supervisor review to record"
 
         approved = await list_discovery_events(
             session,
@@ -269,6 +316,41 @@ async def test_discovery_workspace_api_is_tenant_scoped_and_admin_written(monkey
         assert created.json()["duplicate"] is False
         event_id = created.json()["event"]["id"]
 
+        revised_payload = {
+            **payload,
+            "workflow_label": "Radio to supervisor review to record",
+            "dedupe_key": "manual:radio_to_record:identified:v2",
+            "supersedes_event_id": event_id,
+            "evidence": {
+                "reason": "Supervisor review observed",
+                "steps": ["radio", "supervisor_review", "record"],
+            },
+        }
+        revised = await client.post(events_url, json=revised_payload, headers=headers)
+        assert revised.status_code == 201
+        assert revised.json()["duplicate"] is False
+        assert revised.json()["event"]["supersedes_event_id"] == event_id
+
+        revised_retry = await client.post(
+            events_url,
+            json=revised_payload,
+            headers=headers,
+        )
+        assert revised_retry.status_code == 201
+        assert revised_retry.json()["duplicate"] is True
+        assert revised_retry.json()["event"]["id"] == revised.json()["event"]["id"]
+
+        branch = await client.post(
+            events_url,
+            json={
+                **revised_payload,
+                "dedupe_key": "manual:radio_to_record:identified:branch",
+            },
+            headers=headers,
+        )
+        assert branch.status_code == 422
+        assert "already been superseded" in branch.json()["detail"]
+
         retry = await client.post(events_url, json=payload, headers=headers)
         assert retry.status_code == 201
         assert retry.json()["duplicate"] is True
@@ -290,11 +372,15 @@ async def test_discovery_workspace_api_is_tenant_scoped_and_admin_written(monkey
             "rejected": 0,
         }
         assert summary.json()["phase_evidence"]["learn"] is True
+        assert summary.json()["workflows"][0]["label"] == (
+            "Radio to supervisor review to record"
+        )
 
         events = await client.get(events_url)
         assert events.status_code == 200
-        assert len(events.json()) == 1
+        assert len(events.json()) == 2
         assert events.json()[0]["workflow_key"] == "radio_to_record"
+        assert events.json()[0]["supersedes_event_id"] == event_id
 
         other = await client.get(
             f"/api/v1/workspace/organizations/{uuid4()}/discovery"
