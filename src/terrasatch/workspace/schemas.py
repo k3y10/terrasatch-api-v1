@@ -327,8 +327,11 @@ class DiscoveryWorkflowSummary(BaseModel):
     key: str
     label: str | None
     state: Literal["identified", "testing", "approved", "rejected"]
+    state_event_id: UUID
+    state_event_at: datetime
     latest_event_id: UUID
     latest_event_at: datetime
+    revision_count: int = Field(ge=0)
 
 
 class DiscoveryEvidenceWorkflowCounts(BaseModel):
