@@ -165,7 +165,7 @@ export type EntitlementsResponse = {
 export type SubscriptionResponse = {
   organization_id: string;
   managed: boolean;
-  plan_code: "field" | "team" | "organization" | "enterprise" | null;
+  plan_code: "field" | "team" | "operations" | "enterprise" | null;
   billing_interval: "monthly" | "annual" | null;
   status: string;
   service_access: "full" | "grace" | "restricted" | "legacy";
