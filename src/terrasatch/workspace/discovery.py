@@ -70,11 +70,11 @@ def _is_idempotent_retry(
     )
 
 
-def _logical_occurred_at(
+def _logical_order_key(
     event: WorkspaceDiscoveryEvent,
     *,
     events_by_id: dict[UUID, WorkspaceDiscoveryEvent],
-) -> datetime:
+) -> tuple[datetime, datetime]:
     """Place a revision at the original event's position in workflow chronology."""
 
     current = event
@@ -87,7 +87,10 @@ def _logical_occurred_at(
         if parent is None:
             break
         current = parent
-    return _utc_timestamp(current.occurred_at)
+    return (
+        _utc_timestamp(current.occurred_at),
+        _utc_timestamp(current.created_at),
+    )
 
 
 async def record_discovery_event(
@@ -137,11 +140,14 @@ async def record_discovery_event(
     evidence_payload = dict(evidence or {})
     if len(evidence_payload) > 32:
         raise ValueError("Discovery evidence supports at most 32 fields")
-    encoded_evidence = json.dumps(
-        evidence_payload,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
+    try:
+        encoded_evidence = json.dumps(
+            evidence_payload,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Discovery evidence must be JSON-serializable") from exc
     if len(encoded_evidence.encode("utf-8")) > 16_384:
         raise ValueError("Discovery evidence cannot exceed 16 KiB")
 
@@ -345,9 +351,9 @@ async def discovery_evidence_summary(
         event for event in events if event.id not in superseded_ids
     ]
     effective_events.sort(
-        key=lambda event: (
-            _logical_occurred_at(event, events_by_id=events_by_id),
-            _utc_timestamp(event.created_at),
+        key=lambda event: _logical_order_key(
+            event,
+            events_by_id=events_by_id,
         )
     )
 
