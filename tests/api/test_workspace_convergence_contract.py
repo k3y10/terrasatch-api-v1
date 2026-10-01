@@ -11,6 +11,8 @@ from terrasatch.main import create_app
 from terrasatch.satchy.schemas import SatchyContext
 from terrasatch.workspace.convergence import (
     build_capability_manifest,
+    discovery_state_for_status,
+    update_discovery_state,
     workspace_profile_payload,
 )
 
@@ -21,7 +23,59 @@ def test_default_workspace_profile_is_legacy_and_discovery_safe() -> None:
     assert payload["runtime_mode"] == "legacy"
     assert payload["operational_domain"] == "general"
     assert payload["workspace_template"] == "general"
-    assert payload["discovery_state"] == {"status": "not_started"}
+    assert payload["discovery_state"] == {
+        "status": "not_started",
+        "duration_days": 14,
+        "day": 0,
+        "phases": {
+            "listen": "off",
+            "watch": "off",
+            "learn": "off",
+            "adapt": "off",
+        },
+        "workflow_counts": {
+            "identified": 0,
+            "testing": 0,
+            "approved": 0,
+        },
+    }
+
+
+def test_discovery_lifecycle_moves_from_observation_to_approved_adaptation() -> None:
+    active = discovery_state_for_status("active", day=5)
+    assert active["day"] == 5
+    assert active["phases"] == {
+        "listen": "active",
+        "watch": "active",
+        "learn": "active",
+        "adapt": "testing",
+    }
+
+    completed = update_discovery_state(
+        active,
+        status="complete",
+        workflow_count_updates={"identified": 4, "testing": 2},
+    )
+    assert completed["day"] == 14
+    assert completed["phases"]["adapt"] == "ready"
+    assert completed["workflow_counts"] == {
+        "identified": 4,
+        "testing": 2,
+        "approved": 0,
+    }
+
+    integrated = update_discovery_state(
+        completed,
+        status="integrated",
+        workflow_count_updates={"approved": 2},
+    )
+    assert integrated["phases"] == {
+        "listen": "active",
+        "watch": "active",
+        "learn": "active",
+        "adapt": "active",
+    }
+    assert integrated["workflow_counts"]["approved"] == 2
 
 
 def test_legacy_and_shadow_keep_convergence_out_of_model_context() -> None:
