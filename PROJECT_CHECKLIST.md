@@ -17,7 +17,7 @@ This checklist tracks the API/backend repository. Field-side hardware discovery 
 | 8. RTL-SDR / Nooelec | in progress | API capability model and Edge inventory reporting are live. The dedicated Edge client has physically detected a NESDR SMArt v5 in Linux/WSL and completed a bounded RTL-SDR IQ receive probe. RF demodulation → audio → STT is the next field-side phase. |
 | 9. Edge control plane | completed | Browser pairing, device credential issuance, Edge registry, `/edge/me`, heartbeat, hardware inventory, remote config, live fleet health, and configurable registration limits are implemented. Durable offline queue/store-and-forward remains a field-client enhancement. |
 | 10. TerraEngine | in progress | Deterministic provider-neutral extraction, provenance, confidence, event classification, callsign/aspect/elevation extraction, and source-linked persistence are live. Model-backed providers and industry-specific extraction profiles remain. |
-| 11. Operations intelligence | in progress | Append-only Discovery evidence, idempotent event capture, and evidence-derived workflow state/counts are implemented. Automatic signal/context capture, pattern detection, incident threading, shifts, summaries, and richer operational context remain. |
+| 11. Operations intelligence | in progress | Append-only Discovery evidence, immutable revisions, evidence-derived workflow state/counts, automatic canonical signal capture, and new-run workspace-context capture are implemented. Bounded workflow pattern detection, incident threading, shifts, summaries, and richer operational context remain. |
 | 12. Realtime API | in progress | Versioned REST, OpenAPI, Redis publication, filters, detail routes, authenticated tenant WebSockets, Edge control plane, fleet health, and public aggregate network status are implemented. Durable outbox/webhooks remain. |
 | 13. TypeScript SDK | in progress | Dependency-free REST/WebSocket client, OpenAPI-backed declarations, workspace/convergence response contracts, and SDK drift gates are production. Satchy consumer migration is staged; broader demo adoption remains. |
 | 14. Usage and billing | not started | Plans, entitlements, usage, billing adapters, and subscription enforcement remain. |
@@ -69,9 +69,9 @@ Do not create a separate demo-only intelligence path. Simulator, recorded audio,
 
 ## Next engineering sequence
 
-1. Complete Discovery Events isolated QA and deploy migration `0026_workspace_discovery_events`.
-2. Add automatic Discovery evidence capture from canonical field/workspace signals without inventing operational facts.
-3. Build bounded workflow-pattern detection and recommendation state transitions.
+1. Validate automatic Discovery signal/context capture through isolated Oracle QA and production smoke checks.
+2. Build bounded workflow-pattern detection that can propose `workflow_identified` evidence without auto-approving it.
+3. Add measured workflow-testing evidence and human approval/rejection transitions for Discovery recommendations.
 4. Keep the dedicated Edge client running continuous heartbeats and hardware inventory.
 5. Add bounded RTL-SDR demodulated audio capture, VAD/STT, and submit recognized speech into the existing transmission endpoint.
 6. Continue Edge → site affinity, pairing throttling, durable offline queue/store-and-forward, outbox/webhooks, audit/retention, and billing.
