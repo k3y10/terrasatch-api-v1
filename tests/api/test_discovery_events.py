@@ -135,6 +135,17 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
                 supersedes_event_id=identified.id,
             )
 
+        with pytest.raises(ValueError, match="same event_type"):
+            await record_discovery_event(
+                session,
+                organization_id=organization.id,
+                event_type="workflow_testing",
+                source_type="satchy",
+                workflow_key="radio_to_record",
+                dedupe_key="workflow:radio_to_record:bad-transition-revision",
+                supersedes_event_id=revised.id,
+            )
+
         testing, duplicate = await record_discovery_event(
             session,
             organization_id=organization.id,
