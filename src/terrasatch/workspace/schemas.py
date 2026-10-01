@@ -25,7 +25,7 @@ class WorkspaceUserSummary(BaseModel):
 
 class WorkspaceSessionResponse(BaseModel):
     user: WorkspaceUserSummary | None
-    organizations: list[WorkspaceOrganizationSummary] = Field(default_factory=list)
+    organizations: list[WorkspaceOrganizationSummary]
     csrf_token: str
 
 
@@ -34,12 +34,12 @@ class WorkspaceLoginResponse(BaseModel):
 
 
 class WorkspaceLogoutResponse(BaseModel):
-    signed_out: bool = True
+    signed_out: bool
 
 
 class WorkspacePreferencesResponse(BaseModel):
-    modules: list[str] = Field(default_factory=list)
-    satchy: dict[str, object] = Field(default_factory=dict)
+    modules: list[str]
+    satchy: dict[str, object]
 
 
 class WorkspaceDiscoveryPhases(BaseModel):
@@ -67,9 +67,9 @@ class WorkspaceProfileResponse(BaseModel):
     operational_domain: str
     workspace_template: str
     runtime_mode: Literal["legacy", "shadow", "agent_read", "agent_propose"]
-    recommended_modules: list[str] = Field(default_factory=list)
-    preferred_map_layers: list[str] = Field(default_factory=list)
-    workflow_preferences: list[str] = Field(default_factory=list)
+    recommended_modules: list[str]
+    preferred_map_layers: list[str]
+    workflow_preferences: list[str]
     discovery_state: WorkspaceDiscoveryState
 
 
@@ -77,9 +77,9 @@ class WorkspaceEdgeCapabilityDevice(BaseModel):
     id: UUID
     site_id: UUID
     name: str
-    agent_version: str | None = None
-    capabilities: list[str] = Field(default_factory=list)
-    last_seen_at: datetime | None = None
+    agent_version: str | None
+    capabilities: list[str]
+    last_seen_at: datetime | None
 
 
 class WorkspaceCapabilityPolicy(BaseModel):
@@ -92,12 +92,12 @@ class WorkspaceCapabilityPolicy(BaseModel):
 
 class WorkspaceCapabilityManifest(BaseModel):
     runtime_mode: Literal["legacy", "shadow", "agent_read", "agent_propose"]
-    read: list[str] = Field(default_factory=list)
-    write: list[str] = Field(default_factory=list)
-    edge: list[str] = Field(default_factory=list)
-    physical: list[str] = Field(default_factory=list)
-    connected_providers: list[str] = Field(default_factory=list)
-    edge_devices: list[WorkspaceEdgeCapabilityDevice] = Field(default_factory=list)
+    read: list[str]
+    write: list[str]
+    edge: list[str]
+    physical: list[str]
+    connected_providers: list[str]
+    edge_devices: list[WorkspaceEdgeCapabilityDevice]
     policy: WorkspaceCapabilityPolicy
 
 
@@ -114,8 +114,8 @@ class WorkspaceDeviceSummary(BaseModel):
     id: UUID
     name: str
     enabled: bool
-    last_seen_at: datetime | None = None
-    agent_version: str | None = None
+    last_seen_at: datetime | None
+    agent_version: str | None
 
 
 class WorkspaceEngineSummary(BaseModel):
@@ -149,24 +149,24 @@ class WorkspaceIntegrationCatalogItem(BaseModel):
         "partner_required",
         "coming_soon",
     ]
-    scopes: list[str] = Field(default_factory=list)
-    allowed_scopes: list[str] = Field(default_factory=list)
+    scopes: list[str]
+    allowed_scopes: list[str]
     allowed: bool
     can_connect: bool
     requires_admin: bool
     connected: bool
-    connected_scopes: list[str] = Field(default_factory=list)
+    connected_scopes: list[str]
     runtime_ready: bool
-    capabilities: list[str] = Field(default_factory=list)
-    capability_details: list[WorkspaceCapabilityResponse] = Field(default_factory=list)
+    capabilities: list[str]
+    capability_details: list[WorkspaceCapabilityResponse]
     description: str
 
 
 class WorkspaceIntegrationsResponse(BaseModel):
-    devices: list[WorkspaceDeviceSummary] = Field(default_factory=list)
+    devices: list[WorkspaceDeviceSummary]
     engine: WorkspaceEngineSummary
-    catalog: list[WorkspaceIntegrationCatalogItem] = Field(default_factory=list)
-    connections: list[dict[str, object]] = Field(default_factory=list)
+    catalog: list[WorkspaceIntegrationCatalogItem]
+    connections: list[dict[str, object]]
 
 
 class WorkspaceSiteSummary(BaseModel):
@@ -177,7 +177,7 @@ class WorkspaceSiteSummary(BaseModel):
 class WorkspaceTeamSummary(BaseModel):
     id: UUID
     name: str
-    site_id: UUID | None = None
+    site_id: UUID | None
 
 
 class WorkspaceFieldAssetResponse(BaseModel):
@@ -189,10 +189,10 @@ class WorkspaceFieldAssetResponse(BaseModel):
     name: str
     type: str
     provider: str
-    capabilities: list[str] = Field(default_factory=list)
+    capabilities: list[str]
     state: str
-    location: dict[str, object] = Field(default_factory=dict)
-    policy: dict[str, object] = Field(default_factory=dict)
+    location: dict[str, object]
+    policy: dict[str, object]
     enabled: bool
 
 
@@ -200,31 +200,31 @@ class WorkspaceRecordInterpretation(BaseModel):
     id: UUID
     summary: str
     type: str
-    latitude: float | None = None
-    longitude: float | None = None
-    location: str | None = None
+    latitude: float | None
+    longitude: float | None
+    location: str | None
     confidence: float
-    spatial_status: str | None = None
+    spatial_status: str | None
 
 
 class WorkspaceRecordResponse(BaseModel):
     id: UUID
     source: str
-    speaker: str | None = None
+    speaker: str | None
     timestamp: datetime
-    original: str | None = None
-    location: object | None = None
-    interpretations: list[WorkspaceRecordInterpretation] = Field(default_factory=list)
+    original: str | None
+    location: object | None
+    interpretations: list[WorkspaceRecordInterpretation]
 
 
 class WorkspaceActionResponse(BaseModel):
     id: UUID
-    source_id: UUID | None = None
+    source_id: UUID | None
     type: str
     reason: str
-    message: str | None = None
+    message: str | None
     status: str
-    integration_execution: dict[str, object] = Field(default_factory=dict)
+    integration_execution: dict[str, object]
 
 
 class WorkspaceMessageResponse(BaseModel):
@@ -235,17 +235,17 @@ class WorkspaceMessageResponse(BaseModel):
 
 class WorkspaceSnapshotResponse(BaseModel):
     role: str
-    modules: list[str] = Field(default_factory=list)
-    satchy_preferences: dict[str, object] = Field(default_factory=dict)
+    modules: list[str]
+    satchy_preferences: dict[str, object]
     convergence: WorkspaceConvergenceResponse
     integrations: WorkspaceIntegrationsResponse
     subscription: SubscriptionResponse
-    sites: list[WorkspaceSiteSummary] = Field(default_factory=list)
-    teams: list[WorkspaceTeamSummary] = Field(default_factory=list)
-    assets: list[WorkspaceFieldAssetResponse] = Field(default_factory=list)
-    records: list[WorkspaceRecordResponse] = Field(default_factory=list)
-    actions: list[WorkspaceActionResponse] = Field(default_factory=list)
-    messages: list[WorkspaceMessageResponse] = Field(default_factory=list)
+    sites: list[WorkspaceSiteSummary]
+    teams: list[WorkspaceTeamSummary]
+    assets: list[WorkspaceFieldAssetResponse]
+    records: list[WorkspaceRecordResponse]
+    actions: list[WorkspaceActionResponse]
+    messages: list[WorkspaceMessageResponse]
 
 
 class SatchyChatResponse(BaseModel):
@@ -260,7 +260,7 @@ class SatchyChatResponse(BaseModel):
 class WorkspaceActionReviewResponse(BaseModel):
     id: UUID
     status: str
-    integration_detail: object | None = None
+    integration_detail: object | None
     integration_execution: dict[str, object] = Field(default_factory=dict)
 
 
