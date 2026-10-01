@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from enum import StrEnum
 from uuid import UUID
 
@@ -35,6 +36,58 @@ WORKFLOW_STATE_BY_EVENT = {
     DiscoveryEventType.WORKFLOW_APPROVED.value: "approved",
     DiscoveryEventType.WORKFLOW_REJECTED.value: "rejected",
 }
+
+
+def _utc_timestamp(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _is_idempotent_retry(
+    existing: WorkspaceDiscoveryEvent,
+    *,
+    site_id: UUID | None,
+    actor_user_id: UUID | None,
+    supersedes_event_id: UUID | None,
+    event_type: str,
+    workflow_key: str | None,
+    workflow_label: str | None,
+    source_type: str,
+    source_ref: str | None,
+    confidence: float | None,
+    evidence: dict[str, object],
+) -> bool:
+    return (
+        existing.site_id == site_id
+        and existing.actor_user_id == actor_user_id
+        and existing.supersedes_event_id == supersedes_event_id
+        and existing.event_type == event_type
+        and existing.workflow_key == workflow_key
+        and existing.workflow_label == workflow_label
+        and existing.source_type == source_type
+        and existing.source_ref == source_ref
+        and existing.confidence == confidence
+        and dict(existing.evidence or {}) == evidence
+    )
+
+
+def _logical_occurred_at(
+    event: WorkspaceDiscoveryEvent,
+    *,
+    events_by_id: dict[UUID, WorkspaceDiscoveryEvent],
+) -> datetime:
+    """Place a revision at the original event's position in workflow chronology."""
+
+    current = event
+    seen: set[UUID] = set()
+    while current.supersedes_event_id is not None:
+        if current.id in seen:
+            break
+        seen.add(current.id)
+        parent = events_by_id.get(current.supersedes_event_id)
+        if parent is None:
+            break
+        current = parent
+    return _utc_timestamp(current.occurred_at)
 
 
 async def record_discovery_event(
@@ -73,9 +126,25 @@ async def record_discovery_event(
     if normalized_label and len(normalized_label) > 255:
         raise ValueError("workflow_label cannot exceed 255 characters")
 
+    normalized_source_ref = source_ref.strip() if source_ref else None
+    if normalized_source_ref and len(normalized_source_ref) > 255:
+        raise ValueError("source_ref cannot exceed 255 characters")
+
     normalized_dedupe = dedupe_key.strip() if dedupe_key else None
     if normalized_dedupe and len(normalized_dedupe) > 255:
         raise ValueError("dedupe_key cannot exceed 255 characters")
+
+    evidence_payload = dict(evidence or {})
+    if len(evidence_payload) > 32:
+        raise ValueError("Discovery evidence supports at most 32 fields")
+    encoded_evidence = json.dumps(
+        evidence_payload,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    if len(encoded_evidence.encode("utf-8")) > 16_384:
+        raise ValueError("Discovery evidence cannot exceed 16 KiB")
+
     effective_occurred_at = occurred_at or datetime.now(UTC)
 
     if normalized_dedupe:
@@ -86,6 +155,22 @@ async def record_discovery_event(
             )
         )
         if existing is not None:
+            if not _is_idempotent_retry(
+                existing,
+                site_id=site_id,
+                actor_user_id=actor_user_id,
+                supersedes_event_id=supersedes_event_id,
+                event_type=normalized_type,
+                workflow_key=normalized_workflow,
+                workflow_label=normalized_label,
+                source_type=normalized_source,
+                source_ref=normalized_source_ref,
+                confidence=confidence,
+                evidence=evidence_payload,
+            ):
+                raise ValueError(
+                    "dedupe_key is already used by different Discovery evidence"
+                )
             return existing, True
 
     superseded: WorkspaceDiscoveryEvent | None = None
@@ -99,15 +184,11 @@ async def record_discovery_event(
         if superseded is None:
             raise ValueError("superseded Discovery event was not found in this organization")
 
-        new_is_workflow = normalized_type in WORKFLOW_EVENT_TYPES
-        old_is_workflow = superseded.event_type in WORKFLOW_EVENT_TYPES
-        if new_is_workflow != old_is_workflow:
-            raise ValueError("Discovery revisions must stay in the same evidence family")
-        if new_is_workflow:
+        if superseded.event_type != normalized_type:
+            raise ValueError("Discovery revisions must keep the same event_type")
+        if normalized_type in WORKFLOW_EVENT_TYPES:
             if superseded.workflow_key != normalized_workflow:
                 raise ValueError("workflow revisions must keep the same workflow_key")
-        elif superseded.event_type != normalized_type:
-            raise ValueError("non-workflow revisions must keep the same event_type")
 
         prior_successor = await session.scalar(
             select(WorkspaceDiscoveryEvent).where(
@@ -118,12 +199,8 @@ async def record_discovery_event(
         if prior_successor is not None:
             raise ValueError("Discovery event has already been superseded")
 
-        superseded_at = superseded.occurred_at
-        if superseded_at.tzinfo is None:
-            superseded_at = superseded_at.replace(tzinfo=UTC)
-        compare_at = effective_occurred_at
-        if compare_at.tzinfo is None:
-            compare_at = compare_at.replace(tzinfo=UTC)
+        superseded_at = _utc_timestamp(superseded.occurred_at)
+        compare_at = _utc_timestamp(effective_occurred_at)
         if compare_at < superseded_at:
             raise ValueError("Discovery revision cannot occur before the superseded event")
 
@@ -136,10 +213,10 @@ async def record_discovery_event(
         workflow_key=normalized_workflow,
         workflow_label=normalized_label,
         source_type=normalized_source,
-        source_ref=source_ref.strip() if source_ref else None,
+        source_ref=normalized_source_ref,
         dedupe_key=normalized_dedupe,
         confidence=confidence,
-        evidence=dict(evidence or {}),
+        evidence=evidence_payload,
         occurred_at=effective_occurred_at,
     )
     if normalized_dedupe or supersedes_event_id is not None:
@@ -156,6 +233,22 @@ async def record_discovery_event(
                     )
                 )
                 if existing is not None:
+                    if not _is_idempotent_retry(
+                        existing,
+                        site_id=site_id,
+                        actor_user_id=actor_user_id,
+                        supersedes_event_id=supersedes_event_id,
+                        event_type=normalized_type,
+                        workflow_key=normalized_workflow,
+                        workflow_label=normalized_label,
+                        source_type=normalized_source,
+                        source_ref=normalized_source_ref,
+                        confidence=confidence,
+                        evidence=evidence_payload,
+                    ):
+                        raise ValueError(
+                            "dedupe_key is already used by different Discovery evidence"
+                        ) from None
                     return existing, True
             if supersedes_event_id is not None:
                 successor = await session.scalar(
@@ -242,12 +335,28 @@ async def discovery_evidence_summary(
         )
     )
 
+    events_by_id = {event.id: event for event in events}
+    superseded_ids = {
+        event.supersedes_event_id
+        for event in events
+        if event.supersedes_event_id is not None
+    }
+    effective_events = [
+        event for event in events if event.id not in superseded_ids
+    ]
+    effective_events.sort(
+        key=lambda event: (
+            _logical_occurred_at(event, events_by_id=events_by_id),
+            _utc_timestamp(event.created_at),
+        )
+    )
+
     signal_count = 0
     context_count = 0
     adapt_evidence = False
     workflow_states: dict[str, dict[str, object]] = {}
 
-    for event in events:
+    for event in effective_events:
         if event.event_type == DiscoveryEventType.SIGNAL_OBSERVED.value:
             signal_count += 1
         elif event.event_type == DiscoveryEventType.CONTEXT_OBSERVED.value:
@@ -280,6 +389,7 @@ async def discovery_evidence_summary(
 
     return {
         "event_count": len(events),
+        "active_event_count": len(effective_events),
         "signal_count": signal_count,
         "context_count": context_count,
         "workflow_counts": {
