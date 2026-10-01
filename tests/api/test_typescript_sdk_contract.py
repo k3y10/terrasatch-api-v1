@@ -91,9 +91,11 @@ def test_generated_declarations_cover_workspace_and_discovery_contracts() -> Non
     integrations = declarations.split(
         "export type WorkspaceIntegrationCatalogItem =", 1
     )[1].split("\n\n", 1)[0]
-    assert "unknown" not in snapshot
-    assert "runtime_ready" in integrations
-    assert "capability_details" in integrations
+    assert "convergence: WorkspaceConvergenceResponse;" in snapshot
+    assert "integrations: WorkspaceIntegrationsResponse;" in snapshot
+    assert "subscription: SubscriptionResponse;" in snapshot
+    assert "runtime_ready: boolean;" in integrations
+    assert "capability_details: WorkspaceCapabilityResponse[];" in integrations
 
     runs = declarations.split("export type SatchyRunResponse =", 1)[1].split(
         "\n\n", 1
