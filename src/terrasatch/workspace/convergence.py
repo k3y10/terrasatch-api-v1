@@ -12,7 +12,7 @@ from terrasatch.workspace.models import WorkspaceProfile
 
 
 class WorkspaceRuntimeMode(StrEnum):
-    """Controlled rollout modes for Satchy workspace intelligence."""
+    """Internal rollout modes for Satchy intelligence."""
 
     LEGACY = "legacy"
     SHADOW = "shadow"
@@ -20,7 +20,148 @@ class WorkspaceRuntimeMode(StrEnum):
     AGENT_PROPOSE = "agent_propose"
 
 
-DEFAULT_DISCOVERY_STATE: dict[str, object] = {"status": "not_started"}
+class DiscoveryStatus(StrEnum):
+    """Customer-facing lifecycle for the 14-day Satchy Discovery."""
+
+    NOT_STARTED = "not_started"
+    ACTIVE = "active"
+    COMPLETE = "complete"
+    INTEGRATED = "integrated"
+
+
+class DiscoveryPhaseState(StrEnum):
+    OFF = "off"
+    ACTIVE = "active"
+    TESTING = "testing"
+    READY = "ready"
+
+
+DISCOVERY_DURATION_DAYS = 14
+_DISCOVERY_PHASES = ("listen", "watch", "learn", "adapt")
+_DISCOVERY_WORKFLOW_COUNTS = ("identified", "testing", "approved")
+
+
+def discovery_state_for_status(
+    status: DiscoveryStatus | str,
+    *,
+    day: int | None = None,
+) -> dict[str, object]:
+    """Return the default LISTEN/WATCH/LEARN/ADAPT state for one lifecycle status."""
+
+    normalized_status = DiscoveryStatus(status)
+    if normalized_status == DiscoveryStatus.NOT_STARTED:
+        normalized_day = 0
+        phases = {phase: DiscoveryPhaseState.OFF.value for phase in _DISCOVERY_PHASES}
+    elif normalized_status == DiscoveryStatus.ACTIVE:
+        normalized_day = min(DISCOVERY_DURATION_DAYS, max(1, day or 1))
+        phases = {
+            "listen": DiscoveryPhaseState.ACTIVE.value,
+            "watch": DiscoveryPhaseState.ACTIVE.value,
+            "learn": DiscoveryPhaseState.ACTIVE.value,
+            "adapt": DiscoveryPhaseState.TESTING.value,
+        }
+    elif normalized_status == DiscoveryStatus.COMPLETE:
+        normalized_day = DISCOVERY_DURATION_DAYS
+        phases = {
+            "listen": DiscoveryPhaseState.ACTIVE.value,
+            "watch": DiscoveryPhaseState.ACTIVE.value,
+            "learn": DiscoveryPhaseState.ACTIVE.value,
+            "adapt": DiscoveryPhaseState.READY.value,
+        }
+    else:
+        normalized_day = DISCOVERY_DURATION_DAYS
+        phases = {phase: DiscoveryPhaseState.ACTIVE.value for phase in _DISCOVERY_PHASES}
+
+    return {
+        "status": normalized_status.value,
+        "duration_days": DISCOVERY_DURATION_DAYS,
+        "day": normalized_day,
+        "phases": phases,
+        "workflow_counts": {
+            "identified": 0,
+            "testing": 0,
+            "approved": 0,
+        },
+    }
+
+
+DEFAULT_DISCOVERY_STATE: dict[str, object] = discovery_state_for_status(
+    DiscoveryStatus.NOT_STARTED
+)
+
+
+def normalize_discovery_state(value: dict[str, object] | None) -> dict[str, object]:
+    """Normalize persisted JSON into the stable customer-facing Discovery contract."""
+
+    raw = dict(value or {})
+    raw_status = raw.get("status")
+    try:
+        status = DiscoveryStatus(str(raw_status or DiscoveryStatus.NOT_STARTED.value))
+    except ValueError:
+        status = DiscoveryStatus.NOT_STARTED
+
+    raw_day = raw.get("day")
+    day = raw_day if isinstance(raw_day, int) else None
+    normalized = discovery_state_for_status(status, day=day)
+
+    raw_phases = raw.get("phases")
+    if isinstance(raw_phases, dict):
+        phases = dict(normalized["phases"])
+        for phase in _DISCOVERY_PHASES:
+            candidate = raw_phases.get(phase)
+            if candidate in {item.value for item in DiscoveryPhaseState}:
+                phases[phase] = candidate
+        normalized["phases"] = phases
+
+    raw_counts = raw.get("workflow_counts")
+    if isinstance(raw_counts, dict):
+        counts = dict(normalized["workflow_counts"])
+        for key in _DISCOVERY_WORKFLOW_COUNTS:
+            candidate = raw_counts.get(key)
+            if isinstance(candidate, int) and candidate >= 0:
+                counts[key] = candidate
+        normalized["workflow_counts"] = counts
+
+    return normalized
+
+
+def update_discovery_state(
+    current: dict[str, object] | None,
+    *,
+    status: str | None = None,
+    day: int | None = None,
+    phase_updates: dict[str, str] | None = None,
+    workflow_count_updates: dict[str, int] | None = None,
+) -> dict[str, object]:
+    """Apply an explicit admin update without conflating Discovery with runtime shadowing."""
+
+    existing = normalize_discovery_state(current)
+    next_status = DiscoveryStatus(status or str(existing["status"]))
+
+    if status is not None and status != existing["status"]:
+        updated = discovery_state_for_status(next_status, day=day)
+        updated["workflow_counts"] = dict(existing["workflow_counts"])
+    else:
+        updated = normalize_discovery_state(existing)
+        if day is not None:
+            if next_status == DiscoveryStatus.ACTIVE:
+                updated["day"] = min(DISCOVERY_DURATION_DAYS, max(1, day))
+            elif next_status == DiscoveryStatus.NOT_STARTED:
+                updated["day"] = 0
+            else:
+                updated["day"] = DISCOVERY_DURATION_DAYS
+
+    if phase_updates:
+        phases = dict(updated["phases"])
+        phases.update(phase_updates)
+        updated["phases"] = phases
+
+    if workflow_count_updates:
+        counts = dict(updated["workflow_counts"])
+        counts.update(workflow_count_updates)
+        updated["workflow_counts"] = counts
+
+    return normalize_discovery_state(updated)
 
 
 def _is_physical_edge_capability(capability: str) -> bool:
@@ -42,11 +183,9 @@ def workspace_profile_payload(profile: WorkspaceProfile | None) -> dict[str, obj
             "recommended_modules": [],
             "preferred_map_layers": [],
             "workflow_preferences": [],
-            "discovery_state": dict(DEFAULT_DISCOVERY_STATE),
+            "discovery_state": normalize_discovery_state(None),
         }
 
-    discovery_state = dict(profile.discovery_state or {})
-    discovery_state.setdefault("status", "not_started")
     return {
         "operational_domain": profile.operational_domain,
         "workspace_template": profile.workspace_template,
@@ -54,7 +193,7 @@ def workspace_profile_payload(profile: WorkspaceProfile | None) -> dict[str, obj
         "recommended_modules": list(profile.recommended_modules or []),
         "preferred_map_layers": list(profile.preferred_map_layers or []),
         "workflow_preferences": list(profile.workflow_preferences or []),
-        "discovery_state": discovery_state,
+        "discovery_state": normalize_discovery_state(profile.discovery_state),
     }
 
 
@@ -81,7 +220,7 @@ async def get_or_create_workspace_profile(
             recommended_modules=[],
             preferred_map_layers=[],
             workflow_preferences=[],
-            discovery_state=dict(DEFAULT_DISCOVERY_STATE),
+            discovery_state=normalize_discovery_state(None),
         )
         session.add(profile)
         await session.flush()
