@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.workspace.discovery import (
     DiscoveryEventType,
-    WORKFLOW_EVENT_TYPES,
     discovery_evidence_summary,
     record_discovery_event,
 )
