@@ -51,6 +51,7 @@ async def record_discovery_event(
     dedupe_key: str | None = None,
     confidence: float | None = None,
     evidence: dict[str, object] | None = None,
+    supersedes_event_id: UUID | None = None,
     occurred_at: datetime | None = None,
 ) -> tuple[WorkspaceDiscoveryEvent, bool]:
     """Append one evidence event, returning an existing row for an idempotent retry."""
@@ -75,6 +76,8 @@ async def record_discovery_event(
     normalized_dedupe = dedupe_key.strip() if dedupe_key else None
     if normalized_dedupe and len(normalized_dedupe) > 255:
         raise ValueError("dedupe_key cannot exceed 255 characters")
+    effective_occurred_at = occurred_at or datetime.now(UTC)
+
     if normalized_dedupe:
         existing = await session.scalar(
             select(WorkspaceDiscoveryEvent).where(
@@ -85,10 +88,50 @@ async def record_discovery_event(
         if existing is not None:
             return existing, True
 
+    superseded: WorkspaceDiscoveryEvent | None = None
+    if supersedes_event_id is not None:
+        superseded = await session.scalar(
+            select(WorkspaceDiscoveryEvent).where(
+                WorkspaceDiscoveryEvent.id == supersedes_event_id,
+                WorkspaceDiscoveryEvent.organization_id == organization_id,
+            )
+        )
+        if superseded is None:
+            raise ValueError("superseded Discovery event was not found in this organization")
+
+        new_is_workflow = normalized_type in WORKFLOW_EVENT_TYPES
+        old_is_workflow = superseded.event_type in WORKFLOW_EVENT_TYPES
+        if new_is_workflow != old_is_workflow:
+            raise ValueError("Discovery revisions must stay in the same evidence family")
+        if new_is_workflow:
+            if superseded.workflow_key != normalized_workflow:
+                raise ValueError("workflow revisions must keep the same workflow_key")
+        elif superseded.event_type != normalized_type:
+            raise ValueError("non-workflow revisions must keep the same event_type")
+
+        prior_successor = await session.scalar(
+            select(WorkspaceDiscoveryEvent).where(
+                WorkspaceDiscoveryEvent.organization_id == organization_id,
+                WorkspaceDiscoveryEvent.supersedes_event_id == supersedes_event_id,
+            )
+        )
+        if prior_successor is not None:
+            raise ValueError("Discovery event has already been superseded")
+
+        superseded_at = superseded.occurred_at
+        if superseded_at.tzinfo is None:
+            superseded_at = superseded_at.replace(tzinfo=UTC)
+        compare_at = effective_occurred_at
+        if compare_at.tzinfo is None:
+            compare_at = compare_at.replace(tzinfo=UTC)
+        if compare_at < superseded_at:
+            raise ValueError("Discovery revision cannot occur before the superseded event")
+
     event = WorkspaceDiscoveryEvent(
         organization_id=organization_id,
         site_id=site_id,
         actor_user_id=actor_user_id,
+        supersedes_event_id=supersedes_event_id,
         event_type=normalized_type,
         workflow_key=normalized_workflow,
         workflow_label=normalized_label,
@@ -97,22 +140,32 @@ async def record_discovery_event(
         dedupe_key=normalized_dedupe,
         confidence=confidence,
         evidence=dict(evidence or {}),
-        occurred_at=occurred_at or datetime.now(UTC),
+        occurred_at=effective_occurred_at,
     )
-    if normalized_dedupe:
+    if normalized_dedupe or supersedes_event_id is not None:
         try:
             async with session.begin_nested():
                 session.add(event)
                 await session.flush()
         except IntegrityError:
-            existing = await session.scalar(
-                select(WorkspaceDiscoveryEvent).where(
-                    WorkspaceDiscoveryEvent.organization_id == organization_id,
-                    WorkspaceDiscoveryEvent.dedupe_key == normalized_dedupe,
+            if normalized_dedupe:
+                existing = await session.scalar(
+                    select(WorkspaceDiscoveryEvent).where(
+                        WorkspaceDiscoveryEvent.organization_id == organization_id,
+                        WorkspaceDiscoveryEvent.dedupe_key == normalized_dedupe,
+                    )
                 )
-            )
-            if existing is not None:
-                return existing, True
+                if existing is not None:
+                    return existing, True
+            if supersedes_event_id is not None:
+                successor = await session.scalar(
+                    select(WorkspaceDiscoveryEvent).where(
+                        WorkspaceDiscoveryEvent.organization_id == organization_id,
+                        WorkspaceDiscoveryEvent.supersedes_event_id == supersedes_event_id,
+                    )
+                )
+                if successor is not None:
+                    raise ValueError("Discovery event has already been superseded") from None
             raise
     else:
         session.add(event)
@@ -155,6 +208,9 @@ def discovery_event_payload(event: WorkspaceDiscoveryEvent) -> dict[str, object]
         "organization_id": str(event.organization_id),
         "site_id": str(event.site_id) if event.site_id else None,
         "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
+        "supersedes_event_id": (
+            str(event.supersedes_event_id) if event.supersedes_event_id else None
+        ),
         "event_type": event.event_type,
         "workflow_key": event.workflow_key,
         "workflow_label": event.workflow_label,
