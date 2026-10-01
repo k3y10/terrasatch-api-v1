@@ -20,6 +20,8 @@ COPY migrations ./migrations
 COPY src ./src
 COPY tests ./tests
 COPY scripts ./scripts
+COPY package.json ./
+COPY sdk ./sdk
 
 RUN uv sync --frozen --extra dev
 

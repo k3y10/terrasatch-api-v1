@@ -48,6 +48,19 @@ structured RF provenance; raw/rejected audio remains an Edge concern and is neve
 
 See [PROJECT_CHECKLIST.md](PROJECT_CHECKLIST.md) for the current roadmap and validation state.
 
+## TypeScript SDK
+
+The canonical browser/service client lives in `sdk/typescript` and is exposed from the repository as `@terrasatch/sdk`. Its declarations are generated from the FastAPI OpenAPI contract, while the dependency-free runtime supports browser-session transports, bearer-token REST, and the authenticated `/ws/v1/events` subscription handshake.
+
+Regenerate declarations after an API contract change:
+
+```bash
+uv run python scripts/generate-typescript-sdk.py
+```
+
+Production consumers should pin a reviewed TerraSatch API commit when installing the GitHub package rather than floating on `main`.
+
+
 ## Public operational checks
 
 ```text

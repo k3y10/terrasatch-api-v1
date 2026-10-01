@@ -1,0 +1,23 @@
+{
+  "name": "@terrasatch/sdk",
+  "version": "0.1.0",
+  "description": "Generated TypeScript client and OpenAPI types for the TerraSatch platform.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./sdk/typescript/index.d.ts",
+      "import": "./sdk/typescript/index.js",
+      "default": "./sdk/typescript/index.js"
+    }
+  },
+  "types": "./sdk/typescript/index.d.ts",
+  "files": [
+    "sdk/typescript/index.js",
+    "sdk/typescript/index.d.ts",
+    "sdk/typescript/README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
