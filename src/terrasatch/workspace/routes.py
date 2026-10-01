@@ -99,6 +99,18 @@ from terrasatch.workspace.convergence import (
     workspace_profile_payload,
 )
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
+from terrasatch.workspace.schemas import (
+    SatchyChatResponse,
+    WorkspaceActionReviewResponse,
+    WorkspaceConvergenceResponse,
+    WorkspaceConvergenceUpdateResponse,
+    WorkspaceLoginResponse,
+    WorkspaceLogoutResponse,
+    WorkspaceObservationResponse,
+    WorkspacePreferencesResponse,
+    WorkspaceSessionResponse,
+    WorkspaceSnapshotResponse,
+)
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
@@ -194,7 +206,7 @@ async def submit_mobile_observation(
     )
 
 
-@router.post("/organizations/{organization_id}/preferences")
+@router.post("/organizations/{organization_id}/preferences", response_model=WorkspacePreferencesResponse)
 async def save_preferences(organization_id: UUID, payload: ModulePreferences, request: Request):
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
@@ -222,7 +234,7 @@ async def save_preferences(organization_id: UUID, payload: ModulePreferences, re
         }
 
 
-@router.get("/organizations/{organization_id}/convergence")
+@router.get("/organizations/{organization_id}/convergence", response_model=WorkspaceConvergenceResponse)
 async def workspace_convergence(
     organization_id: UUID,
     request: Request,
@@ -264,7 +276,10 @@ async def workspace_convergence(
         )
 
 
-@router.patch("/organizations/{organization_id}/convergence")
+@router.patch(
+    "/organizations/{organization_id}/convergence",
+    response_model=WorkspaceConvergenceUpdateResponse,
+)
 async def update_workspace_convergence(
     organization_id: UUID,
     payload: WorkspaceConvergenceUpdate,
@@ -452,7 +467,7 @@ async def writable(session, membership):
         raise HTTPException(403, "Subscription is restricted; existing records remain readable")
 
 
-@router.get("/session")
+@router.get("/session", response_model=WorkspaceSessionResponse)
 async def session_info(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     _enabled(request.app.state.settings)
@@ -480,7 +495,7 @@ async def session_info(request: Request, response: Response):
         }
 
 
-@router.post("/login")
+@router.post("/login", response_model=WorkspaceLoginResponse)
 async def login(payload: Login, request: Request):
     csrf(request)
     await enforce_public_rate_limit(
@@ -507,7 +522,7 @@ async def login(payload: Login, request: Request):
         return {"csrf_token": issue_csrf_token(request.session)}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=WorkspaceLogoutResponse)
 async def logout(request: Request):
     csrf(request)
     request.session.clear()
@@ -595,7 +610,7 @@ def _connection_scopes(connections) -> dict[str, set[str]]:
     return result
 
 
-@router.get("/organizations/{organization_id}")
+@router.get("/organizations/{organization_id}", response_model=WorkspaceSnapshotResponse)
 async def workspace(organization_id: UUID, request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     async with create_session_factory(request.app.state.settings)() as session:
@@ -1220,7 +1235,10 @@ async def get_satchy_run(
         return await run_payload(session, run=run)
 
 
-@router.post("/organizations/{organization_id}/actions/{action_id}")
+@router.post(
+    "/organizations/{organization_id}/actions/{action_id}",
+    response_model=WorkspaceActionReviewResponse,
+)
 async def review(organization_id: UUID, action_id: UUID, payload: Decision, request: Request):
     csrf(request)
     async with create_session_factory(request.app.state.settings)() as session:
@@ -1290,7 +1308,7 @@ async def billing(organization_id: UUID, request: Request):
     }
 
 
-@router.post("/organizations/{organization_id}/chat")
+@router.post("/organizations/{organization_id}/chat", response_model=SatchyChatResponse)
 async def chat(organization_id: UUID, payload: Chat, request: Request):
     csrf(request)
     settings = request.app.state.settings
@@ -1662,7 +1680,10 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         }
 
 
-@router.post("/organizations/{organization_id}/observations")
+@router.post(
+    "/organizations/{organization_id}/observations",
+    response_model=WorkspaceObservationResponse,
+)
 async def create_observation(organization_id: UUID, payload: Observation, request: Request):
     """Preserve a human field note even before an AI interpretation is available."""
     csrf(request)
