@@ -101,10 +101,22 @@ class SatchyContext(BaseModel):
     subscription: dict[str, object] = Field(default_factory=dict)
     available_capabilities: list[str] = Field(default_factory=list)
     connected_providers: list[str] = Field(default_factory=list)
+    workspace_profile: dict[str, object] = Field(default_factory=dict)
+    capability_manifest: dict[str, object] = Field(default_factory=dict)
     operational_profile: dict[str, object] = Field(default_factory=dict)
     edge_context: dict[str, object] = Field(default_factory=dict)
     rf_context: dict[str, object] = Field(default_factory=dict)
     evidence: list[dict[str, object]] = Field(default_factory=list, max_length=64)
+
+    def model_context_payload(self) -> dict[str, object]:
+        """Preserve legacy/shadow model inputs until agent modes are explicitly enabled."""
+
+        payload = self.model_dump(mode="json")
+        runtime_mode = str(self.workspace_profile.get("runtime_mode") or "legacy")
+        if runtime_mode in {"legacy", "shadow"}:
+            payload.pop("workspace_profile", None)
+            payload.pop("capability_manifest", None)
+        return payload
 
 
 class SatchyDecision(BaseModel):

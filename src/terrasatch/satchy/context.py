@@ -24,6 +24,11 @@ from terrasatch.radio.models import (
     Transcript,
     Transmission,
 )
+from terrasatch.workspace.convergence import (
+    build_capability_manifest,
+    get_workspace_profile,
+    workspace_profile_payload,
+)
 from terrasatch.workspace.models import WorkspacePreference
 
 from .schemas import ActiveMapContext, SatchyContext
@@ -158,16 +163,18 @@ async def build_satchy_context(
             "emergency_terms": profile.emergency_terms,
         }
 
-    device = await session.scalar(
-        select(EdgeDevice)
-        .where(
-            EdgeDevice.organization_id == organization_id,
-            EdgeDevice.site_id == site_id,
-            EdgeDevice.enabled.is_(True),
+    devices = list(
+        await session.scalars(
+            select(EdgeDevice)
+            .where(
+                EdgeDevice.organization_id == organization_id,
+                EdgeDevice.site_id == site_id,
+                EdgeDevice.enabled.is_(True),
+            )
+            .order_by(EdgeDevice.last_seen_at.desc(), EdgeDevice.created_at.desc())
         )
-        .order_by(EdgeDevice.last_seen_at.desc(), EdgeDevice.created_at.desc())
-        .limit(1)
     )
+    device = devices[0] if devices else None
     edge_context: dict[str, object] = {}
     if device is not None:
         edge_context = {
@@ -252,6 +259,7 @@ async def build_satchy_context(
 
     available_capabilities: set[str] = set()
     connected_providers: list[str] = []
+    catalog: list[dict[str, object]] = []
     if settings is not None and user is not None and membership is not None:
         connections = await list_visible_connections(
             session,
@@ -278,6 +286,16 @@ async def build_satchy_context(
                 connected_providers.append(provider["key"])
                 available_capabilities.update(provider["capabilities"])
 
+    convergence_profile = await get_workspace_profile(
+        session,
+        organization_id=organization_id,
+    )
+    capability_manifest = build_capability_manifest(
+        profile=convergence_profile,
+        catalog=catalog,
+        devices=devices,
+    )
+
     return SatchyContext(
         organization_id=organization_id,
         organization_name=organization.name,
@@ -303,6 +321,8 @@ async def build_satchy_context(
         subscription=subscription_payload,
         available_capabilities=sorted(available_capabilities),
         connected_providers=sorted(connected_providers),
+        workspace_profile=workspace_profile_payload(convergence_profile),
+        capability_manifest=capability_manifest,
         operational_profile=profile_payload,
         edge_context=edge_context,
         rf_context=dict(transmission.rf_metadata or {}) if transmission else {},

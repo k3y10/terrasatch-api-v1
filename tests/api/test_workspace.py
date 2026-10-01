@@ -135,6 +135,37 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         }
 
         assert own.json()["modules"] == ["Map", "Radio Log", "Observations", "Satchy"]
+        assert own.json()["convergence"]["profile"] == {
+            "operational_domain": "general",
+            "workspace_template": "general",
+            "runtime_mode": "legacy",
+            "recommended_modules": [],
+            "preferred_map_layers": [],
+            "workflow_preferences": [],
+            "discovery_state": {
+                "status": "not_started",
+                "duration_days": 14,
+                "day": 0,
+                "phases": {
+                    "listen": "off",
+                    "watch": "off",
+                    "learn": "off",
+                    "adapt": "off",
+                },
+                "workflow_counts": {
+                    "identified": 0,
+                    "testing": 0,
+                    "approved": 0,
+                },
+            },
+        }
+        assert own.json()["convergence"]["capability_manifest"]["runtime_mode"] == "legacy"
+        assert own.json()["convergence"]["capability_manifest"]["policy"][
+            "agent_reads_enabled"
+        ] is False
+        assert own.json()["convergence"]["capability_manifest"]["policy"][
+            "agent_proposals_enabled"
+        ] is False
         assert own.json()["integrations"]["devices"] == []
         assert own.json()["teams"] == [
             {"id": str(team_id), "name": "Field team", "site_id": str(site_id)}
@@ -329,6 +360,66 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert revoked.status_code == 200
         assert revoked.json()["status"] == "revoked"
         assert revoked.json()["enabled"] is False
+
+        convergence_url = (
+            f"/api/v1/workspace/organizations/{organization_id}/convergence"
+        )
+        assert (await client.patch(
+            convergence_url,
+            json={"runtime_mode": "shadow"},
+        )).status_code == 403
+        convergence_changed = await client.patch(
+            convergence_url,
+            json={
+                "operational_domain": "avalanche",
+                "workspace_template": "uac",
+                "runtime_mode": "shadow",
+                "recommended_modules": ["Map", "Radio Log", "Observations"],
+                "preferred_map_layers": ["forecast", "observations"],
+                "workflow_preferences": ["observation_review", "handoff"],
+                "discovery": {
+                    "status": "active",
+                    "day": 5,
+                    "workflow_counts": {
+                        "identified": 3,
+                        "testing": 1,
+                    },
+                },
+            },
+            headers=headers,
+        )
+        assert convergence_changed.status_code == 200
+        changed_profile = convergence_changed.json()["profile"]
+        assert changed_profile["runtime_mode"] == "shadow"
+        assert changed_profile["discovery_state"]["status"] == "active"
+        assert changed_profile["discovery_state"]["day"] == 5
+        assert changed_profile["discovery_state"]["phases"] == {
+            "listen": "active",
+            "watch": "active",
+            "learn": "active",
+            "adapt": "testing",
+        }
+        assert changed_profile["discovery_state"]["workflow_counts"] == {
+            "identified": 3,
+            "testing": 1,
+            "approved": 0,
+        }
+
+        converged_workspace = (
+            await client.get(f"/api/v1/workspace/organizations/{organization_id}")
+        ).json()
+        assert converged_workspace["convergence"]["profile"]["operational_domain"] == "avalanche"
+        assert converged_workspace["convergence"]["profile"]["workspace_template"] == "uac"
+        assert converged_workspace["convergence"]["profile"]["runtime_mode"] == "shadow"
+        assert converged_workspace["convergence"]["capability_manifest"]["policy"][
+            "shadow_only"
+        ] is True
+        assert converged_workspace["modules"] == [
+            "Map",
+            "Radio Log",
+            "Observations",
+            "Satchy",
+        ]
 
         prefs_url = f"/api/v1/workspace/organizations/{organization_id}/preferences"
         assert (await client.post(prefs_url, json={"modules": []})).status_code == 403

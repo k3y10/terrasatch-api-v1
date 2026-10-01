@@ -1,0 +1,194 @@
+"""Contract tests for organization workspace convergence state."""
+
+from types import SimpleNamespace
+from uuid import uuid4
+
+import httpx
+import pytest
+
+from terrasatch.config import Settings
+from terrasatch.main import create_app
+from terrasatch.satchy.schemas import SatchyContext
+from terrasatch.workspace.convergence import (
+    build_capability_manifest,
+    discovery_state_for_status,
+    update_discovery_state,
+    workspace_profile_payload,
+)
+
+
+def test_default_workspace_profile_is_legacy_and_discovery_safe() -> None:
+    payload = workspace_profile_payload(None)
+
+    assert payload["runtime_mode"] == "legacy"
+    assert payload["operational_domain"] == "general"
+    assert payload["workspace_template"] == "general"
+    assert payload["discovery_state"] == {
+        "status": "not_started",
+        "duration_days": 14,
+        "day": 0,
+        "phases": {
+            "listen": "off",
+            "watch": "off",
+            "learn": "off",
+            "adapt": "off",
+        },
+        "workflow_counts": {
+            "identified": 0,
+            "testing": 0,
+            "approved": 0,
+        },
+    }
+
+
+def test_discovery_lifecycle_moves_from_observation_to_approved_adaptation() -> None:
+    active = discovery_state_for_status("active", day=5)
+    assert active["day"] == 5
+    assert active["phases"] == {
+        "listen": "active",
+        "watch": "active",
+        "learn": "active",
+        "adapt": "testing",
+    }
+
+    completed = update_discovery_state(
+        active,
+        status="complete",
+        workflow_count_updates={"identified": 4, "testing": 2},
+    )
+    assert completed["day"] == 14
+    assert completed["phases"]["adapt"] == "ready"
+    assert completed["workflow_counts"] == {
+        "identified": 4,
+        "testing": 2,
+        "approved": 0,
+    }
+
+    integrated = update_discovery_state(
+        completed,
+        status="integrated",
+        workflow_count_updates={"approved": 2},
+    )
+    assert integrated["phases"] == {
+        "listen": "active",
+        "watch": "active",
+        "learn": "active",
+        "adapt": "active",
+    }
+    assert integrated["workflow_counts"]["approved"] == 2
+
+
+def test_legacy_and_shadow_keep_convergence_out_of_model_context() -> None:
+    organization_id = uuid4()
+    site_id = uuid4()
+
+    legacy = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "legacy"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+    shadow = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "shadow"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+    agent_read = SatchyContext(
+        organization_id=organization_id,
+        site_id=site_id,
+        workspace_profile={"runtime_mode": "agent_read"},
+        capability_manifest={"read": ["weather.forecast.read"]},
+    )
+
+    assert "workspace_profile" not in legacy.model_context_payload()
+    assert "capability_manifest" not in legacy.model_context_payload()
+    assert "workspace_profile" not in shadow.model_context_payload()
+    assert "capability_manifest" not in shadow.model_context_payload()
+    assert agent_read.model_context_payload()["workspace_profile"]["runtime_mode"] == "agent_read"
+    assert agent_read.model_context_payload()["capability_manifest"]["read"] == [
+        "weather.forecast.read"
+    ]
+
+
+def test_capability_manifest_only_exposes_runtime_ready_connections_and_edge_caps() -> None:
+    catalog = [
+        {
+            "key": "nws_forecast",
+            "connected": True,
+            "runtime_ready": True,
+            "capability_details": [
+                {
+                    "key": "weather.forecast.read",
+                    "label": "Read weather forecasts",
+                    "access": "read",
+                }
+            ],
+        },
+        {
+            "key": "slack",
+            "connected": False,
+            "runtime_ready": True,
+            "capability_details": [
+                {
+                    "key": "notification.send",
+                    "label": "Send notifications",
+                    "access": "write",
+                }
+            ],
+        },
+    ]
+    edge = SimpleNamespace(
+        id=uuid4(),
+        site_id=uuid4(),
+        name="Field Edge",
+        agent_version="0.2.8",
+        capabilities=["radio:receive", "radio:transmit"],
+        last_seen_at=None,
+        enabled=True,
+    )
+
+    manifest = build_capability_manifest(
+        profile=None,
+        catalog=catalog,
+        devices=[edge],
+    )
+
+    assert manifest["runtime_mode"] == "legacy"
+    assert manifest["read"] == ["weather.forecast.read"]
+    assert manifest["write"] == []
+    assert manifest["edge"] == ["radio:receive", "radio:transmit"]
+    assert manifest["physical"] == ["radio:transmit"]
+    assert manifest["connected_providers"] == ["nws_forecast"]
+    assert manifest["policy"] == {
+        "agent_reads_enabled": False,
+        "agent_proposals_enabled": False,
+        "shadow_only": False,
+        "consequential_actions_require_approval": True,
+        "physical_actions_require_approval": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_openapi_exposes_workspace_convergence_contract() -> None:
+    app = create_app(
+        Settings(
+            environment="local",
+            deployment_name="workspace-convergence-contract",
+            api_base_url="http://testserver",
+            intelligence_provider="deterministic",
+            admin_session_secret="workspace-convergence-session-secret",
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/openapi.json")
+
+    assert response.status_code == 200
+    path = response.json()["paths"][
+        "/api/v1/workspace/organizations/{organization_id}/convergence"
+    ]
+    assert "get" in path
+    assert "patch" in path
