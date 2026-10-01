@@ -1,5 +1,5 @@
 // AUTO-GENERATED FROM TERRASATCH OPENAPI. DO NOT EDIT BY HAND.
-// schema-sha256: 900f19a96681c55d3fbe04a5530770cfbb798b8b5e16077bb24e4c141bfc936b
+// schema-sha256: 147d500106a5f9c13544f8f41190b9ec5bbfe09a3a732bf7aac370255ae95d1e
 
 export type ActiveMapContext = {
   center_latitude?: number | null;
