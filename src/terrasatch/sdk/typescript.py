@@ -10,6 +10,24 @@ from typing import Any
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
+SDK_ROOT_SCHEMAS = frozenset(
+    {
+        "Chat",
+        "Observation",
+        "SatchyChatResponse",
+        "SatchyRunResponse",
+        "WorkspaceActionReviewResponse",
+        "WorkspaceConvergenceResponse",
+        "WorkspaceConvergenceUpdate",
+        "WorkspaceConvergenceUpdateResponse",
+        "WorkspaceLoginResponse",
+        "WorkspaceLogoutResponse",
+        "WorkspaceObservationResponse",
+        "WorkspaceSessionResponse",
+        "WorkspaceSnapshotResponse",
+    }
+)
+
 
 def canonical_openapi_json(openapi: Mapping[str, Any]) -> str:
     return json.dumps(openapi, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -126,16 +144,60 @@ def _typescript_type(schema: Any, indent: int = 0) -> str:
     return "unknown"
 
 
-def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
+def _schema_refs(value: Any) -> set[str]:
+    refs: set[str] = set()
+    if isinstance(value, Mapping):
+        ref = value.get("$ref")
+        if isinstance(ref, str):
+            refs.add(_schema_name(ref))
+        for nested in value.values():
+            refs.update(_schema_refs(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            refs.update(_schema_refs(nested))
+    return refs
+
+
+def _selected_schemas(openapi: Mapping[str, Any]) -> dict[str, Any]:
+    components = openapi.get("components")
     schemas = (
-        openapi.get("components", {}).get("schemas", {})
-        if isinstance(openapi.get("components"), Mapping)
+        components.get("schemas", {})
+        if isinstance(components, Mapping)
         else {}
     )
-    digest = openapi_sha256(openapi)
+    if not isinstance(schemas, Mapping):
+        raise ValueError("OpenAPI components.schemas is missing")
+
+    selected = set(SDK_ROOT_SCHEMAS)
+    queue = list(SDK_ROOT_SCHEMAS)
+    while queue:
+        name = queue.pop()
+        schema = schemas.get(name)
+        if schema is None:
+            raise ValueError(f"SDK root schema is missing from OpenAPI: {name}")
+        for dependency in _schema_refs(schema):
+            if dependency not in schemas:
+                raise ValueError(
+                    f"SDK schema {name} references missing OpenAPI schema {dependency}"
+                )
+            if dependency not in selected:
+                selected.add(dependency)
+                queue.append(dependency)
+
+    return {name: schemas[name] for name in sorted(selected)}
+
+
+def selected_schema_sha256(openapi: Mapping[str, Any]) -> str:
+    selected = _selected_schemas(openapi)
+    return hashlib.sha256(canonical_openapi_json(selected).encode()).hexdigest()
+
+
+def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
+    schemas = _selected_schemas(openapi)
+    digest = selected_schema_sha256(openapi)
     lines = [
         "// AUTO-GENERATED FROM TERRASATCH OPENAPI. DO NOT EDIT BY HAND.",
-        f"// openapi-sha256: {digest}",
+        f"// schema-sha256: {digest}",
         "",
     ]
 
@@ -205,7 +267,7 @@ def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
             "    payload: Observation,",
             "    csrfToken: string,",
             "  ): Promise<WorkspaceObservationResponse>;",
-            "  connectEvents(options: {",
+            "  connectEvents(options?: {",
             "    token?: string;",
             "    topics?: RealtimeTopic[];",
             "  }): WebSocket;",
