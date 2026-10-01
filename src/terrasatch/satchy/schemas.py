@@ -145,11 +145,11 @@ class SatchyRunStepResponse(BaseModel):
     type: str
     status: str
     label: str
-    detail: dict[str, object] = Field(default_factory=dict)
-    source_refs: list[dict[str, object]] = Field(default_factory=list)
-    action_id: UUID | None = None
+    detail: dict[str, object]
+    source_refs: list[dict[str, object]]
+    action_id: UUID | None
     created_at: datetime
-    completed_at: datetime | None = None
+    completed_at: datetime | None
 
 
 class SatchyRunResponse(BaseModel):
@@ -157,17 +157,17 @@ class SatchyRunResponse(BaseModel):
     request_id: UUID
     organization_id: UUID
     site_id: UUID
-    user_id: UUID | None = None
-    objective: str | None = None
+    user_id: UUID | None
+    objective: str | None
     input_text: str
-    response_text: str | None = None
-    model: str | None = None
+    response_text: str | None
+    model: str | None
     status: str
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: dict[str, object]
     created_at: datetime
     updated_at: datetime
-    completed_at: datetime | None = None
-    steps: list[SatchyRunStepResponse] = Field(default_factory=list)
+    completed_at: datetime | None
+    steps: list[SatchyRunStepResponse]
 
 
 class FieldAssetCreate(BaseModel):
