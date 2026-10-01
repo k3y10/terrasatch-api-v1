@@ -314,6 +314,7 @@ async def test_learning_ignores_generic_signals_without_specific_event_pattern()
 
     await engine.dispose()
 
+
 @pytest.mark.asyncio
 async def test_learning_ignores_signal_support_older_than_discovery_window() -> None:
     engine = create_async_engine("sqlite+aiosqlite://")
