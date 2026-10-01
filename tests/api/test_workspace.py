@@ -299,6 +299,47 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert "Nothing has been sent" in proposal.json()["answer"]
 
         run_id = proposal.json()["run_id"]
+        discovery_url = (
+            f"/api/v1/workspace/organizations/{organization_id}/discovery"
+        )
+        discovery_events_url = f"{discovery_url}/events"
+        discovery = await client.get(discovery_url)
+        assert discovery.status_code == 200
+        assert discovery.json()["signal_count"] == 0
+        assert discovery.json()["context_count"] == 1
+        assert discovery.json()["event_count"] == 1
+        assert discovery.json()["phase_evidence"] == {
+            "listen": False,
+            "watch": True,
+            "learn": False,
+            "adapt": False,
+        }
+        context_events = await client.get(discovery_events_url)
+        assert context_events.status_code == 200
+        assert len(context_events.json()) == 1
+        context_event = context_events.json()[0]
+        assert context_event["event_type"] == "context_observed"
+        assert context_event["source_type"] == "satchy_workspace"
+        assert context_event["source_ref"] == f"satchy_run:{run_id}"
+        assert context_event["actor_user_id"] == str(user_id)
+        assert "notify the team" not in str(context_event["evidence"]).lower()
+
+        repeated_proposal = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "request_id": str(satchy_request_id),
+                "site_id": str(site_id),
+                "message": "Satchy, notify the team that staging integration review is ready.",
+            },
+            headers=headers,
+        )
+        assert repeated_proposal.status_code == 200
+        assert repeated_proposal.json()["run_id"] == run_id
+        repeated_discovery = await client.get(discovery_url)
+        assert repeated_discovery.status_code == 200
+        assert repeated_discovery.json()["context_count"] == 1
+        assert repeated_discovery.json()["event_count"] == 1
+
         run_detail = await client.get(
             f"/api/v1/workspace/organizations/{organization_id}/runs/{run_id}"
         )
