@@ -170,3 +170,64 @@ async def test_canonical_signal_and_workspace_context_are_captured_idempotently(
         await session.commit()
 
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_discovery_capture_failure_does_not_break_parent_transaction(monkeypatch) -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        account = Account(name="Capture resilience account")
+        session.add(account)
+        await session.flush()
+        organization = Organization(
+            account_id=account.id,
+            name="Capture resilience org",
+            slug=f"capture-resilience-{uuid4().hex[:8]}",
+        )
+        user = User(
+            email=f"{uuid4().hex}@example.com",
+            display_name="Capture resilience user",
+            enabled=True,
+        )
+        session.add_all([organization, user])
+        await session.flush()
+        site = Site(
+            organization_id=organization.id,
+            name="Capture resilience site",
+            slug=f"capture-resilience-site-{uuid4().hex[:8]}",
+        )
+        session.add(site)
+        await session.flush()
+
+        async def fail_record(*args, **kwargs):
+            raise RuntimeError("simulated Discovery storage failure")
+
+        monkeypatch.setattr(
+            "terrasatch.satchy.discovery_capture.record_discovery_event",
+            fail_record,
+        )
+        captured = await capture_workspace_context_discovery_evidence(
+            session,
+            organization_id=organization.id,
+            site_id=site.id,
+            user_id=user.id,
+            run_id=uuid4(),
+            request_id=uuid4(),
+            active_map=False,
+            field_source_count=0,
+            connected_provider_count=0,
+            available_capability_count=0,
+        )
+        assert captured is None
+
+        organization.name = "Capture resilience org still writable"
+        await session.commit()
+        refreshed = await session.get(Organization, organization.id)
+        assert refreshed is not None
+        assert refreshed.name == "Capture resilience org still writable"
+
+    await engine.dispose()
+
