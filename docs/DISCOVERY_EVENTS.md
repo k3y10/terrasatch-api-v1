@@ -73,6 +73,14 @@ The Discovery summary reports both:
 
 Signal/context counts and current workflow interpretation use active evidence so revisions do not inflate observations.
 
+Each workflow summary separates:
+
+- `state_event_id/state_event_at` — the event that currently determines identified/testing/approved/rejected state
+- `latest_event_id/latest_event_at` — the most recent workflow evidence or revision by actual time
+- `revision_count` — how many explicit superseding revisions exist in that workflow history
+
+This lets a workflow remain Approved while still showing that Satchy refined its understanding afterward.
+
 ## Derived workflow counts
 
 Counts are derived from the latest evidence state for each unique workflow key:
