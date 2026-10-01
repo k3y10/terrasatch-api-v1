@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from terrasatch.billing.schemas import SubscriptionResponse
 
@@ -285,6 +286,17 @@ class DiscoveryEventCreate(BaseModel):
     dedupe_key: str | None = Field(default=None, min_length=1, max_length=255)
     confidence: float | None = Field(default=None, ge=0, le=1)
     evidence: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_discovery_evidence(self):
+        if self.event_type.startswith("workflow_") and self.workflow_key is None:
+            raise ValueError("workflow_key is required for workflow Discovery events")
+        if len(self.evidence) > 32:
+            raise ValueError("Discovery evidence supports at most 32 fields")
+        encoded = json.dumps(self.evidence, separators=(",", ":"), ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > 16_384:
+            raise ValueError("Discovery evidence cannot exceed 16 KiB")
+        return self
 
 
 class DiscoveryEventResponse(BaseModel):
