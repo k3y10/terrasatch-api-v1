@@ -63,6 +63,11 @@ class WorkspaceDiscoveryEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "dedupe_key",
             name="uq_workspace_discovery_events_org_dedupe",
         ),
+        UniqueConstraint(
+            "organization_id",
+            "supersedes_event_id",
+            name="uq_workspace_discovery_events_org_supersedes",
+        ),
         Index(
             "ix_workspace_discovery_events_org_occurred",
             "organization_id",
@@ -85,6 +90,10 @@ class WorkspaceDiscoveryEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     actor_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    supersedes_event_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workspace_discovery_events.id", ondelete="RESTRICT"),
         nullable=True,
     )
     event_type: Mapped[str] = mapped_column(String(48), nullable=False)
