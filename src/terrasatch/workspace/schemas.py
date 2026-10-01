@@ -275,6 +275,7 @@ class DiscoveryEventCreate(BaseModel):
         "workflow_rejected",
     ]
     site_id: UUID | None = None
+    supersedes_event_id: UUID | None = None
     workflow_key: str | None = Field(
         default=None,
         min_length=1,
@@ -304,6 +305,7 @@ class DiscoveryEventResponse(BaseModel):
     organization_id: UUID
     site_id: UUID | None
     actor_user_id: UUID | None
+    supersedes_event_id: UUID | None
     event_type: str
     workflow_key: str | None
     workflow_label: str | None
