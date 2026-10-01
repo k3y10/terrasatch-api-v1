@@ -123,10 +123,49 @@ class WorkspaceEngineSummary(BaseModel):
     model: str
 
 
+class WorkspaceCapabilityResponse(BaseModel):
+    key: str
+    label: str
+    access: Literal["read", "write"]
+
+
+class WorkspaceIntegrationCatalogItem(BaseModel):
+    key: str
+    name: str
+    category: str
+    auth: str
+    setup_status: Literal["managed", "planned", "available"]
+    support_status: Literal[
+        "managed",
+        "supported",
+        "partner_required",
+        "coming_soon",
+    ]
+    connect_status: Literal[
+        "managed",
+        "available",
+        "external_setup_required",
+        "needs_configuration",
+        "partner_required",
+        "coming_soon",
+    ]
+    scopes: list[str] = Field(default_factory=list)
+    allowed_scopes: list[str] = Field(default_factory=list)
+    allowed: bool
+    can_connect: bool
+    requires_admin: bool
+    connected: bool
+    connected_scopes: list[str] = Field(default_factory=list)
+    runtime_ready: bool
+    capabilities: list[str] = Field(default_factory=list)
+    capability_details: list[WorkspaceCapabilityResponse] = Field(default_factory=list)
+    description: str
+
+
 class WorkspaceIntegrationsResponse(BaseModel):
     devices: list[WorkspaceDeviceSummary] = Field(default_factory=list)
     engine: WorkspaceEngineSummary
-    catalog: list[dict[str, object]] = Field(default_factory=list)
+    catalog: list[WorkspaceIntegrationCatalogItem] = Field(default_factory=list)
     connections: list[dict[str, object]] = Field(default_factory=list)
 
 
