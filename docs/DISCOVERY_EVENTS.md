@@ -117,7 +117,7 @@ Automatic evidence intentionally avoids duplicating source content. Signal evide
 
 Automatic capture is best-effort and isolated in a database savepoint. Discovery evidence failure is logged but must not break the canonical ingest or Satchy request that produced the evidence.
 
-This phase still does not automatically create `workflow_identified`, `workflow_testing`, `workflow_approved`, or `workflow_rejected` events. Workflow learning remains a separate bounded pattern-detection phase.
+Automatic capture itself remains observational. The bounded LEARN detector described below may create or revise `workflow_identified` candidate evidence, but it cannot create `workflow_testing`, `workflow_approved`, or `workflow_rejected` state transitions.
 
 ## Bounded LEARN detection
 
@@ -161,13 +161,13 @@ Automatic Satchy/system capture should call the internal Discovery service direc
 
 ## Rollout boundary
 
-This foundation intentionally does not:
+This phase intentionally does not:
 
-- auto-detect workflow patterns yet
+- move an identified candidate into testing without an authorized human
+- approve, reject, or execute workflow adaptations automatically
 - alter the existing Discovery lifecycle JSON
-- change Satchy runtime modes
-- auto-approve adaptations
+- change Satchy runtime modes or permissions
 - calculate ROI without measured evidence
 - change UAC, Snowbird, Edge, radio, or integration behavior
 
-The next phase can safely connect canonical signals to this evidence layer and then surface evidence-derived counts in the workspace UI.
+The next phase can add measured `workflow_testing` evidence and explicit human review outcomes while keeping execution separately permissioned.
