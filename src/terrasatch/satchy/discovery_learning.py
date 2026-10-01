@@ -61,7 +61,7 @@ def _signal_signature(
     )
     if not event_types:
         return None
-    return source.strip(), event_types
+    return source.strip().casefold(), event_types
 
 
 def _workflow_key(
