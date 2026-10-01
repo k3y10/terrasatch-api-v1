@@ -434,20 +434,27 @@ async def create_discovery_event(
                 "workflow_key is required for workflow Discovery events",
             )
 
-        event, duplicate = await record_discovery_event(
-            session,
-            organization_id=organization_id,
-            event_type=payload.event_type,
-            source_type="manual",
-            site_id=payload.site_id,
-            actor_user_id=user.id,
-            workflow_key=payload.workflow_key,
-            workflow_label=payload.workflow_label,
-            source_ref=payload.source_ref,
-            dedupe_key=payload.dedupe_key,
-            confidence=payload.confidence,
-            evidence=payload.evidence,
-        )
+        try:
+            event, duplicate = await record_discovery_event(
+                session,
+                organization_id=organization_id,
+                event_type=payload.event_type,
+                source_type="manual",
+                site_id=payload.site_id,
+                actor_user_id=user.id,
+                workflow_key=payload.workflow_key,
+                workflow_label=payload.workflow_label,
+                source_ref=payload.source_ref,
+                dedupe_key=payload.dedupe_key,
+                confidence=payload.confidence,
+                evidence=payload.evidence,
+                supersedes_event_id=payload.supersedes_event_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                str(exc),
+            ) from exc
         await session.commit()
         return jsonable_encoder(
             {
