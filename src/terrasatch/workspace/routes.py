@@ -1,7 +1,7 @@
 """Member sessions, tenant-scoped field records, Satchy chat and human reviews."""
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -376,9 +376,9 @@ async def discovery_events(
     organization_id: UUID,
     request: Request,
     response: Response,
-    event_type: DiscoveryEventType | None = Query(default=None),
-    workflow_key: str | None = Query(default=None, max_length=128),
-    limit: int = Query(default=100, ge=1, le=200),
+    event_type: Annotated[DiscoveryEventType | None, Query()] = None,
+    workflow_key: Annotated[str | None, Query(max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ):
     """List append-only Discovery evidence visible to this workspace member."""
 
