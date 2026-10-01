@@ -205,6 +205,7 @@ async def test_canonical_signal_and_workspace_context_are_captured_idempotently(
 
     await engine.dispose()
 
+
 @pytest.mark.asyncio
 async def test_discovery_capture_failure_does_not_break_parent_transaction(monkeypatch) -> None:
     engine = create_async_engine("sqlite+aiosqlite://")
@@ -264,6 +265,7 @@ async def test_discovery_capture_failure_does_not_break_parent_transaction(monke
         assert refreshed.name == "Capture resilience org still writable"
 
     await engine.dispose()
+
 
 @pytest.mark.asyncio
 async def test_context_capture_unlocks_preexisting_signal_pattern() -> None:
