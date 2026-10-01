@@ -40,7 +40,7 @@ async def capture_transmission_discovery_evidence(
                 organization_id=transmission.organization_id,
                 site_id=transmission.site_id,
                 event_type="signal_observed",
-                source_type=transmission.source_type,
+                source_type="canonical_transmission",
                 source_ref=f"transmission:{transmission.id}",
                 dedupe_key=f"auto:signal:transmission:{transmission.id}",
                 evidence=evidence,
