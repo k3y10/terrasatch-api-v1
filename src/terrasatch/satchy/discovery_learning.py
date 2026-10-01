@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
 
@@ -22,6 +23,7 @@ _MAX_PATTERNS_PER_SITE = 12
 _IGNORED_EVENT_TYPES = {"GENERAL_UPDATE", "RADIO_TRANSMISSION"}
 _DETECTOR_SOURCE = "satchy_pattern_detector"
 _DETECTOR_VERSION = "signal-pattern-v1"
+_LOOKBACK_DAYS = 14
 
 
 def _active_events(
@@ -131,12 +133,14 @@ async def detect_discovery_workflow_candidates(
 ) -> list[WorkspaceDiscoveryEvent]:
     """Identify repeatable signal patterns without testing, approving, or executing them."""
 
+    cutoff = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
     rows = list(
         await session.scalars(
             select(WorkspaceDiscoveryEvent)
             .where(
                 WorkspaceDiscoveryEvent.organization_id == organization_id,
                 WorkspaceDiscoveryEvent.site_id == site_id,
+                WorkspaceDiscoveryEvent.occurred_at >= cutoff,
                 WorkspaceDiscoveryEvent.event_type.in_(
                     [
                         DiscoveryEventType.SIGNAL_OBSERVED.value,
@@ -230,6 +234,7 @@ async def detect_discovery_workflow_candidates(
 
         evidence = {
             "detector_version": _DETECTOR_VERSION,
+            "confidence_basis": "bounded_support_milestone_not_operational_truth",
             "site_id": str(site_id),
             "source_type": source_type,
             "operational_event_types": list(event_types),
