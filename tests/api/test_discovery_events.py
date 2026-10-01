@@ -155,7 +155,7 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
         assert duplicate_retry is True
         assert retry.id == testing.id
 
-        await record_discovery_event(
+        approved_event, _ = await record_discovery_event(
             session,
             organization_id=organization.id,
             event_type="workflow_approved",
@@ -164,6 +164,25 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             workflow_key="radio_to_record",
             dedupe_key="workflow:radio_to_record:approved",
         )
+        late_revision, _ = await record_discovery_event(
+            session,
+            organization_id=organization.id,
+            event_type="workflow_identified",
+            source_type="satchy",
+            workflow_key="radio_to_record",
+            workflow_label="Radio to supervisor review to archived record",
+            dedupe_key="workflow:radio_to_record:identified:v3",
+            evidence={
+                "steps": [
+                    "radio",
+                    "supervisor_review",
+                    "archived_record",
+                ]
+            },
+            supersedes_event_id=revised.id,
+        )
+        assert late_revision.supersedes_event_id == revised.id
+        assert approved_event.id != late_revision.id
         await record_discovery_event(
             session,
             organization_id=organization.id,
@@ -189,7 +208,8 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             session,
             organization_id=organization.id,
         )
-        assert summary["event_count"] == 8
+        assert summary["event_count"] == 9
+        assert summary["active_event_count"] == 7
         assert summary["signal_count"] == 1
         assert summary["context_count"] == 1
         assert summary["workflow_counts"] == {
@@ -210,7 +230,7 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             "shift_handoff": "rejected",
         }
         labels = {item["key"]: item["label"] for item in summary["workflows"]}
-        assert labels["radio_to_record"] == "Radio to supervisor review to record"
+        assert labels["radio_to_record"] == "Radio to supervisor review to archived record"
 
         approved = await list_discovery_events(
             session,
@@ -299,6 +319,7 @@ async def test_discovery_workspace_api_is_tenant_scoped_and_admin_written(monkey
         empty = await client.get(summary_url)
         assert empty.status_code == 200
         assert empty.json()["event_count"] == 0
+        assert empty.json()["active_event_count"] == 0
 
         payload = {
             "event_type": "workflow_identified",
@@ -356,6 +377,17 @@ async def test_discovery_workspace_api_is_tenant_scoped_and_admin_written(monkey
         assert retry.json()["duplicate"] is True
         assert retry.json()["event"]["id"] == event_id
 
+        dedupe_collision = await client.post(
+            events_url,
+            json={
+                **payload,
+                "workflow_label": "Changed content with reused retry key",
+            },
+            headers=headers,
+        )
+        assert dedupe_collision.status_code == 422
+        assert "dedupe_key is already used" in dedupe_collision.json()["detail"]
+
         invalid = await client.post(
             events_url,
             json={"event_type": "workflow_testing"},
@@ -365,6 +397,8 @@ async def test_discovery_workspace_api_is_tenant_scoped_and_admin_written(monkey
 
         summary = await client.get(summary_url)
         assert summary.status_code == 200
+        assert summary.json()["event_count"] == 2
+        assert summary.json()["active_event_count"] == 1
         assert summary.json()["workflow_counts"] == {
             "identified": 1,
             "testing": 0,
