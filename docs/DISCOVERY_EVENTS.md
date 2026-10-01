@@ -125,7 +125,7 @@ Satchy may create a `workflow_identified` candidate only when a repeated pattern
 
 The first detector is intentionally conservative:
 
-- at least **3** matching canonical signal events
+- at least **3** matching canonical signal events inside the rolling 14-day Discovery window
 - all matching signals are scoped to the same site
 - the signals share the same original source classification and specific structured operational-event type set
 - at least one active `context_observed` event exists for that site
@@ -133,7 +133,7 @@ The first detector is intentionally conservative:
 - at most 12 strongest signal patterns per site are considered
 - workflow keys are deterministic hashes of site + source + structured event types
 
-Automatic LEARN evidence contains references and counts, not transcript/chat content. The first candidate starts at confidence 0.65 and can be revised only at bounded support milestones:
+Automatic LEARN evidence contains references and counts, not transcript/chat content. Its confidence value is only a bounded pattern-support score, not confidence that an operational conclusion is true. The first candidate starts at 0.65 and can be revised only at bounded support milestones:
 
 - 3 observations → 0.65
 - 5 observations → 0.72
