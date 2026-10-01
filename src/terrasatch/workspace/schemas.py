@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from terrasatch.billing.schemas import SubscriptionResponse
 
@@ -262,6 +263,100 @@ class WorkspaceActionReviewResponse(BaseModel):
     status: str
     integration_detail: object | None
     integration_execution: dict[str, object]
+
+
+class DiscoveryEventCreate(BaseModel):
+    event_type: Literal[
+        "signal_observed",
+        "context_observed",
+        "workflow_identified",
+        "workflow_testing",
+        "workflow_approved",
+        "workflow_rejected",
+    ]
+    site_id: UUID | None = None
+    supersedes_event_id: UUID | None = None
+    workflow_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+    )
+    workflow_label: str | None = Field(default=None, min_length=1, max_length=255)
+    source_ref: str | None = Field(default=None, min_length=1, max_length=255)
+    dedupe_key: str | None = Field(default=None, min_length=1, max_length=255)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_discovery_evidence(self):
+        if self.event_type.startswith("workflow_") and self.workflow_key is None:
+            raise ValueError("workflow_key is required for workflow Discovery events")
+        if len(self.evidence) > 32:
+            raise ValueError("Discovery evidence supports at most 32 fields")
+        encoded = json.dumps(self.evidence, separators=(",", ":"), ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > 16_384:
+            raise ValueError("Discovery evidence cannot exceed 16 KiB")
+        return self
+
+
+class DiscoveryEventResponse(BaseModel):
+    id: UUID
+    organization_id: UUID
+    site_id: UUID | None
+    actor_user_id: UUID | None
+    supersedes_event_id: UUID | None
+    event_type: str
+    workflow_key: str | None
+    workflow_label: str | None
+    source_type: str
+    source_ref: str | None
+    dedupe_key: str | None
+    confidence: float | None
+    evidence: dict[str, object]
+    occurred_at: datetime
+    created_at: datetime
+
+
+class DiscoveryEventCreateResponse(BaseModel):
+    event: DiscoveryEventResponse
+    duplicate: bool
+
+
+class DiscoveryWorkflowSummary(BaseModel):
+    key: str
+    label: str | None
+    state: Literal["identified", "testing", "approved", "rejected"]
+    state_event_id: UUID
+    state_event_at: datetime
+    latest_event_id: UUID
+    latest_event_at: datetime
+    revision_count: int = Field(ge=0)
+
+
+class DiscoveryEvidenceWorkflowCounts(BaseModel):
+    identified: int = Field(ge=0)
+    testing: int = Field(ge=0)
+    approved: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+
+
+class DiscoveryPhaseEvidence(BaseModel):
+    listen: bool
+    watch: bool
+    learn: bool
+    adapt: bool
+
+
+class DiscoveryEvidenceSummaryResponse(BaseModel):
+    event_count: int = Field(ge=0)
+    active_event_count: int = Field(ge=0)
+    signal_count: int = Field(ge=0)
+    context_count: int = Field(ge=0)
+    workflow_counts: DiscoveryEvidenceWorkflowCounts
+    phase_evidence: DiscoveryPhaseEvidence
+    latest_event_at: datetime | None
+    workflows: list[DiscoveryWorkflowSummary]
 
 
 class WorkspaceObservationResponse(BaseModel):

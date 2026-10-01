@@ -1,8 +1,19 @@
 """Persistent, member-private Satchy conversations."""
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from terrasatch.database.base import Base
@@ -40,6 +51,64 @@ class WorkspaceProfile(TimestampMixin, Base):
     preferred_map_layers: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     workflow_preferences: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     discovery_state: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class WorkspaceDiscoveryEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Append-only evidence observed during Satchy Discovery."""
+
+    __tablename__ = "workspace_discovery_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "dedupe_key",
+            name="uq_workspace_discovery_events_org_dedupe",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "supersedes_event_id",
+            name="uq_workspace_discovery_events_org_supersedes",
+        ),
+        Index(
+            "ix_workspace_discovery_events_org_occurred",
+            "organization_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_workspace_discovery_events_org_workflow",
+            "organization_id",
+            "workflow_key",
+        ),
+    )
+
+    organization_id: Mapped[UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    site_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sites.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    actor_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    supersedes_event_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workspace_discovery_events.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    workflow_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    workflow_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class WorkspaceMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
