@@ -384,9 +384,31 @@ async def discovery_evidence_summary(
             "key": event.workflow_key,
             "label": event.workflow_label or previous_label,
             "state": state,
-            "latest_event_id": str(event.id),
-            "latest_event_at": event.occurred_at,
+            "state_event_id": str(event.id),
+            "state_event_at": event.occurred_at,
         }
+
+    workflow_history: dict[str, list[WorkspaceDiscoveryEvent]] = {}
+    for event in events:
+        if event.workflow_key is not None:
+            workflow_history.setdefault(event.workflow_key, []).append(event)
+
+    for workflow_key, item in workflow_states.items():
+        history = workflow_history.get(workflow_key, [])
+        if not history:
+            continue
+        latest = max(
+            history,
+            key=lambda event: (
+                _utc_timestamp(event.occurred_at),
+                _utc_timestamp(event.created_at),
+            ),
+        )
+        item["latest_event_id"] = str(latest.id)
+        item["latest_event_at"] = latest.occurred_at
+        item["revision_count"] = sum(
+            event.supersedes_event_id is not None for event in history
+        )
 
     identified = len(workflow_states)
     testing = sum(item["state"] == "testing" for item in workflow_states.values())
