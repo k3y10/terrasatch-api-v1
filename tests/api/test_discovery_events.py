@@ -115,7 +115,6 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             source_type="manual",
             actor_user_id=user.id,
             workflow_key="radio_to_record",
-            workflow_label="Radio observation to record",
             dedupe_key="workflow:radio_to_record:approved",
         )
         await record_discovery_event(
@@ -163,6 +162,8 @@ async def test_discovery_summary_uses_latest_unique_workflow_evidence() -> None:
             "radio_to_record": "approved",
             "shift_handoff": "rejected",
         }
+        labels = {item["key"]: item["label"] for item in summary["workflows"]}
+        assert labels["radio_to_record"] == "Radio observation to record"
 
         approved = await list_discovery_events(
             session,
