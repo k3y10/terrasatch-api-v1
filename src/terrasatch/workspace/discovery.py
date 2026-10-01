@@ -7,6 +7,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.workspace.models import WorkspaceDiscoveryEvent
@@ -55,11 +56,25 @@ async def record_discovery_event(
     """Append one evidence event, returning an existing row for an idempotent retry."""
 
     normalized_type = DiscoveryEventType(str(event_type)).value
+    normalized_source = source_type.strip()
+    if not normalized_source or len(normalized_source) > 48:
+        raise ValueError("source_type must contain between 1 and 48 characters")
+    if confidence is not None and not 0 <= confidence <= 1:
+        raise ValueError("confidence must be between 0 and 1")
+
     normalized_workflow = workflow_key.strip() if workflow_key else None
+    if normalized_workflow and len(normalized_workflow) > 128:
+        raise ValueError("workflow_key cannot exceed 128 characters")
     if normalized_type in WORKFLOW_EVENT_TYPES and not normalized_workflow:
         raise ValueError("workflow_key is required for workflow Discovery events")
 
+    normalized_label = workflow_label.strip() if workflow_label else None
+    if normalized_label and len(normalized_label) > 255:
+        raise ValueError("workflow_label cannot exceed 255 characters")
+
     normalized_dedupe = dedupe_key.strip() if dedupe_key else None
+    if normalized_dedupe and len(normalized_dedupe) > 255:
+        raise ValueError("dedupe_key cannot exceed 255 characters")
     if normalized_dedupe:
         existing = await session.scalar(
             select(WorkspaceDiscoveryEvent).where(
@@ -76,16 +91,34 @@ async def record_discovery_event(
         actor_user_id=actor_user_id,
         event_type=normalized_type,
         workflow_key=normalized_workflow,
-        workflow_label=workflow_label.strip() if workflow_label else None,
-        source_type=source_type.strip(),
+        workflow_label=normalized_label,
+        source_type=normalized_source,
         source_ref=source_ref.strip() if source_ref else None,
         dedupe_key=normalized_dedupe,
         confidence=confidence,
         evidence=dict(evidence or {}),
         occurred_at=occurred_at or datetime.now(UTC),
     )
-    session.add(event)
-    await session.flush()
+    if normalized_dedupe:
+        try:
+            async with session.begin_nested():
+                session.add(event)
+                await session.flush()
+        except IntegrityError:
+            existing = await session.scalar(
+                select(WorkspaceDiscoveryEvent).where(
+                    WorkspaceDiscoveryEvent.organization_id == organization_id,
+                    WorkspaceDiscoveryEvent.dedupe_key == normalized_dedupe,
+                )
+            )
+            if existing is not None:
+                return existing, True
+            raise
+    else:
+        session.add(event)
+        await session.flush()
+
+    await session.refresh(event)
     return event, False
 
 
@@ -155,6 +188,7 @@ async def discovery_evidence_summary(
 
     signal_count = 0
     context_count = 0
+    adapt_evidence = False
     workflow_states: dict[str, dict[str, object]] = {}
 
     for event in events:
@@ -163,12 +197,21 @@ async def discovery_evidence_summary(
         elif event.event_type == DiscoveryEventType.CONTEXT_OBSERVED.value:
             context_count += 1
 
+        if event.event_type in {
+            DiscoveryEventType.WORKFLOW_TESTING.value,
+            DiscoveryEventType.WORKFLOW_APPROVED.value,
+            DiscoveryEventType.WORKFLOW_REJECTED.value,
+        }:
+            adapt_evidence = True
+
         state = WORKFLOW_STATE_BY_EVENT.get(event.event_type)
         if state is None or event.workflow_key is None:
             continue
+        previous = workflow_states.get(event.workflow_key)
+        previous_label = previous.get("label") if previous is not None else None
         workflow_states[event.workflow_key] = {
             "key": event.workflow_key,
-            "label": event.workflow_label,
+            "label": event.workflow_label or previous_label,
             "state": state,
             "latest_event_id": str(event.id),
             "latest_event_at": event.occurred_at,
@@ -193,7 +236,7 @@ async def discovery_evidence_summary(
             "listen": signal_count > 0,
             "watch": context_count > 0,
             "learn": identified > 0,
-            "adapt": testing > 0 or approved > 0,
+            "adapt": adapt_evidence,
         },
         "latest_event_at": events[-1].occurred_at if events else None,
         "workflows": sorted(
