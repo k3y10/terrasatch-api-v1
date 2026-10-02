@@ -289,3 +289,85 @@ async def record_workflow_test_measurement(
         evidence=evidence,
         supersedes_event_id=active_test.id,
     )
+
+
+async def review_workflow_test(
+    session: AsyncSession,
+    *,
+    organization_id: UUID,
+    actor_user_id: UUID,
+    workflow_key: str,
+    request_id: UUID,
+    decision: str,
+    rationale: str,
+) -> tuple[WorkspaceDiscoveryEvent, bool]:
+    event_type = (
+        DiscoveryEventType.WORKFLOW_APPROVED
+        if decision == "approved"
+        else DiscoveryEventType.WORKFLOW_REJECTED
+    )
+    dedupe_key = f"test-review:{workflow_key}:{decision}:{request_id}"
+    existing = await _existing_request(
+        session,
+        organization_id=organization_id,
+        dedupe_key=dedupe_key,
+        event_type=event_type,
+        workflow_key=workflow_key,
+    )
+    if existing is not None:
+        return existing, True
+
+    workflow = await _current_workflow(
+        session,
+        organization_id=organization_id,
+        workflow_key=workflow_key,
+    )
+    if workflow is None or workflow["state"] != "testing":
+        raise ValueError("workflow must be in testing before review")
+
+    active_test = await _active_event(
+        session,
+        organization_id=organization_id,
+        workflow_key=workflow_key,
+        event_type=DiscoveryEventType.WORKFLOW_TESTING,
+    )
+    if active_test is None:
+        raise ValueError("active workflow testing evidence was not found")
+
+    test_evidence = dict(active_test.evidence or {})
+    measurement_count = int(test_evidence.get("measurement_count") or 0)
+    sample_target = int(test_evidence.get("sample_target") or 1)
+    if decision == "approved" and measurement_count < sample_target:
+        raise ValueError("approval requires the declared sample target to be met")
+
+    evidence = {
+        "review_request_id": str(request_id),
+        "testing_event_id": str(active_test.id),
+        "decision": decision,
+        "rationale": rationale.strip(),
+        "objective": test_evidence.get("objective"),
+        "metric_key": test_evidence.get("metric_key"),
+        "metric_unit": test_evidence.get("metric_unit"),
+        "baseline_value": test_evidence.get("baseline_value"),
+        "measurement_count": measurement_count,
+        "sample_target": sample_target,
+        "measured_average": test_evidence.get("measured_average"),
+        "observed_delta_from_baseline": test_evidence.get(
+            "observed_delta_from_baseline"
+        ),
+        "observed_delta_percent": test_evidence.get("observed_delta_percent"),
+        "execution_authorized": False,
+    }
+    return await record_discovery_event(
+        session,
+        organization_id=organization_id,
+        site_id=active_test.site_id,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        workflow_key=workflow_key,
+        workflow_label=active_test.workflow_label,
+        source_type=_REVIEW_SOURCE,
+        source_ref=f"testing:{active_test.id}",
+        dedupe_key=dedupe_key,
+        evidence=evidence,
+    )
