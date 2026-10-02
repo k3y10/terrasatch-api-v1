@@ -183,6 +183,83 @@ export class TerraSatchClient {
     );
   }
 
+  getWorkspaceIntegrationCatalog(organizationId) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/catalog`,
+    );
+  }
+
+  createWorkspaceIntegration(organizationId, payload, csrfToken) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations`,
+      {
+        method: "POST",
+        csrfToken,
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  configureWorkspaceIntegrationCredentials(
+    organizationId,
+    connectionId,
+    values,
+    csrfToken,
+  ) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/${encode(connectionId)}/credentials`,
+      {
+        method: "POST",
+        csrfToken,
+        body: JSON.stringify({ values }),
+      },
+    );
+  }
+
+  authorizeWorkspaceIntegration(organizationId, connectionId, csrfToken) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/${encode(connectionId)}/authorize`,
+      {
+        method: "POST",
+        csrfToken,
+        body: "{}",
+      },
+    );
+  }
+
+  testWorkspaceIntegration(organizationId, connectionId, csrfToken) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/${encode(connectionId)}/test`,
+      {
+        method: "POST",
+        csrfToken,
+        body: "{}",
+      },
+    );
+  }
+
+  revokeWorkspaceIntegration(organizationId, connectionId, csrfToken) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/${encode(connectionId)}/revoke`,
+      {
+        method: "POST",
+        csrfToken,
+        body: "{}",
+      },
+    );
+  }
+
+  queryWorkspaceIntegration(organizationId, payload, csrfToken) {
+    return this.request(
+      `/api/v1/workspace/organizations/${encode(organizationId)}/integrations/query`,
+      {
+        method: "POST",
+        csrfToken,
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
   connectEvents({ token = this.token, topics = ["events"] } = {}) {
     if (!token) {
       throw new Error("TerraSatch realtime subscriptions require an API token");
