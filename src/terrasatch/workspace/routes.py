@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, SecretStr, model_validator
@@ -106,12 +106,20 @@ from terrasatch.workspace.discovery import (
     list_discovery_events,
     record_discovery_event,
 )
+from terrasatch.workspace.discovery_testing import (
+    record_workflow_test_measurement,
+    review_workflow_test,
+    start_workflow_test,
+)
 from terrasatch.workspace.models import WorkspaceMessage, WorkspacePreference
 from terrasatch.workspace.schemas import (
     DiscoveryEventCreate,
     DiscoveryEventCreateResponse,
     DiscoveryEventResponse,
     DiscoveryEvidenceSummaryResponse,
+    DiscoveryWorkflowMeasurementCreate,
+    DiscoveryWorkflowReviewCreate,
+    DiscoveryWorkflowTestStart,
     SatchyChatResponse,
     WorkspaceActionReviewResponse,
     WorkspaceConvergenceResponse,
@@ -431,8 +439,17 @@ async def create_discovery_event(
             and payload.workflow_key is None
         ):
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "workflow_key is required for workflow Discovery events",
+            )
+        if payload.event_type in {
+            "workflow_testing",
+            "workflow_approved",
+            "workflow_rejected",
+        }:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Use the controlled Discovery workflow testing/review endpoints",
             )
 
         try:
@@ -453,7 +470,7 @@ async def create_discovery_event(
             )
         except ValueError as exc:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 str(exc),
             ) from exc
         await session.commit()
@@ -463,6 +480,152 @@ async def create_discovery_event(
                 "duplicate": duplicate,
             }
         )
+
+
+@router.post(
+    "/organizations/{organization_id}/discovery/workflows/{workflow_key}/testing",
+    response_model=DiscoveryEventCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_discovery_workflow_testing(
+    organization_id: UUID,
+    workflow_key: Annotated[
+        str,
+        Path(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_.:-]+$"),
+    ],
+    payload: DiscoveryWorkflowTestStart,
+    request: Request,
+):
+    """Start a controlled workflow test after explicit administrator authorization."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Admin access required")
+        await writable(session, membership)
+        try:
+            event, duplicate = await start_workflow_test(
+                session,
+                organization_id=organization_id,
+                actor_user_id=user.id,
+                workflow_key=workflow_key,
+                request_id=payload.request_id,
+                objective=payload.objective,
+                metric_key=payload.metric_key,
+                metric_unit=payload.metric_unit,
+                baseline_value=payload.baseline_value,
+                target_direction=payload.target_direction,
+                sample_target=payload.sample_target,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(exc),
+            ) from exc
+        await session.commit()
+        return jsonable_encoder(
+            {
+                "event": discovery_event_payload(event),
+                "duplicate": duplicate,
+            }
+        )
+
+
+@router.post(
+    (
+        "/organizations/{organization_id}/discovery/workflows/"
+        "{workflow_key}/testing/measurements"
+    ),
+    response_model=DiscoveryEventCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_discovery_workflow_measurement(
+    organization_id: UUID,
+    workflow_key: Annotated[
+        str,
+        Path(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_.:-]+$"),
+    ],
+    payload: DiscoveryWorkflowMeasurementCreate,
+    request: Request,
+):
+    """Append one measured outcome to an active controlled workflow test."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        await writable(session, membership)
+        try:
+            event, duplicate = await record_workflow_test_measurement(
+                session,
+                organization_id=organization_id,
+                actor_user_id=user.id,
+                workflow_key=workflow_key,
+                measurement_id=payload.measurement_id,
+                value=payload.value,
+                note=payload.note,
+                source_ref=payload.source_ref,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(exc),
+            ) from exc
+        await session.commit()
+        return jsonable_encoder(
+            {
+                "event": discovery_event_payload(event),
+                "duplicate": duplicate,
+            }
+        )
+
+
+@router.post(
+    "/organizations/{organization_id}/discovery/workflows/{workflow_key}/review",
+    response_model=DiscoveryEventCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def review_discovery_workflow_testing(
+    organization_id: UUID,
+    workflow_key: Annotated[
+        str,
+        Path(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_.:-]+$"),
+    ],
+    payload: DiscoveryWorkflowReviewCreate,
+    request: Request,
+):
+    """Approve or reject measured test evidence without authorizing execution."""
+
+    csrf(request)
+    async with create_session_factory(request.app.state.settings)() as session:
+        user, membership = await access(request, session, organization_id)
+        if not role_allows(membership.role, MembershipRole.ADMIN):
+            raise HTTPException(403, "Admin access required")
+        await writable(session, membership)
+        try:
+            event, duplicate = await review_workflow_test(
+                session,
+                organization_id=organization_id,
+                actor_user_id=user.id,
+                workflow_key=workflow_key,
+                request_id=payload.request_id,
+                decision=payload.decision,
+                rationale=payload.rationale,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(exc),
+            ) from exc
+        await session.commit()
+        return jsonable_encoder(
+            {
+                "event": discovery_event_payload(event),
+                "duplicate": duplicate,
+            }
+        )
+
+
 
 
 class Login(BaseModel):
