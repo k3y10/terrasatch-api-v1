@@ -29,9 +29,31 @@ from terrasatch.workspace.email_service import (
     send_workspace_email,
     sendable_mailboxes,
     set_mailbox_delegate,
+    visible_mailboxes,
 )
 
 router = APIRouter(tags=["portal-email"])
+
+_EMAIL_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Content-Security-Policy": "frame-ancestors 'self'",
+    "Referrer-Policy": "same-origin",
+}
+
+
+def _login_response(embedded: bool) -> HTMLResponse | RedirectResponse:
+    if embedded:
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta name="viewport" '
+            'content="width=device-width,initial-scale=1"><title>Sign in required</title></head>'
+            '<body style="background:#080b0d;color:#edf1f0;font:16px system-ui;padding:24px">'
+            '<h1>Sign in to view email</h1><p>Your workspace session has expired.</p>'
+            '<a style="color:#ffad59" href="/portal/login" target="_top">Sign in again</a>'
+            '</body></html>', status_code=401, headers=_EMAIL_HEADERS,
+        )
+    return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
+
 
 
 async def _email_context(request: Request, organization: str):
@@ -48,6 +70,8 @@ async def _email_context(request: Request, organization: str):
         access = await list_user_access(session, user_id=user.id)
         if not access:
             raise HTTPException(status_code=403, detail="No organization access")
+        if organization and not any(str(item.organization_id) == organization for item in access):
+            raise HTTPException(status_code=403, detail="No access to the selected organization")
         remembered = str(request.session.get("portal_organization") or "")
         selector = organization or remembered
         selected_access = next(
@@ -67,12 +91,13 @@ async def _email_context(request: Request, organization: str):
 async def portal_email_inbox(
     request: Request,
     organization: str = "",
+    embedded: bool = False,
 ) -> HTMLResponse | RedirectResponse:
     try:
         user, membership = await _email_context(request, organization)
     except HTTPException as error:
         if error.status_code == 401:
-            return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
+            return _login_response(embedded)
         raise
 
     factory = create_session_factory(request.app.state.settings)
@@ -87,6 +112,7 @@ async def portal_email_inbox(
             user=user,
             role=membership.role,
         )
+        assigned_mailboxes = await visible_mailboxes(session, user=user, role=membership.role)
         managed_mailboxes = manageable_mailboxes(user, membership.role)
         member_rows = list(
             await session.scalars(
@@ -125,6 +151,7 @@ async def portal_email_inbox(
             organization_name=membership.organization_name,
             messages=messages,
             senders=senders,
+            mailboxes=assigned_mailboxes,
             manageable_mailboxes=managed_mailboxes,
             organization_members=[
                 {"email": item.email, "display_name": item.display_name}
@@ -132,8 +159,9 @@ async def portal_email_inbox(
             ],
             delegates=delegates,
             csrf_token=issue_csrf_token(request.session),
+            embedded=embedded,
         ),
-        headers={"Cache-Control": "no-store"},
+        headers=_EMAIL_HEADERS,
     )
 
 
@@ -148,6 +176,7 @@ async def portal_email_delegate(
     mailbox: Annotated[str, Form()],
     delegate_email: Annotated[str, Form()],
     can_send: Annotated[str | None, Form()] = None,
+    embedded: Annotated[bool, Form()] = False,
 ) -> RedirectResponse:
     _verify_csrf(request, csrf_token)
     actor, membership = await _email_context(request, organization)
@@ -175,7 +204,7 @@ async def portal_email_delegate(
         )
         await session.commit()
     return RedirectResponse(
-        f"/portal/email?organization={membership.organization_id}",
+        f"/portal/email?organization={membership.organization_id}" + ("&embedded=1" if embedded else ""),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -187,6 +216,7 @@ async def portal_email_delegate_revoke(
     csrf_token: Annotated[str, Form()],
     mailbox: Annotated[str, Form()],
     delegate_email: Annotated[str, Form()],
+    embedded: Annotated[bool, Form()] = False,
 ) -> RedirectResponse:
     _verify_csrf(request, csrf_token)
     actor, membership = await _email_context(request, organization)
@@ -213,7 +243,7 @@ async def portal_email_delegate_revoke(
         )
         await session.commit()
     return RedirectResponse(
-        f"/portal/email?organization={membership.organization_id}",
+        f"/portal/email?organization={membership.organization_id}" + ("&embedded=1" if embedded else ""),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -223,12 +253,13 @@ async def portal_email_detail(
     email_id: UUID,
     request: Request,
     organization: str = "",
+    embedded: bool = False,
 ) -> HTMLResponse | RedirectResponse:
     try:
         user, membership = await _email_context(request, organization)
     except HTTPException as error:
         if error.status_code == 401:
-            return RedirectResponse("/portal/login", status_code=status.HTTP_303_SEE_OTHER)
+            return _login_response(embedded)
         raise
 
     factory = create_session_factory(request.app.state.settings)
@@ -253,8 +284,9 @@ async def portal_email_detail(
             message=message,
             reply_allowed=reply_allowed,
             csrf_token=issue_csrf_token(request.session),
+            embedded=embedded,
         ),
-        headers={"Cache-Control": "no-store"},
+        headers=_EMAIL_HEADERS,
     )
 
 
@@ -283,7 +315,7 @@ async def portal_email_attachment(
     return RedirectResponse(
         attachment["download_url"],
         status_code=status.HTTP_302_FOUND,
-        headers={"Cache-Control": "no-store"},
+        headers=_EMAIL_HEADERS,
     )
 
 
@@ -296,6 +328,7 @@ async def portal_email_compose(
     recipient: Annotated[str, Form()],
     subject: Annotated[str, Form()],
     body: Annotated[str, Form()],
+    embedded: Annotated[bool, Form()] = False,
 ) -> RedirectResponse:
     _verify_csrf(request, csrf_token)
     user, membership = await _email_context(request, organization)
@@ -314,7 +347,7 @@ async def portal_email_compose(
         )
         await session.commit()
     return RedirectResponse(
-        f"/portal/email?organization={membership.organization_id}",
+        f"/portal/email?organization={membership.organization_id}" + ("&embedded=1" if embedded else ""),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -330,6 +363,7 @@ async def portal_email_reply(
     organization: Annotated[str, Form()],
     csrf_token: Annotated[str, Form()],
     body: Annotated[str, Form()],
+    embedded: Annotated[bool, Form()] = False,
 ) -> RedirectResponse:
     _verify_csrf(request, csrf_token)
     user, membership = await _email_context(request, organization)
@@ -346,6 +380,6 @@ async def portal_email_reply(
         )
         await session.commit()
     return RedirectResponse(
-        f"/portal/email/{email_id}?organization={membership.organization_id}",
+        f"/portal/email/{email_id}?organization={membership.organization_id}" + ("&embedded=1" if embedded else ""),
         status_code=status.HTTP_303_SEE_OTHER,
     )
