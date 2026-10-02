@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -298,6 +299,45 @@ class DiscoveryEventCreate(BaseModel):
         if len(encoded.encode("utf-8")) > 16_384:
             raise ValueError("Discovery evidence cannot exceed 16 KiB")
         return self
+
+
+class DiscoveryWorkflowTestStart(BaseModel):
+    request_id: UUID
+    objective: str = Field(min_length=1, max_length=500)
+    metric_key: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_.:-]+$",
+    )
+    metric_unit: str = Field(min_length=1, max_length=32)
+    baseline_value: float
+    target_direction: Literal["decrease", "increase", "maintain"]
+    sample_target: int = Field(default=3, ge=1, le=25)
+
+    @model_validator(mode="after")
+    def validate_baseline(self):
+        if not math.isfinite(self.baseline_value):
+            raise ValueError("baseline_value must be finite")
+        return self
+
+
+class DiscoveryWorkflowMeasurementCreate(BaseModel):
+    measurement_id: UUID
+    value: float
+    note: str | None = Field(default=None, min_length=1, max_length=240)
+    source_ref: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_measurement(self):
+        if not math.isfinite(self.value):
+            raise ValueError("measurement value must be finite")
+        return self
+
+
+class DiscoveryWorkflowReviewCreate(BaseModel):
+    request_id: UUID
+    decision: Literal["approved", "rejected"]
+    rationale: str = Field(min_length=1, max_length=1000)
 
 
 class DiscoveryEventResponse(BaseModel):
