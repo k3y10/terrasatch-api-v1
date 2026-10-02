@@ -20,6 +20,12 @@ COPY migrations ./migrations
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+# Build contexts can preserve restrictive host file modes. Normalize runtime
+# source/config readability before dropping privileges while keeping the app
+# tree non-writable to the unprivileged service account.
+RUN chmod -R a+rX /app/src /app/migrations \
+    && chmod a+r /app/alembic.ini /app/pyproject.toml /app/uv.lock /app/README.md
+
 RUN useradd --create-home --uid 10001 terrasatch
 USER terrasatch
 
