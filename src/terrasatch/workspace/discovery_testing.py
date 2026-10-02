@@ -152,8 +152,8 @@ async def start_workflow_test(
     metric_unit = _clean_text(metric_unit, field="metric_unit", max_length=32)
     if target_direction not in {"decrease", "increase", "maintain"}:
         raise ValueError("target_direction is invalid")
-    if not 1 <= sample_target <= 25:
-        raise ValueError("sample_target must be between 1 and 25")
+    if not 1 <= sample_target <= 20:
+        raise ValueError("sample_target must be between 1 and 20")
 
     dedupe_key = f"controlled-test:{workflow_key}:{request_id}"
     existing = await _existing_request(
