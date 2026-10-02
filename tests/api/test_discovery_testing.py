@@ -350,6 +350,14 @@ async def test_controlled_discovery_testing_requires_human_start_measurement_and
         }
         assert summary.json()["phase_evidence"]["adapt"] is True
 
+        cross_actor_retry = await owner_client.post(
+            measurement_url,
+            json=measurement_one,
+            headers=owner_headers,
+        )
+        assert cross_actor_retry.status_code == 422
+        assert "different actor" in cross_actor_retry.json()["detail"]
+
         after_review_measurement = await owner_client.post(
             measurement_url,
             json={"measurement_id": str(uuid4()), "value": 4.0},
