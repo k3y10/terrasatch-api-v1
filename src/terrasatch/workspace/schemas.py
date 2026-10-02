@@ -312,7 +312,7 @@ class DiscoveryWorkflowTestStart(BaseModel):
     metric_unit: str = Field(min_length=1, max_length=32)
     baseline_value: float
     target_direction: Literal["decrease", "increase", "maintain"]
-    sample_target: int = Field(default=3, ge=1, le=25)
+    sample_target: int = Field(default=3, ge=1, le=20)
 
     @model_validator(mode="after")
     def validate_baseline(self):
