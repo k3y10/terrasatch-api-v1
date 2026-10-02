@@ -74,8 +74,8 @@ bash deploy/release-oracle.sh
 ```
 
 The release applies Alembic migrations, so production must reach migration
-`0023_workspace_email_delegates` before inbound delivery is enabled. Migration
-`0022_workspace_email` creates the durable message/read-state tables and `0023` adds explicit
+`0028_workspace_email_delegates` before inbound delivery is enabled. Migration
+`0027_workspace_email` creates the durable message/read-state tables and `0023` adds explicit
 mailbox delegation.
 
 Do not enable receiving DNS first. Deploy and verify the API route/database before changing mail
@@ -200,3 +200,12 @@ external sender
 
 Both paths intentionally share Resend transport and webhook verification but do not share human
 mailbox authorization or billing-send authority.
+
+
+## Recovery note
+
+The original workspace-email implementation was developed and validated on an isolated staging branch
+but was never merged into the production migration line. Production later used revision numbers
+0022 through 0024 for unrelated features. The production-safe recovery therefore ports the same
+mailbox behavior onto revisions 0027 through 0029 rather than attempting to reuse or rewrite the
+already-deployed production history.
