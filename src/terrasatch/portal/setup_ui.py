@@ -39,4 +39,4 @@ window.renderIntegrationSetup=(card,item)=>{
  const submit=el('button',item.auth==='oauth2'?'Save and prepare authorization':'Add connection',form);submit.type='submit';
  form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;await run(async()=>{const configuration={};for(const {input,type} of configs){const value=input.value.trim();if(value)configuration[input.name]=type==='list'?value.split(',').map(x=>x.trim()).filter(Boolean):type==='number'?Number(value):value}const c=await api('/integrations',{provider:item.key,scope:scope.value,team_id:scope.value==='team'?team.value.trim():null,display_name:name.value.trim()||item.name,configuration});status.textContent='Connection saved. Finish authorization or credentials below, then refresh services.';add.hidden=true;if(item.auth==='oauth2')auth(c);else secrets(c)});submit.disabled=false});
 };
-})();</script>'''\n
+})();</script>'''
