@@ -38,7 +38,11 @@ export class TerraSatchClient {
     );
     this.token = options.token || null;
     this.credentials = options.credentials || "include";
-    this.fetchImpl = options.fetch || globalThis.fetch;
+    this.fetchImpl =
+      options.fetch ||
+      (typeof globalThis.fetch === "function"
+        ? globalThis.fetch.bind(globalThis)
+        : undefined);
     this.resolveUrl =
       options.resolveUrl || ((path) => `${this.baseUrl}${path}`);
     this.WebSocketImpl = options.WebSocket || globalThis.WebSocket;
