@@ -21,6 +21,20 @@ _MEASUREMENT_SOURCE = "test_measurement"
 _REVIEW_SOURCE = "human_review"
 
 
+def _clean_text(value: str, *, field: str, max_length: int) -> str:
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > max_length:
+        raise ValueError(f"{field} must contain between 1 and {max_length} characters")
+    return cleaned
+
+
+def _same_number(left: object, right: float) -> bool:
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return False
+
+
 async def _workflow_history(
     session: AsyncSession,
     *,
@@ -133,6 +147,13 @@ async def start_workflow_test(
 ) -> tuple[WorkspaceDiscoveryEvent, bool]:
     if not math.isfinite(baseline_value):
         raise ValueError("baseline_value must be finite")
+    objective = _clean_text(objective, field="objective", max_length=500)
+    metric_key = _clean_text(metric_key, field="metric_key", max_length=64)
+    metric_unit = _clean_text(metric_unit, field="metric_unit", max_length=32)
+    if target_direction not in {"decrease", "increase", "maintain"}:
+        raise ValueError("target_direction is invalid")
+    if not 1 <= sample_target <= 25:
+        raise ValueError("sample_target must be between 1 and 25")
 
     dedupe_key = f"controlled-test:{workflow_key}:{request_id}"
     existing = await _existing_request(
@@ -143,6 +164,16 @@ async def start_workflow_test(
         workflow_key=workflow_key,
     )
     if existing is not None:
+        prior = dict(existing.evidence or {})
+        if not (
+            prior.get("objective") == objective
+            and prior.get("metric_key") == metric_key
+            and prior.get("metric_unit") == metric_unit
+            and _same_number(prior.get("baseline_value"), baseline_value)
+            and prior.get("target_direction") == target_direction
+            and prior.get("sample_target") == sample_target
+        ):
+            raise ValueError("request_id is already used by different test content")
         return existing, True
 
     workflow = await _current_workflow(
@@ -167,9 +198,9 @@ async def start_workflow_test(
     evidence = {
         "test_request_id": str(request_id),
         "candidate_event_id": str(identified.id),
-        "objective": objective.strip(),
-        "metric_key": metric_key.strip(),
-        "metric_unit": metric_unit.strip(),
+        "objective": objective,
+        "metric_key": metric_key,
+        "metric_unit": metric_unit,
         "baseline_value": baseline_value,
         "target_direction": target_direction,
         "sample_target": sample_target,
@@ -209,6 +240,16 @@ async def record_workflow_test_measurement(
 ) -> tuple[WorkspaceDiscoveryEvent, bool]:
     if not math.isfinite(value):
         raise ValueError("measurement value must be finite")
+    clean_note = (
+        _clean_text(note, field="note", max_length=240)
+        if note is not None
+        else None
+    )
+    clean_source_ref = (
+        _clean_text(source_ref, field="source_ref", max_length=255)
+        if source_ref is not None
+        else None
+    )
 
     dedupe_key = f"test-measurement:{workflow_key}:{measurement_id}"
     existing = await _existing_request(
@@ -219,6 +260,22 @@ async def record_workflow_test_measurement(
         workflow_key=workflow_key,
     )
     if existing is not None:
+        measurements = list(dict(existing.evidence or {}).get("measurements") or [])
+        prior = next(
+            (
+                item
+                for item in measurements
+                if isinstance(item, dict)
+                and item.get("measurement_id") == str(measurement_id)
+            ),
+            None,
+        )
+        if prior is None or not _same_number(prior.get("value"), value):
+            raise ValueError("measurement_id is already used by different content")
+        if (prior.get("note") or None) != clean_note:
+            raise ValueError("measurement_id is already used by different content")
+        if (prior.get("source_ref") or None) != clean_source_ref:
+            raise ValueError("measurement_id is already used by different content")
         return existing, True
 
     workflow = await _current_workflow(
@@ -252,10 +309,10 @@ async def record_workflow_test_measurement(
         "recorded_by": str(actor_user_id),
         "recorded_at": datetime.now(UTC).isoformat(),
     }
-    if note:
-        measurement["note"] = note.strip()
-    if source_ref:
-        measurement["source_ref"] = source_ref.strip()
+    if clean_note:
+        measurement["note"] = clean_note
+    if clean_source_ref:
+        measurement["source_ref"] = clean_source_ref
     measurements.append(measurement)
 
     values = [float(item["value"]) for item in measurements]
@@ -284,7 +341,7 @@ async def record_workflow_test_measurement(
         workflow_key=workflow_key,
         workflow_label=active_test.workflow_label,
         source_type=_MEASUREMENT_SOURCE,
-        source_ref=source_ref or f"measurement:{measurement_id}",
+        source_ref=clean_source_ref or f"measurement:{measurement_id}",
         dedupe_key=dedupe_key,
         evidence=evidence,
         supersedes_event_id=active_test.id,
@@ -301,6 +358,9 @@ async def review_workflow_test(
     decision: str,
     rationale: str,
 ) -> tuple[WorkspaceDiscoveryEvent, bool]:
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("decision must be approved or rejected")
+    rationale = _clean_text(rationale, field="rationale", max_length=1000)
     event_type = (
         DiscoveryEventType.WORKFLOW_APPROVED
         if decision == "approved"
@@ -315,6 +375,12 @@ async def review_workflow_test(
         workflow_key=workflow_key,
     )
     if existing is not None:
+        prior = dict(existing.evidence or {})
+        if (
+            prior.get("decision") != decision
+            or prior.get("rationale") != rationale
+        ):
+            raise ValueError("request_id is already used by different review content")
         return existing, True
 
     workflow = await _current_workflow(
@@ -333,6 +399,8 @@ async def review_workflow_test(
     )
     if active_test is None:
         raise ValueError("active workflow testing evidence was not found")
+    if active_test.source_type not in {_TEST_SOURCE, _MEASUREMENT_SOURCE}:
+        raise ValueError("workflow testing evidence is not a controlled TerraSatch test")
 
     test_evidence = dict(active_test.evidence or {})
     measurement_count = int(test_evidence.get("measurement_count") or 0)
@@ -344,7 +412,7 @@ async def review_workflow_test(
         "review_request_id": str(request_id),
         "testing_event_id": str(active_test.id),
         "decision": decision,
-        "rationale": rationale.strip(),
+        "rationale": rationale,
         "objective": test_evidence.get("objective"),
         "metric_key": test_evidence.get("metric_key"),
         "metric_unit": test_evidence.get("metric_unit"),
