@@ -127,6 +127,7 @@ def test_checked_in_sdk_runtime_keeps_existing_workspace_and_realtime_paths() ->
 
     assert "resolveUrl?: (path: string) => string;" in declarations
     assert 'RealtimeTopic = "events" | "transmissions" | "transcripts"' in declarations
+    assert 'globalThis.fetch.bind(globalThis)' in runtime
 
 
 def test_repository_exports_sdk_as_installable_package() -> None:
