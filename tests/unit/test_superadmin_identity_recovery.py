@@ -94,3 +94,59 @@ async def test_legacy_admin_hash_can_promote_canonical_founder_identity() -> Non
         assert membership.enabled is True
 
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_existing_founder_password_is_preserved_during_superadmin_promotion() -> None:
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    workspace_hash = hash_admin_password("existing-workspace-password-123")
+    break_glass_hash = hash_admin_password("break-glass-password-123")
+
+    async with factory() as session:
+        account = Account(id=uuid4(), name="TerraSatch")
+        organization = Organization(
+            id=uuid4(),
+            account_id=account.id,
+            name="TerraSatch",
+            slug="terrasatch",
+            enabled=True,
+        )
+        founder = User(
+            id=uuid4(),
+            email="keaton@terrasatch.com",
+            display_name="Keaton",
+            password_hash=workspace_hash,
+            credential_version=1,
+            enabled=True,
+        )
+        session.add_all([account, organization, founder])
+        await session.flush()
+
+        user, membership = await promote_superadmin_identity(
+            session,
+            organization_id=organization.id,
+            email="keaton@terrasatch.com",
+            display_name="Keaton",
+            password_hash=break_glass_hash,
+            settings=Settings(max_portal_users=250),
+        )
+        await session.commit()
+
+        assert user.id == founder.id
+        assert user.password_hash == workspace_hash
+        assert user.credential_version == 1
+        assert user.is_superadmin is True
+        assert verify_admin_password(
+            "existing-workspace-password-123",
+            user.password_hash or "",
+        )
+        assert not verify_admin_password(
+            "break-glass-password-123",
+            user.password_hash or "",
+        )
+        assert membership.role == MembershipRole.OWNER
+
+    await engine.dispose()
+
