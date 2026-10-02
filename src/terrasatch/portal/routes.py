@@ -131,6 +131,10 @@ async def _require_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Portal login required",
         )
+    # API sign-in also establishes this session. Refresh display data from the
+    # validated account rather than depending on the HTML login path's cache.
+    request.session["portal_email"] = user.email
+    request.session["portal_display_name"] = user.display_name
     return user_id
 
 
@@ -469,6 +473,8 @@ async def portal_dashboard(
 
     remembered = str(request.session.get("portal_organization") or "")
     selector = organization or remembered
+    if organization and not any(str(item.organization_id) == organization for item in access):
+        raise HTTPException(status_code=403, detail="No access to the selected organization")
     selected = next((item for item in access if str(item.organization_id) == selector), access[0])
     request.session["portal_organization"] = str(selected.organization_id)
 
@@ -508,7 +514,8 @@ async def portal_dashboard(
             billing=subscription.model_dump(mode="json"),
             billing_manage_allowed=role_allows(selected.role, MembershipRole.ADMIN),
             csrf_token=issue_csrf_token(request.session),
-        )
+        ),
+        headers={"Cache-Control": "no-store", "X-Frame-Options": "SAMEORIGIN"},
     )
 
 
