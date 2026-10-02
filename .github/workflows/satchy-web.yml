@@ -1,0 +1,42 @@
+name: Validate Satchy Web
+
+on:
+  pull_request:
+    paths:
+      - "apps/satchy/**"
+      - "sdk/typescript/**"
+      - "package.json"
+      - ".github/workflows/satchy-web.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/satchy/**"
+      - "sdk/typescript/**"
+      - "package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/satchy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_TERRASATCH_API_ORIGIN: https://api.terrasatch.com
+        run: npm run build
