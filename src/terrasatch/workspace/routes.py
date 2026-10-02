@@ -451,6 +451,24 @@ async def create_discovery_event(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "Use the controlled Discovery workflow testing/review endpoints",
             )
+        if (
+            payload.event_type == "workflow_identified"
+            and payload.workflow_key is not None
+            and payload.supersedes_event_id is None
+        ):
+            summary = await discovery_evidence_summary(
+                session,
+                organization_id=organization_id,
+            )
+            if any(
+                item.get("key") == payload.workflow_key
+                for item in summary["workflows"]
+                if isinstance(item, dict)
+            ):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "Existing workflow identification must use an explicit revision",
+                )
 
         try:
             event, duplicate = await record_discovery_event(
