@@ -56,6 +56,7 @@ from terrasatch.billing.stripe_gateway import StripeGateway
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import InvalidConfiguration, ProviderUnavailable
+from terrasatch.workspace.email_service import ingest_resend_received_email
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 staging_router = APIRouter(prefix="/workspace/billing", tags=["billing"])
@@ -106,23 +107,33 @@ async def _process_resend_webhook_request(
             detail="Invalid Resend webhook",
         ) from error
 
-    result = await _run_database(
-        settings,
-        lambda session: reconcile_resend_webhook(
+    async def reconcile_event(session: AsyncSession) -> tuple[bool, bool]:
+        delivery = await reconcile_resend_webhook(
             session,
             event=event,
             webhook_id=webhook_id,
-        ),
-    )
+        )
+        inbound = await ingest_resend_received_email(
+            session,
+            settings,
+            event=event,
+            webhook_id=webhook_id,
+        )
+        return (
+            delivery.matched or inbound.matched,
+            delivery.duplicate or inbound.duplicate,
+        )
+
+    matched, duplicate = await _run_database(settings, reconcile_event)
     return EmailProviderWebhookResponse(
-        matched=result.matched,
-        duplicate=result.duplicate,
+        matched=matched,
+        duplicate=duplicate,
     )
 
 
 @router.post("/resend/webhook", response_model=EmailProviderWebhookResponse)
 async def post_resend_webhook(request: Request) -> EmailProviderWebhookResponse:
-    """Reconcile signed Resend delivery/bounce events with the billing outbox."""
+    """Reconcile signed Resend delivery events and persist inbound workspace email."""
 
     return await _process_resend_webhook_request(request)
 
@@ -131,7 +142,7 @@ async def post_resend_webhook(request: Request) -> EmailProviderWebhookResponse:
 async def post_staging_resend_webhook(
     request: Request,
 ) -> EmailProviderWebhookResponse:
-    """Expose the same signed Resend reconciliation route on isolated staging."""
+    """Expose the same signed Resend delivery/inbound route on isolated staging."""
 
     return await _process_resend_webhook_request(request)
 

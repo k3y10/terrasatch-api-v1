@@ -22,6 +22,7 @@ from terrasatch.auth.service import issue_api_key, list_api_keys, revoke_api_key
 from terrasatch.config import Environment, Settings
 from terrasatch.database.session import create_session_factory
 from terrasatch.errors import TerraSatchError
+from terrasatch.identity.access import promote_superadmin_identity
 from terrasatch.main import create_app
 from terrasatch.observability.health import check_readiness
 from terrasatch.organizations.service import (
@@ -29,8 +30,10 @@ from terrasatch.organizations.service import (
     create_site,
     list_organizations,
     list_sites,
+    resolve_organization,
 )
 from terrasatch.workers.runner import run_worker
+from terrasatch.workspace.email_recovery import import_workspace_email_bundle
 
 app = typer.Typer(help="Operate the TerraSatch API platform.", no_args_is_help=True)
 config_app = typer.Typer(help="Inspect and validate runtime configuration.", no_args_is_help=True)
@@ -280,7 +283,7 @@ def admin_configure(
         typer.Option("--env-file", help="Owner-only environment file to update."),
     ] = Path(".env"),
 ) -> None:
-    """Set an owner-only local admin login configuration without printing secrets."""
+    """Set legacy bootstrap/break-glass admin credentials without printing secrets."""
 
     admin_email = email or typer.prompt("Administrator email").strip()
     if "@" not in admin_email or admin_email.startswith("@") or admin_email.endswith("@"):
@@ -306,6 +309,86 @@ def admin_configure(
     )
     typer.echo(f"Browser administration configured in {env_file} with owner-only permissions.")
     typer.echo("Restart the API, then open /admin using HTTPS in production.")
+
+
+@admin_app.command("promote-superadmin")
+def admin_promote_superadmin(
+    email: Annotated[
+        str,
+        typer.Option("--email", help="Canonical TerraSatch superadmin email."),
+    ],
+    organization: Annotated[
+        str,
+        typer.Option("--organization", help="Organization ID, slug, or name to own."),
+    ],
+    display_name: Annotated[
+        str,
+        typer.Option("--display-name", help="Human display name."),
+    ] = "Keaton",
+) -> None:
+    """Promote one database-backed User to platform superadmin + organization owner."""
+
+    settings = _load_settings()
+    if settings.admin_password_hash is None:
+        typer.echo(
+            "Legacy admin password hash is not configured; cannot reuse the existing password.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    async def operation(session: AsyncSession, active_settings: Settings):
+        selected = await resolve_organization(session, organization)
+        return await promote_superadmin_identity(
+            session,
+            organization_id=selected.id,
+            email=email,
+            display_name=display_name,
+            password_hash=settings.admin_password_hash.get_secret_value(),
+            settings=active_settings,
+        )
+
+    user, membership = _run_database(operation)
+    typer.echo(f"Superadmin: {user.email}")
+    typer.echo(f"Organization role: {membership.role.value}")
+    typer.echo("Same TerraSatch password now works for /portal and /admin.")
+
+
+@admin_app.command("import-workspace-email")
+def admin_import_workspace_email(
+    bundle: Annotated[
+        Path,
+        typer.Option("--bundle", help="Owner-only JSON recovery bundle."),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Validate and report without writing."),
+    ] = False,
+) -> None:
+    """Import stranded staging mailbox data idempotently into the current database."""
+
+    if not bundle.is_file():
+        typer.echo(f"Recovery bundle not found: {bundle}", err=True)
+        raise typer.Exit(code=1)
+    try:
+        payload = json.loads(bundle.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        typer.echo("Recovery bundle is not valid readable JSON.", err=True)
+        raise typer.Exit(code=1) from error
+    if not isinstance(payload, dict):
+        typer.echo("Recovery bundle root must be a JSON object.", err=True)
+        raise typer.Exit(code=1)
+
+    async def operation(session: AsyncSession, _settings: Settings):
+        return await import_workspace_email_bundle(
+            session,
+            payload=payload,
+            dry_run=dry_run,
+        )
+
+    result = _run_database(operation)
+    typer.echo(("DRY RUN · " if dry_run else "") + "Workspace email recovery")
+    for key, value in result.items():
+        typer.echo(f"{key}: {value}")
 
 
 @deployment_app.command("check")

@@ -31,6 +31,7 @@ from terrasatch.edge.service import list_devices
 from terrasatch.errors import InvalidConfiguration, ResourceNotFound
 from terrasatch.identity.access import (
     authenticate_user,
+    establish_browser_identity,
     get_user_organization_access,
     list_user_access,
     role_allows,
@@ -238,11 +239,7 @@ async def portal_login(
             render_portal_login(issue_csrf_token(request.session), failed=True),
             status_code=401,
         )
-    request.session.clear()
-    request.session["portal_user_id"] = str(user.id)
-    request.session["portal_credential_version"] = user.credential_version
-    request.session["portal_email"] = user.email
-    request.session["portal_display_name"] = user.display_name
+    establish_browser_identity(request.session, user)
     issue_csrf_token(request.session)
     return RedirectResponse("/portal", status_code=status.HTTP_303_SEE_OTHER)
 
