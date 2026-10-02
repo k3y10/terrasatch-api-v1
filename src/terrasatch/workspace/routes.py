@@ -746,6 +746,115 @@ def _connection_scopes(connections) -> dict[str, set[str]]:
     return result
 
 
+_INTEGRATION_CONFIGURATION_FIELDS: dict[str, list[dict[str, object]]] = {
+    "google_drive": [{"key": "folder_id", "type": "string", "required": False}],
+    "google_calendar": [{"key": "calendar_id", "type": "string", "required": False}],
+    "microsoft_365": [
+        {"key": "site_id", "type": "string", "required": False},
+        {"key": "drive_id", "type": "string", "required": False},
+        {"key": "folder_path", "type": "string", "required": False},
+    ],
+    "microsoft_calendar": [{"key": "calendar_id", "type": "string", "required": False}],
+    "jira": [
+        {"key": "cloud_id", "type": "string", "required": True},
+        {"key": "project_key", "type": "string", "required": True},
+        {"key": "issue_type", "type": "string", "required": True},
+    ],
+    "confluence": [
+        {"key": "cloud_id", "type": "string", "required": True},
+        {"key": "space_id", "type": "string", "required": True},
+        {"key": "parent_page_id", "type": "string", "required": False},
+    ],
+    "cloudflare_r2": [
+        {"key": "endpoint_url", "type": "string", "required": True},
+        {"key": "bucket", "type": "string", "required": True},
+        {"key": "prefix", "type": "string", "required": False},
+    ],
+    "aws_s3": [
+        {"key": "region", "type": "string", "required": True},
+        {"key": "bucket", "type": "string", "required": True},
+        {"key": "prefix", "type": "string", "required": False},
+    ],
+    "email": [
+        {"key": "recipients", "type": "list", "required": True},
+        {"key": "subject", "type": "string", "required": False},
+    ],
+    "geojson": [
+        {"key": "endpoint_url", "type": "string", "required": True},
+        {"key": "max_features", "type": "number", "required": False},
+    ],
+    "ogc_api_features": [
+        {"key": "base_url", "type": "string", "required": True},
+        {"key": "collection_ids", "type": "list", "required": False},
+        {"key": "max_features", "type": "number", "required": False},
+    ],
+    "stac_api": [
+        {"key": "base_url", "type": "string", "required": True},
+        {"key": "collection_ids", "type": "list", "required": False},
+        {"key": "max_items", "type": "number", "required": False},
+    ],
+    "nws_forecast": [{"key": "max_periods", "type": "number", "required": False}],
+    "snowflake": [
+        {"key": "account_host", "type": "string", "required": True},
+        {"key": "warehouse", "type": "string", "required": False},
+        {"key": "database", "type": "string", "required": False},
+        {"key": "schema", "type": "string", "required": False},
+        {"key": "role", "type": "string", "required": False},
+    ],
+    "esri_arcgis": [{"key": "feature_layer_urls", "type": "list", "required": True}],
+    "arcgis_enterprise_public": [
+        {"key": "feature_layer_urls", "type": "list", "required": True}
+    ],
+    "caltopo": [
+        {"key": "caltopo_team_id", "type": "string", "required": True},
+        {"key": "map_ids", "type": "list", "required": False},
+    ],
+}
+
+_INTEGRATION_CREDENTIAL_FIELDS: dict[str, list[dict[str, object]]] = {
+    "caltopo": [
+        {"key": "credential_id", "required": True},
+        {"key": "credential_secret", "required": True},
+    ],
+    "snowflake": [{"key": "programmatic_access_token", "required": True}],
+    "aws_s3": [
+        {"key": "access_key_id", "required": True},
+        {"key": "secret_access_key", "required": True},
+        {"key": "session_token", "required": False},
+    ],
+    "cloudflare_r2": [
+        {"key": "access_key_id", "required": True},
+        {"key": "secret_access_key", "required": True},
+    ],
+    "microsoft_teams": [{"key": "webhook_url", "required": True}],
+    "webhook": [
+        {"key": "webhook_url", "required": True},
+        {"key": "signing_secret", "required": False},
+    ],
+}
+
+
+def _integration_setup(provider: dict[str, object]) -> dict[str, object]:
+    key = str(provider["key"])
+    auth = str(provider["auth"])
+    if auth == "oauth2":
+        detail = "Create the scoped connection, then authorize it with the provider."
+    elif auth in {"service_account", "webhook_url"}:
+        detail = "Create the scoped connection, then save encrypted provider credentials and test it."
+    elif auth in {"public_https", "platform"}:
+        detail = "Provide the approved connection settings. TerraSatch validates the destination before use."
+    elif auth == "managed":
+        detail = "Managed by TerraSatch. No customer credential setup is required."
+    else:
+        detail = "Provider setup is not available yet."
+
+    return {
+        "detail": detail,
+        "configuration_fields": _INTEGRATION_CONFIGURATION_FIELDS.get(key, []),
+        "credential_fields": _INTEGRATION_CREDENTIAL_FIELDS.get(key, []),
+    }
+
+
 @router.get("/organizations/{organization_id}", response_model=WorkspaceSnapshotResponse)
 async def workspace(organization_id: UUID, request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -929,7 +1038,7 @@ async def integration_catalog(organization_id: UUID, request: Request, response:
             user_id=user.id,
             role=membership.role,
         )
-        return provider_catalog(
+        catalog = provider_catalog(
             request.app.state.settings,
             admin_access=role_allows(
                 membership.role,
@@ -937,6 +1046,24 @@ async def integration_catalog(organization_id: UUID, request: Request, response:
             ),
             connected_scopes=_connection_scopes(connections),
         )
+        admin_access = role_allows(membership.role, MembershipRole.ADMIN)
+        enriched = []
+        for provider in catalog:
+            item = dict(provider)
+            item["setup"] = _integration_setup(item)
+            item["connections"] = [
+                {
+                    **connection_payload(connection),
+                    "can_manage": (
+                        connection.scope_type == IntegrationScope.USER.value
+                        or admin_access
+                    ),
+                }
+                for connection in connections
+                if connection.provider == item["key"]
+            ]
+            enriched.append(item)
+        return enriched
 
 
 @router.post(
