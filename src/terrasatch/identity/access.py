@@ -339,8 +339,9 @@ async def promote_superadmin_identity(
         await session.flush()
     else:
         user.display_name = normalized_name
-        user.password_hash = password_hash
-        user.credential_version += 1
+        if not user.password_hash:
+            user.password_hash = password_hash
+            user.credential_version += 1
         user.is_superadmin = True
         user.enabled = True
 
