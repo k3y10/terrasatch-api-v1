@@ -165,6 +165,8 @@ async def start_workflow_test(
     )
     if existing is not None:
         prior = dict(existing.evidence or {})
+        if existing.actor_user_id != actor_user_id:
+            raise ValueError("request_id is already used by a different actor")
         if not (
             prior.get("objective") == objective
             and prior.get("metric_key") == metric_key
@@ -260,6 +262,8 @@ async def record_workflow_test_measurement(
         workflow_key=workflow_key,
     )
     if existing is not None:
+        if existing.actor_user_id != actor_user_id:
+            raise ValueError("measurement_id is already used by a different actor")
         measurements = list(dict(existing.evidence or {}).get("measurements") or [])
         prior = next(
             (
@@ -375,6 +379,8 @@ async def review_workflow_test(
         workflow_key=workflow_key,
     )
     if existing is not None:
+        if existing.actor_user_id != actor_user_id:
+            raise ValueError("request_id is already used by a different actor")
         prior = dict(existing.evidence or {})
         if (
             prior.get("decision") != decision
