@@ -32,8 +32,8 @@ from terrasatch.organizations.service import (
     list_sites,
     resolve_organization,
 )
-from terrasatch.workspace.email_recovery import import_workspace_email_bundle
 from terrasatch.workers.runner import run_worker
+from terrasatch.workspace.email_recovery import import_workspace_email_bundle
 
 app = typer.Typer(help="Operate the TerraSatch API platform.", no_args_is_help=True)
 config_app = typer.Typer(help="Inspect and validate runtime configuration.", no_args_is_help=True)
