@@ -9,6 +9,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from terrasatch.radio.models import OperationalEvent, Transcript, Transmission
+from terrasatch.satchy.discovery_learning import detect_discovery_workflow_candidates
 from terrasatch.workspace.discovery import record_discovery_event
 from terrasatch.workspace.models import WorkspaceDiscoveryEvent
 
@@ -35,7 +36,7 @@ async def capture_transmission_discovery_evidence(
     }
     try:
         async with session.begin_nested():
-            event, _duplicate = await record_discovery_event(
+            event, duplicate = await record_discovery_event(
                 session,
                 organization_id=transmission.organization_id,
                 site_id=transmission.site_id,
@@ -46,7 +47,6 @@ async def capture_transmission_discovery_evidence(
                 evidence=evidence,
                 occurred_at=transmission.received_at,
             )
-            return event
     except Exception as exc:  # Discovery evidence must never break canonical ingestion.
         logger.warning(
             "discovery_signal_capture_failed",
@@ -55,6 +55,24 @@ async def capture_transmission_discovery_evidence(
             error=str(exc),
         )
         return None
+
+    if not duplicate:
+        try:
+            async with session.begin_nested():
+                await detect_discovery_workflow_candidates(
+                    session,
+                    organization_id=transmission.organization_id,
+                    site_id=transmission.site_id,
+                )
+        except Exception as exc:  # LEARN must never break LISTEN or canonical ingestion.
+            logger.warning(
+                "discovery_learning_failed",
+                organization_id=str(transmission.organization_id),
+                site_id=str(transmission.site_id),
+                trigger="signal",
+                error=str(exc),
+            )
+    return event
 
 
 async def capture_workspace_context_discovery_evidence(
@@ -82,7 +100,7 @@ async def capture_workspace_context_discovery_evidence(
     }
     try:
         async with session.begin_nested():
-            event, _duplicate = await record_discovery_event(
+            event, duplicate = await record_discovery_event(
                 session,
                 organization_id=organization_id,
                 site_id=site_id,
@@ -93,7 +111,6 @@ async def capture_workspace_context_discovery_evidence(
                 dedupe_key=f"auto:context:satchy_run:{run_id}",
                 evidence=evidence,
             )
-            return event
     except Exception as exc:  # Context evidence is observational, never request-critical.
         logger.warning(
             "discovery_context_capture_failed",
@@ -102,3 +119,21 @@ async def capture_workspace_context_discovery_evidence(
             error=str(exc),
         )
         return None
+
+    if not duplicate:
+        try:
+            async with session.begin_nested():
+                await detect_discovery_workflow_candidates(
+                    session,
+                    organization_id=organization_id,
+                    site_id=site_id,
+                )
+        except Exception as exc:  # LEARN must never break WATCH or Satchy requests.
+            logger.warning(
+                "discovery_learning_failed",
+                organization_id=str(organization_id),
+                site_id=str(site_id),
+                trigger="context",
+                error=str(exc),
+            )
+    return event

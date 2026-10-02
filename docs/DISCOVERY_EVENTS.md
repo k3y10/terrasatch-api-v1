@@ -117,7 +117,34 @@ Automatic evidence intentionally avoids duplicating source content. Signal evide
 
 Automatic capture is best-effort and isolated in a database savepoint. Discovery evidence failure is logged but must not break the canonical ingest or Satchy request that produced the evidence.
 
-This phase still does not automatically create `workflow_identified`, `workflow_testing`, `workflow_approved`, or `workflow_rejected` events. Workflow learning remains a separate bounded pattern-detection phase.
+Automatic capture itself remains observational. The bounded LEARN detector described below may create or revise `workflow_identified` candidate evidence, but it cannot create `workflow_testing`, `workflow_approved`, or `workflow_rejected` state transitions.
+
+## Bounded LEARN detection
+
+Satchy may create a `workflow_identified` candidate only when a repeated pattern is supported by both LISTEN and WATCH evidence.
+
+The first detector is intentionally conservative:
+
+- at least **3** matching canonical signal events inside the rolling 14-day Discovery window
+- all matching signals are scoped to the same site
+- the signals share the same original source classification and specific structured operational-event type set
+- at least one active `context_observed` event exists for that site
+- generic-only `GENERAL_UPDATE` and `RADIO_TRANSMISSION` classifications are ignored
+- at most 12 strongest signal patterns per site are considered
+- workflow keys are deterministic hashes of site + source + structured event types
+
+Automatic LEARN evidence contains references and counts, not transcript/chat content. Its confidence value is only a bounded pattern-support score, not confidence that an operational conclusion is true. The first candidate starts at 0.65 and can be revised only at bounded support milestones:
+
+- 3 observations → 0.65
+- 5 observations → 0.72
+- 10 observations → 0.80
+- 20 observations → 0.88
+
+A milestone revision supersedes the prior `workflow_identified` evidence while preserving the complete history. Intermediate observations do not create new workflow events.
+
+Once a reviewer moves a candidate to `workflow_testing`, `workflow_approved`, or `workflow_rejected`, the automatic detector stops revising that workflow. LEARN never moves a candidate into testing, approval, rejection, or execution by itself.
+
+The detector runs after either a newly captured signal or newly captured workspace-context event. This means LISTEN may occur before WATCH or WATCH may occur before the threshold-crossing signal; either direction can unlock the same bounded candidate.
 
 ## Workspace API
 
@@ -134,13 +161,13 @@ Automatic Satchy/system capture should call the internal Discovery service direc
 
 ## Rollout boundary
 
-This foundation intentionally does not:
+This phase intentionally does not:
 
-- auto-detect workflow patterns yet
+- move an identified candidate into testing without an authorized human
+- approve, reject, or execute workflow adaptations automatically
 - alter the existing Discovery lifecycle JSON
-- change Satchy runtime modes
-- auto-approve adaptations
+- change Satchy runtime modes or permissions
 - calculate ROI without measured evidence
 - change UAC, Snowbird, Edge, radio, or integration behavior
 
-The next phase can safely connect canonical signals to this evidence layer and then surface evidence-derived counts in the workspace UI.
+The next phase can add measured `workflow_testing` evidence and explicit human review outcomes while keeping execution separately permissioned.
