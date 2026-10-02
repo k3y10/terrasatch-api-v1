@@ -237,6 +237,28 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert organization_connection.status_code == 201
         assert organization_connection.json()["scope"] == "organization"
 
+        setup_catalog = await client.get(
+            f"/api/v1/workspace/organizations/{organization_id}/integrations/catalog"
+        )
+        assert setup_catalog.status_code == 200
+        providers = {item["key"]: item for item in setup_catalog.json()}
+        drive_setup = providers["google_drive"]
+        assert drive_setup["setup"]["configuration_fields"] == [
+            {"key": "folder_id", "type": "string", "required": False}
+        ]
+        assert drive_setup["setup"]["credential_fields"] == []
+        assert len(drive_setup["connections"]) == 1
+        assert drive_setup["connections"][0]["display_name"] == "My field Drive"
+        assert drive_setup["connections"][0]["can_manage"] is True
+        assert "credential_ref" not in drive_setup["connections"][0]
+
+        snowflake_setup = providers["snowflake"]
+        assert snowflake_setup["setup"]["credential_fields"] == [
+            {"key": "programmatic_access_token", "required": True}
+        ]
+        assert snowflake_setup["connections"][0]["can_manage"] is True
+        assert "programmatic_access_token" not in str(snowflake_setup)
+
         duplicate = await client.post(
             integration_url,
             json={"provider": "google_drive", "scope": "user"},
