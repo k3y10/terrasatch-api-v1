@@ -44,3 +44,5 @@ Create a dedicated Vercel project from this repository with:
 
 No TerraSatch password, API secret, database credential, or signing secret belongs
 in Vercel for this browser application.
+
+Pull requests are validated by `.github/workflows/satchy-web.yml` with a clean install and production build.
