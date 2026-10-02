@@ -197,6 +197,19 @@ async def test_controlled_discovery_testing_requires_human_start_measurement_and
         assert direct_state.status_code == 422
         assert "controlled Discovery workflow" in direct_state.json()["detail"]
 
+        state_rollback = await owner_client.post(
+            f"{base}/events",
+            json={
+                "event_type": "workflow_identified",
+                "workflow_key": workflow_key,
+                "workflow_label": "Attempted rollback",
+                "dedupe_key": f"manual:{workflow_key}:identified-again",
+            },
+            headers=owner_headers,
+        )
+        assert state_rollback.status_code == 422
+        assert "explicit revision" in state_rollback.json()["detail"]
+
         early_approval = await owner_client.post(
             review_url,
             json={
@@ -346,3 +359,28 @@ async def test_controlled_discovery_testing_requires_human_start_measurement_and
         assert "must be in testing" in after_review_measurement.json()["detail"]
 
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_openapi_exposes_controlled_discovery_testing_contract() -> None:
+    app = create_app(
+        Settings(
+            environment="local",
+            deployment_name="controlled-discovery-contract",
+            api_base_url="http://testserver",
+            intelligence_provider="deterministic",
+            admin_session_secret="controlled-discovery-contract-secret",
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/openapi.json")
+
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    base = "/api/v1/workspace/organizations/{organization_id}/discovery/workflows"
+    assert "post" in paths[f"{base}/{{workflow_key}}/testing"]
+    assert "post" in paths[f"{base}/{{workflow_key}}/testing/measurements"]
+    assert "post" in paths[f"{base}/{{workflow_key}}/review"]
+
