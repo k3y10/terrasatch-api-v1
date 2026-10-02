@@ -209,3 +209,72 @@ but was never merged into the production migration line. Production later used r
 0022 through 0024 for unrelated features. The production-safe recovery therefore ports the same
 mailbox behavior onto revisions 0027 through 0029 rather than attempting to reuse or rewrite the
 already-deployed production history.
+
+
+## Stranded staging data recovery
+
+The isolated workspace-staging database may contain mailbox data created before the feature was
+promoted to production. Preserve the Docker volume until recovery is complete.
+
+Export the staging records to an owner-only JSON bundle on the Oracle host. The bundle contains
+message bodies and must never be pasted into chat, committed to Git, or copied to a public location.
+
+From the staging worktree:
+
+```bash
+umask 077
+RECOVERY_BUNDLE=/root/terrasatch-workspace-email-recovery.json
+
+docker compose \
+  --env-file .env.staging \
+  -f deploy/docker-compose.workspace-staging.yml \
+  exec -T postgres \
+  psql -U terrasatch -d terrasatch_staging -Atc "
+SELECT json_build_object(
+  'version', 1,
+  'users', COALESCE((
+    SELECT json_agg(
+      json_build_object(
+        'id', id,
+        'email', email
+      )
+      ORDER BY email
+    )
+    FROM users
+  ), '[]'::json),
+  'messages', COALESCE((
+    SELECT json_agg(to_jsonb(m) ORDER BY m.received_at, m.created_at)
+    FROM workspace_email_messages m
+  ), '[]'::json),
+  'reads', COALESCE((
+    SELECT json_agg(to_jsonb(r) ORDER BY r.read_at)
+    FROM workspace_email_reads r
+  ), '[]'::json),
+  'delegates', COALESCE((
+    SELECT json_agg(to_jsonb(d) ORDER BY d.created_at)
+    FROM workspace_email_delegates d
+  ), '[]'::json)
+);
+" > "$RECOVERY_BUNDLE"
+
+chmod 600 "$RECOVERY_BUNDLE"
+ls -lh "$RECOVERY_BUNDLE"
+```
+
+After the production-safe mailbox migrations are deployed, validate the bundle without writing:
+
+```bash
+terrasatch admin import-workspace-email \
+  --bundle /root/terrasatch-workspace-email-recovery.json \
+  --dry-run
+```
+
+The importer maps staging user UUIDs to current production users by normalized email address.
+It imports messages by provider email ID, rebuilds parent/reply relationships, remaps read state,
+and remaps any delegation records. If the bundle references a user email that does not exist in
+production, the import fails instead of silently assigning the data to the wrong person.
+
+After the dry run reports the expected counts, run the same command without `--dry-run`.
+
+The import is idempotent. Re-running the same bundle skips existing provider message IDs and
+existing read/delegation rows rather than duplicating them.
