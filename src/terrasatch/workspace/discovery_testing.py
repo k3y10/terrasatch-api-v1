@@ -366,7 +366,7 @@ async def review_workflow_test(
         if decision == "approved"
         else DiscoveryEventType.WORKFLOW_REJECTED
     )
-    dedupe_key = f"test-review:{workflow_key}:{decision}:{request_id}"
+    dedupe_key = f"test-review:{workflow_key}:{request_id}"
     existing = await _existing_request(
         session,
         organization_id=organization_id,
