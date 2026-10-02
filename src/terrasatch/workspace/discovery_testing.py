@@ -417,6 +417,7 @@ async def review_workflow_test(
         "metric_key": test_evidence.get("metric_key"),
         "metric_unit": test_evidence.get("metric_unit"),
         "baseline_value": test_evidence.get("baseline_value"),
+        "target_direction": test_evidence.get("target_direction"),
         "measurement_count": measurement_count,
         "sample_target": sample_target,
         "measured_average": test_evidence.get("measured_average"),
@@ -424,6 +425,7 @@ async def review_workflow_test(
             "observed_delta_from_baseline"
         ),
         "observed_delta_percent": test_evidence.get("observed_delta_percent"),
+        "sample_target_met": measurement_count >= sample_target,
         "execution_authorized": False,
     }
     return await record_discovery_event(
