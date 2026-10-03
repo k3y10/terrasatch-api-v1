@@ -128,6 +128,204 @@ router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
 
 
+def _workspace_ui_actions(
+    message: str,
+    *,
+    approval_required: bool = False,
+) -> list[dict[str, object]]:
+    """Resolve obvious workspace navigation without delegating UI control to a model."""
+
+    normalized = " ".join(message.lower().split())
+    explicit_verbs = (
+        "show ",
+        "open ",
+        "go to ",
+        "take me ",
+        "navigate ",
+        "view ",
+        "switch to ",
+    )
+
+    def explicit_for(*terms: str) -> bool:
+        return any(verb in normalized for verb in explicit_verbs) and any(
+            term in normalized for term in terms
+        )
+
+    actions: list[dict[str, object]] = []
+
+    def add(target: str, label: str, reason: str, auto_open: bool = False) -> None:
+        if any(item["target"] == target for item in actions):
+            return
+        actions.append(
+            {
+                "kind": "navigate",
+                "target": target,
+                "label": label,
+                "auto_open": auto_open,
+                "reason": reason,
+            }
+        )
+
+    if approval_required:
+        add(
+            "review",
+            "Open Review",
+            "A reviewable Satchy action is waiting for human approval.",
+            True,
+        )
+
+    if any(
+        term in normalized
+        for term in (
+            "map",
+            "operational picture",
+            "where ",
+            "location",
+            "weather",
+            "forecast",
+            "terrain",
+            "layer",
+        )
+    ):
+        add(
+            "map",
+            "Open Map",
+            "This request is spatial or map-related.",
+            explicit_for(
+                "map",
+                "operational picture",
+                "location",
+                "weather",
+                "forecast",
+                "terrain",
+                "layer",
+            ),
+        )
+
+    if any(
+        term in normalized
+        for term in (
+            "integration",
+            "connect ",
+            "install ",
+            "provider",
+            "tool",
+            "sync source",
+        )
+    ):
+        add(
+            "integrations",
+            "Open Integrations",
+            "This request involves connected tools or data providers.",
+            explicit_for("integration", "provider", "tool"),
+        )
+
+    if any(
+        term in normalized
+        for term in (
+            "review",
+            "approve",
+            "approval",
+            "pending action",
+            "waiting for me",
+        )
+    ):
+        add(
+            "review",
+            "Open Review",
+            "This request relates to human review or approval.",
+            explicit_for("review", "approve", "approval"),
+        )
+
+    if any(
+        term in normalized
+        for term in (
+            "what changed",
+            "last shift",
+            "activity",
+            "run",
+            "trace",
+            "timeline",
+            "history",
+        )
+    ):
+        add(
+            "activity",
+            "Open Activity",
+            "This request is about recent activity or change history.",
+            explicit_for("activity", "run", "trace", "timeline", "history")
+            or "show me what changed" in normalized,
+        )
+
+    if any(
+        term in normalized
+        for term in (
+            "discovery",
+            "trial",
+            "workflow",
+            "what are you learning",
+            "learned about",
+        )
+    ):
+        add(
+            "discovery",
+            "Open Discovery",
+            "This request relates to Discovery or learned workflow context.",
+            explicit_for("discovery", "trial", "workflow"),
+        )
+
+    return actions[:6]
+
+
+def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
+    """Keep Workspace chat useful when the optional reasoning provider is unavailable."""
+
+    normalized = " ".join(message.lower().split())
+    evidence_count = len(context.evidence)
+    provider_count = len(context.connected_providers)
+    capability_count = len(context.available_capabilities)
+    site_name = context.site_name or "this site"
+
+    if "weather" in normalized or "forecast" in normalized:
+        if "weather.forecast.read" in context.available_capabilities:
+            answer = (
+                "Satchy’s reasoning service is temporarily unavailable, but your Workspace "
+                f"is still connected and {site_name} has an authorized weather capability. "
+                "Open Map to inspect spatial context or Integrations to verify the weather source. "
+                "I have not generated a weather interpretation while the reasoning service is degraded."
+            )
+        else:
+            answer = (
+                "Satchy’s reasoning service is temporarily unavailable, and I do not have an "
+                "authorized weather forecast capability in this Workspace to verify today’s conditions. "
+                "Your Workspace is still connected; open Integrations to connect a weather source, "
+                "or Map to inspect the operational context already available."
+            )
+    elif "operational picture" in normalized or "map" in normalized:
+        answer = (
+            f"Workspace context is available for {site_name}: {evidence_count} authorized field "
+            f"source(s), {provider_count} connected provider(s), and {capability_count} callable "
+            "capability/capabilities. The reasoning service is temporarily unavailable, so I’m "
+            "keeping this to verified workspace state. Open Map to inspect the source-linked picture."
+        )
+    elif "what changed" in normalized or "last shift" in normalized or "activity" in normalized:
+        answer = (
+            f"The Workspace is connected with {evidence_count} authorized field source(s) in the "
+            "current Satchy context. The reasoning service is temporarily unavailable, so I cannot "
+            "safely synthesize a change narrative right now. Open Activity to inspect the source-linked "
+            "run and workspace history."
+        )
+    else:
+        answer = (
+            "Satchy’s reasoning service is temporarily unavailable, but the TerraSatch Workspace "
+            f"is still connected. I loaded {evidence_count} authorized field source(s), "
+            f"{provider_count} connected provider(s), and {capability_count} available capability/capabilities. "
+            "You can continue using Map, Activity, Integrations, Review, and Discovery while the "
+            "reasoning service recovers."
+        )
+    return answer, "deterministic-workspace-fallback"
+
+
 class SatchyPreferenceSettings(BaseModel):
     response_detail: Literal["brief", "balanced", "detailed"] = "brief"
     preferred_workflows: list[str] = Field(default_factory=list, max_length=32)
@@ -1688,16 +1886,22 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         )
         if not run_created:
             action = existing_by_id
+            approval_required = bool(
+                action is not None and action.approval_required
+            )
             return {
                 "answer": run.response_text
                 or "That Satchy request already exists and is still being processed.",
                 "action_id": str(action.id) if action is not None else None,
                 "action_status": action.status if action is not None else None,
-                "approval_required": bool(
-                    action is not None and action.approval_required
-                ),
+                "approval_required": approval_required,
                 "run_id": str(run.id),
                 "run_status": run.status,
+                "degraded": run.model == "deterministic-workspace-fallback",
+                "ui_actions": _workspace_ui_actions(
+                    payload.message,
+                    approval_required=approval_required,
+                ),
             }
 
         await capture_workspace_context_discovery_evidence(
@@ -1750,6 +1954,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         existing_action = existing_by_id
         planned_action = None
         needs_input = False
+        degraded = False
         try:
             if resolve_intent(payload.message).intent == SatchyIntent.REQUEST_ACTION:
                 planner_context = context.model_context_payload()
@@ -1887,17 +2092,33 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                     ],
                 )
         except ProviderUnavailable:
+            if not settings.intelligence_fallback_to_deterministic:
+                await append_run_step(
+                    session,
+                    run=run,
+                    step_type="error",
+                    status="failed",
+                    label="Satchy model service unavailable",
+                    detail={"retryable": True},
+                )
+                finish_run(run, status="failed")
+                await session.commit()
+                raise
+            answer, model = _deterministic_workspace_fallback(context, payload.message)
+            degraded = True
             await append_run_step(
                 session,
                 run=run,
-                step_type="error",
-                status="failed",
-                label="Satchy model service unavailable",
-                detail={"retryable": True},
+                step_type="fallback",
+                status="completed",
+                label="Satchy continued with verified Workspace context",
+                detail={
+                    "reasoning_provider_available": False,
+                    "fallback": "deterministic-workspace",
+                    "evidence_count": len(context.evidence),
+                    "connected_provider_count": len(context.connected_providers),
+                },
             )
-            finish_run(run, status="failed")
-            await session.commit()
-            raise
 
         await append_run_step(
             session,
@@ -1946,13 +2167,19 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             ]
         )
         await session.commit()
+        approval_required = bool(action is not None and action.approval_required)
         return {
             "answer": answer[:16000],
             "action_id": str(action.id) if action is not None else None,
             "action_status": action.status if action is not None else None,
-            "approval_required": bool(action is not None and action.approval_required),
+            "approval_required": approval_required,
             "run_id": str(run.id),
             "run_status": run.status,
+            "degraded": degraded,
+            "ui_actions": _workspace_ui_actions(
+                payload.message,
+                approval_required=approval_required,
+            ),
         }
 
 
