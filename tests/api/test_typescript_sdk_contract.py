@@ -133,6 +133,10 @@ def test_checked_in_sdk_runtime_keeps_existing_workspace_and_realtime_paths() ->
     assert "authorizeWorkspaceIntegration(organizationId, connectionId, csrfToken)" in runtime
     assert "queryWorkspaceIntegration(organizationId, payload, csrfToken)" in runtime
     assert "WorkspaceIntegrationSetupCatalogItem" in declarations
+    assert "export type SatchyUiAction" in declarations
+    assert 'target: "chat" | "map" | "activity" | "integrations" | "review" | "discovery"' in declarations
+    assert "ui_actions: SatchyUiAction[]" in declarations
+    assert "degraded: boolean" in declarations
 
 
 def test_repository_exports_sdk_as_installable_package() -> None:
