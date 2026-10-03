@@ -62,6 +62,14 @@ export type Observation = {
 
 export type PlanCode = "field" | "team" | "operations" | "enterprise";
 
+export type SatchyUiAction = {
+  auto_open: boolean;
+  kind: "navigate";
+  label: string;
+  reason: string | null;
+  target: "chat" | "map" | "activity" | "integrations" | "review" | "discovery";
+};
+
 export type SatchyChatResponse = {
   action_id: string | null;
   action_status: string | null;
@@ -69,6 +77,8 @@ export type SatchyChatResponse = {
   approval_required: boolean;
   run_id: string;
   run_status: string;
+  degraded: boolean;
+  ui_actions: SatchyUiAction[];
 };
 
 export type SatchyRunResponse = {
