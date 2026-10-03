@@ -199,6 +199,7 @@ async def plan_integration_action(
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                     ],
                     "stream": False,
+                    "think": False,
                     "format": SatchyIntegrationPlan.model_json_schema(),
                     "options": {"temperature": 0},
                 },
@@ -280,6 +281,7 @@ async def resolve_radio_intent(
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
         "stream": False,
+        "think": False,
         "format": _RadioIntentEnvelope.model_json_schema(),
         "options": {"temperature": 0},
     }
