@@ -128,6 +128,55 @@ router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
 
 
+def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
+    """Keep Workspace chat useful when the optional reasoning provider is unavailable."""
+
+    normalized = " ".join(message.lower().split())
+    evidence_count = len(context.evidence)
+    provider_count = len(context.connected_providers)
+    capability_count = len(context.available_capabilities)
+    site_name = context.site_name or "this site"
+
+    if "weather" in normalized or "forecast" in normalized:
+        if "weather.forecast.read" in context.available_capabilities:
+            answer = (
+                "Satchy’s reasoning service is temporarily unavailable, but your Workspace "
+                f"is still connected and {site_name} has an authorized weather capability. "
+                "Open Map to inspect spatial context or Integrations to verify the weather source. "
+                "I have not generated a weather interpretation while the reasoning service is degraded."
+            )
+        else:
+            answer = (
+                "Satchy’s reasoning service is temporarily unavailable, and I do not have an "
+                "authorized weather forecast capability in this Workspace to verify today’s conditions. "
+                "Your Workspace is still connected; open Integrations to connect a weather source, "
+                "or Map to inspect the operational context already available."
+            )
+    elif "operational picture" in normalized or "map" in normalized:
+        answer = (
+            f"Workspace context is available for {site_name}: {evidence_count} authorized field "
+            f"source(s), {provider_count} connected provider(s), and {capability_count} callable "
+            "capability/capabilities. The reasoning service is temporarily unavailable, so I’m "
+            "keeping this to verified workspace state. Open Map to inspect the source-linked picture."
+        )
+    elif "what changed" in normalized or "last shift" in normalized or "activity" in normalized:
+        answer = (
+            f"The Workspace is connected with {evidence_count} authorized field source(s) in the "
+            "current Satchy context. The reasoning service is temporarily unavailable, so I cannot "
+            "safely synthesize a change narrative right now. Open Activity to inspect the source-linked "
+            "run and workspace history."
+        )
+    else:
+        answer = (
+            "Satchy’s reasoning service is temporarily unavailable, but the TerraSatch Workspace "
+            f"is still connected. I loaded {evidence_count} authorized field source(s), "
+            f"{provider_count} connected provider(s), and {capability_count} available capability/capabilities. "
+            "You can continue using Map, Activity, Integrations, Review, and Discovery while the "
+            "reasoning service recovers."
+        )
+    return answer, "deterministic-workspace-fallback"
+
+
 class SatchyPreferenceSettings(BaseModel):
     response_detail: Literal["brief", "balanced", "detailed"] = "brief"
     preferred_workflows: list[str] = Field(default_factory=list, max_length=32)
@@ -1887,17 +1936,32 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                     ],
                 )
         except ProviderUnavailable:
+            if not settings.intelligence_fallback_to_deterministic:
+                await append_run_step(
+                    session,
+                    run=run,
+                    step_type="error",
+                    status="failed",
+                    label="Satchy model service unavailable",
+                    detail={"retryable": True},
+                )
+                finish_run(run, status="failed")
+                await session.commit()
+                raise
+            answer, model = _deterministic_workspace_fallback(context, payload.message)
             await append_run_step(
                 session,
                 run=run,
-                step_type="error",
-                status="failed",
-                label="Satchy model service unavailable",
-                detail={"retryable": True},
+                step_type="fallback",
+                status="completed",
+                label="Satchy continued with verified Workspace context",
+                detail={
+                    "reasoning_provider_available": False,
+                    "fallback": "deterministic-workspace",
+                    "evidence_count": len(context.evidence),
+                    "connected_provider_count": len(context.connected_providers),
+                },
             )
-            finish_run(run, status="failed")
-            await session.commit()
-            raise
 
         await append_run_step(
             session,
