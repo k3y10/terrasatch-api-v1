@@ -28,7 +28,10 @@ echo "[2/8] Validating Compose configuration"
 docker compose config >/dev/null
 
 echo "[3/8] Starting stateful dependencies"
-docker compose up -d postgres redis
+# Ollama is intentionally started independently of API readiness. TerraSatch
+# keeps deterministic fallback enabled so model startup/failure never blocks
+# the API, database, Redis, or Workspace from coming online.
+docker compose up -d postgres redis ollama
 
 echo "[4/8] Building API and worker images"
 docker compose build api worker
