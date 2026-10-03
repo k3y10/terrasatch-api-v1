@@ -72,6 +72,7 @@ class OllamaIntelligenceProvider:
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             "stream": False,
+            "think": False,
             "format": _EventEnvelope.model_json_schema(),
             "options": {"temperature": 0},
         }
