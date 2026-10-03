@@ -249,6 +249,14 @@ class WorkspaceSnapshotResponse(BaseModel):
     messages: list[WorkspaceMessageResponse]
 
 
+class SatchyUiAction(BaseModel):
+    kind: Literal["navigate"]
+    target: Literal["chat", "map", "activity", "integrations", "review", "discovery"]
+    label: str = Field(min_length=1, max_length=80)
+    auto_open: bool = False
+    reason: str | None = Field(default=None, max_length=240)
+
+
 class SatchyChatResponse(BaseModel):
     answer: str
     action_id: UUID | None
@@ -256,6 +264,8 @@ class SatchyChatResponse(BaseModel):
     approval_required: bool
     run_id: UUID
     run_status: str
+    degraded: bool = False
+    ui_actions: list[SatchyUiAction] = Field(default_factory=list, max_length=6)
 
 
 class WorkspaceActionReviewResponse(BaseModel):
