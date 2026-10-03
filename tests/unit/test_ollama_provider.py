@@ -20,6 +20,7 @@ def _transport_with_content(content: str, *, status: int = 200) -> httpx.MockTra
         assert request.url.path == "/api/chat"
         payload = json.loads(request.content)
         assert payload["stream"] is False
+        assert payload["think"] is False
         assert isinstance(payload["format"], dict)
         assert payload["options"]["temperature"] == 0
         return httpx.Response(status, json={"message": {"content": content}})
