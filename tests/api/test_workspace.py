@@ -12,6 +12,7 @@ from terrasatch.admin.security import hash_admin_password
 from terrasatch.billing.models import BillingCustomer
 from terrasatch.config import Settings
 from terrasatch.database.base import Base
+from terrasatch.errors import ProviderUnavailable
 from terrasatch.identity.models import (
     Account,
     Membership,
@@ -593,6 +594,34 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             headers=headers,
         )
         assert bad_asset.status_code == 404
+
+        async def unavailable_workspace_model(**kwargs):
+            raise ProviderUnavailable("model temporarily unavailable")
+
+        monkeypatch.setattr(
+            "terrasatch.workspace.routes.answer_workspace",
+            unavailable_workspace_model,
+        )
+        degraded_chat = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "site_id": str(site_id),
+                "message": "Show me today's weather in Salt Lake City.",
+            },
+            headers=headers,
+        )
+        assert degraded_chat.status_code == 200
+        assert degraded_chat.json()["degraded"] is True
+        assert degraded_chat.json()["run_status"] == "completed"
+        assert "weather" in degraded_chat.json()["answer"].lower()
+        assert degraded_chat.json()["ui_actions"][0] == {
+            "kind": "navigate",
+            "target": "map",
+            "label": "Open Map",
+            "auto_open": True,
+            "reason": "This request is spatial or map-related.",
+        }
+
         async with factory() as session:
             user = await session.get(User, user_id)
             user.enabled = False
