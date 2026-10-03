@@ -399,6 +399,7 @@ async def test_radio_model_fallback_understands_natural_mission_without_authoriz
     async def handler(request: httpx.Request) -> httpx.Response:
         payload = __import__("json").loads(request.content)
         assert payload["stream"] is False
+        assert payload["think"] is False
         assert isinstance(payload["format"], dict)
         assert "approval" in payload["messages"][0]["content"].casefold()
         return httpx.Response(
