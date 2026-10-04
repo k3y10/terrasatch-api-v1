@@ -1,6 +1,6 @@
 """Authentication and tenant isolation against a real local SQL database."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -22,6 +22,7 @@ from terrasatch.identity.models import (
     Team,
     User,
 )
+from terrasatch.integrations.models import IntegrationConnection
 from terrasatch.main import create_app
 
 
@@ -80,9 +81,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             environment="local",
             admin_session_secret="test-only-session-secret",
             intelligence_provider="ollama",
-            integration_encryption_key=SecretStr(
-                Fernet.generate_key().decode("ascii")
-            ),
+            integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")),
             billing_enabled=True,
             stripe_secret_key=SecretStr("sk_test_workspace_portal"),
         )
@@ -122,9 +121,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             fake_portal,
         )
         assert (
-            await client.post(
-                f"/api/v1/workspace/organizations/{organization_id}/billing"
-            )
+            await client.post(f"/api/v1/workspace/organizations/{organization_id}/billing")
         ).status_code == 403
         portal = await client.post(
             f"/api/v1/workspace/organizations/{organization_id}/billing",
@@ -161,12 +158,14 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             },
         }
         assert own.json()["convergence"]["capability_manifest"]["runtime_mode"] == "legacy"
-        assert own.json()["convergence"]["capability_manifest"]["policy"][
-            "agent_reads_enabled"
-        ] is False
-        assert own.json()["convergence"]["capability_manifest"]["policy"][
-            "agent_proposals_enabled"
-        ] is False
+        assert (
+            own.json()["convergence"]["capability_manifest"]["policy"]["agent_reads_enabled"]
+            is False
+        )
+        assert (
+            own.json()["convergence"]["capability_manifest"]["policy"]["agent_proposals_enabled"]
+            is False
+        )
         assert own.json()["integrations"]["devices"] == []
         assert own.json()["teams"] == [
             {"id": str(team_id), "name": "Field team", "site_id": str(site_id)}
@@ -191,10 +190,12 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert own.json()["integrations"]["connections"] == []
 
         integration_url = f"/api/v1/workspace/organizations/{organization_id}/integrations"
-        assert (await client.post(
-            integration_url,
-            json={"provider": "google_drive", "scope": "user"},
-        )).status_code == 403
+        assert (
+            await client.post(
+                integration_url,
+                json={"provider": "google_drive", "scope": "user"},
+            )
+        ).status_code == 403
 
         personal = await client.post(
             integration_url,
@@ -229,14 +230,21 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             json={
                 "provider": "snowflake",
                 "scope": "organization",
-                "configuration": {
-                    "account_host": "org-account.snowflakecomputing.com"
-                },
+                "configuration": {"account_host": "org-account.snowflakecomputing.com"},
             },
             headers=headers,
         )
         assert organization_connection.status_code == 201
         assert organization_connection.json()["scope"] == "organization"
+
+        # Seed protected server-side material so this checks real redaction,
+        # rather than merely the shape of an unconfigured connection.
+        async with factory() as session:
+            stored_connection = await session.get(
+                IntegrationConnection, UUID(organization_connection.json()["id"])
+            )
+            stored_connection.credential_ref = "encrypted-test-token-must-not-leak"
+            await session.commit()
 
         setup_catalog = await client.get(
             f"/api/v1/workspace/organizations/{organization_id}/integrations/catalog"
@@ -258,7 +266,10 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             {"key": "programmatic_access_token", "required": True}
         ]
         assert snowflake_setup["connections"][0]["can_manage"] is True
-        assert "programmatic_access_token" not in str(snowflake_setup)
+        # Field names are public setup metadata; credential material is never public.
+        assert "programmatic_access_token" not in str(snowflake_setup["connections"])
+        assert "credential_ref" not in snowflake_setup["connections"][0]
+        assert "encrypted-test-token-must-not-leak" not in setup_catalog.text
 
         duplicate = await client.post(
             integration_url,
@@ -298,7 +309,6 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         )
         assert coming_soon_rejected.status_code == 400
 
-
         with_integrations = (
             await client.get(f"/api/v1/workspace/organizations/{organization_id}")
         ).json()
@@ -322,9 +332,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert "Nothing has been sent" in proposal.json()["answer"]
 
         run_id = proposal.json()["run_id"]
-        discovery_url = (
-            f"/api/v1/workspace/organizations/{organization_id}/discovery"
-        )
+        discovery_url = f"/api/v1/workspace/organizations/{organization_id}/discovery"
         discovery_events_url = f"{discovery_url}/events"
         discovery = await client.get(discovery_url)
         assert discovery.status_code == 200
@@ -370,12 +378,12 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert run_detail.json()["request_id"] == str(satchy_request_id)
         assert run_detail.json()["status"] == "awaiting_approval"
         assert run_detail.json()["input_text"].startswith("Satchy, notify")
-        assert [
-            step["type"] for step in run_detail.json()["steps"]
-        ] == ["context", "action", "response"]
-        action_step = next(
-            step for step in run_detail.json()["steps"] if step["type"] == "action"
-        )
+        assert [step["type"] for step in run_detail.json()["steps"]] == [
+            "context",
+            "action",
+            "response",
+        ]
+        action_step = next(step for step in run_detail.json()["steps"] if step["type"] == "action")
         assert action_step["status"] == "awaiting_approval"
         assert action_step["action_id"] == str(satchy_request_id)
         assert action_step["detail"]["capability"] == "notification.send"
@@ -390,18 +398,13 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             await client.get(f"/api/v1/workspace/organizations/{organization_id}")
         ).json()
         proposed_action = next(
-            item
-            for item in proposed_workspace["actions"]
-            if item["id"] == str(satchy_request_id)
+            item for item in proposed_workspace["actions"] if item["id"] == str(satchy_request_id)
         )
         assert proposed_action["source_id"] is None
         assert proposed_action["status"] == "awaiting_approval"
 
         approved_action = await client.post(
-            (
-                f"/api/v1/workspace/organizations/{organization_id}/actions/"
-                f"{satchy_request_id}"
-            ),
+            (f"/api/v1/workspace/organizations/{organization_id}/actions/{satchy_request_id}"),
             json={"decision": "approve"},
             headers=headers,
         )
@@ -425,13 +428,13 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert revoked.json()["status"] == "revoked"
         assert revoked.json()["enabled"] is False
 
-        convergence_url = (
-            f"/api/v1/workspace/organizations/{organization_id}/convergence"
-        )
-        assert (await client.patch(
-            convergence_url,
-            json={"runtime_mode": "shadow"},
-        )).status_code == 403
+        convergence_url = f"/api/v1/workspace/organizations/{organization_id}/convergence"
+        assert (
+            await client.patch(
+                convergence_url,
+                json={"runtime_mode": "shadow"},
+            )
+        ).status_code == 403
         convergence_changed = await client.patch(
             convergence_url,
             json={
@@ -475,9 +478,10 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert converged_workspace["convergence"]["profile"]["operational_domain"] == "avalanche"
         assert converged_workspace["convergence"]["profile"]["workspace_template"] == "uac"
         assert converged_workspace["convergence"]["profile"]["runtime_mode"] == "shadow"
-        assert converged_workspace["convergence"]["capability_manifest"]["policy"][
-            "shadow_only"
-        ] is True
+        assert (
+            converged_workspace["convergence"]["capability_manifest"]["policy"]["shadow_only"]
+            is True
+        )
         assert converged_workspace["modules"] == [
             "Map",
             "Radio Log",
@@ -569,9 +573,7 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         ).json()["assets"]
         assert [item["id"] for item in visible_assets] == [asset["id"]]
 
-        inventory = await client.get(
-            f"/api/v1/workspace/organizations/{organization_id}/assets"
-        )
+        inventory = await client.get(f"/api/v1/workspace/organizations/{organization_id}/assets")
         assert inventory.status_code == 200
         assert [item["id"] for item in inventory.json()] == [asset["id"]]
 
@@ -647,6 +649,18 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
             in causal_fallback.json()["answer"].lower()
         )
         assert "will not infer an explanation" in causal_fallback.json()["answer"].lower()
+
+        update_fallback = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={"site_id": str(site_id), "message": "No worries. Any other updates?"},
+            headers=headers,
+        )
+        assert update_fallback.status_code == 200
+        assert update_fallback.json()["run_status"] == "completed"
+        assert "Activity or Map" in update_fallback.json()["answer"]
+        assert "temporarily unavailable" not in update_fallback.json()["answer"]
+        assert update_fallback.json()["answer"].startswith("No verified updates")
+        assert "wind" not in update_fallback.json()["answer"].lower()
 
         async with factory() as session:
             user = await session.get(User, user_id)
