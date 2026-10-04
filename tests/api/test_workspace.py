@@ -632,6 +632,22 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert "visibility decreased" in grounded_fallback.json()["answer"].lower()
         assert "did not infer a cause" in grounded_fallback.json()["answer"].lower()
 
+        causal_fallback = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "site_id": str(site_id),
+                "message": "Based only on that field report, why did visibility decrease?",
+            },
+            headers=headers,
+        )
+        assert causal_fallback.status_code == 200
+        assert causal_fallback.json()["run_status"] == "completed"
+        assert (
+            "cause cannot be determined from the available evidence"
+            in causal_fallback.json()["answer"].lower()
+        )
+        assert "will not infer an explanation" in causal_fallback.json()["answer"].lower()
+
         async with factory() as session:
             user = await session.get(User, user_id)
             user.enabled = False

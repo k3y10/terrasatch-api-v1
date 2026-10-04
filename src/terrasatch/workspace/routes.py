@@ -166,6 +166,16 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             "capability/capabilities. The reasoning service is temporarily unavailable, so I’m "
             "keeping this to verified workspace state. Open Map to inspect the source-linked picture."
         )
+    elif (
+        "why" in normalized
+        or "cause" in normalized
+        or "what caused" in normalized
+        or "reason for" in normalized
+    ):
+        answer = (
+            "The cause cannot be determined from the available evidence. "
+            "I will not infer an explanation that is not supported by the source material."
+        )
     elif "what changed" in normalized or "last shift" in normalized or "activity" in normalized:
         reported = _FIELD_REPORT_STATEMENT.search(message)
         if reported is not None:
@@ -178,9 +188,8 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             answer = (
                 f"The Workspace is connected with {evidence_count} authorized field source(s) "
                 "in the current Satchy context. The reasoning service is temporarily unavailable, "
-                "so I cannot "
-                "safely synthesize a change narrative right now. Open Activity to inspect the "
-                "source-linked run and workspace history."
+                "so I cannot safely synthesize a change narrative right now. Open Activity to inspect "
+                "the source-linked run and workspace history."
             )
     else:
         answer = (

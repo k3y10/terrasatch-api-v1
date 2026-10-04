@@ -28,7 +28,8 @@ State only supported facts. Do not add possible causes, hazards, impacts, trends
 If support is missing, say it cannot be determined from the available evidence.
 For operational claims, cite evidence IDs when available.
 Never claim actions were executed; external or physical actions require approval.
-Respect listed capabilities. Keep answers concise.
+Respect listed capabilities. Keep answers to 1-3 concise sentences. Do not repeat the same fact.
+Do not use a list unless the user asks for one.
 """
 
 _INTEGRATION_ACTION_SYSTEM = """Plan one provider-neutral TerraSatch integration action.
