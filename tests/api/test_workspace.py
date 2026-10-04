@@ -615,6 +615,23 @@ async def test_workspace_requires_login_csrf_and_current_membership(monkeypatch)
         assert "weather" in degraded_chat.json()["answer"].lower()
         assert "workspace is still connected" in degraded_chat.json()["answer"].lower()
 
+        grounded_fallback = await client.post(
+            f"/api/v1/workspace/organizations/{organization_id}/chat",
+            json={
+                "site_id": str(site_id),
+                "message": (
+                    "A field report says wind increased from light to moderate over the last hour "
+                    "and visibility decreased. What changed?"
+                ),
+            },
+            headers=headers,
+        )
+        assert grounded_fallback.status_code == 200
+        assert grounded_fallback.json()["run_status"] == "completed"
+        assert "wind increased from light to moderate" in grounded_fallback.json()["answer"].lower()
+        assert "visibility decreased" in grounded_fallback.json()["answer"].lower()
+        assert "did not infer a cause" in grounded_fallback.json()["answer"].lower()
+
         async with factory() as session:
             user = await session.get(User, user_id)
             user.enabled = False
