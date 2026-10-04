@@ -1,0 +1,8 @@
+# Merge this site block into the existing host proxy; do not replace API routes.
+# Proposed hostname: create its DNS record only after the server is ready.
+mail.terrasatch.com {
+    request_body {
+        max_size 256KB
+    }
+    reverse_proxy 127.0.0.1:8024
+}

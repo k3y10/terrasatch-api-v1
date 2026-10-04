@@ -1,0 +1,17 @@
+name: terrasatch-internal-inbox
+services:
+  inbox:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["127.0.0.1:8024:8024"]
+    volumes: ["./data:/data"]
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
