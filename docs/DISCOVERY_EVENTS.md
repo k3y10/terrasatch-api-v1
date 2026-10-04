@@ -146,6 +146,44 @@ Once a reviewer moves a candidate to `workflow_testing`, `workflow_approved`, or
 
 The detector runs after either a newly captured signal or newly captured workspace-context event. This means LISTEN may occur before WATCH or WATCH may occur before the threshold-crossing signal; either direction can unlock the same bounded candidate.
 
+## Controlled ADAPT testing
+
+A LEARN candidate does not enter testing automatically. An authorized administrator must explicitly start a controlled test and declare:
+
+- the test objective
+- one numeric metric key and unit
+- a measured baseline value
+- whether the desired direction is decrease, increase, or maintain
+- a sample target between 1 and 20
+
+Starting a test creates `workflow_testing` evidence with `execution_authorized: false`.
+
+Operators may append bounded numeric measurements to an active test. Every measurement uses a client-supplied UUID for retry safety and creates an immutable revision of the current testing evidence. The evidence records:
+
+- raw measured values
+- measurement count and declared sample target
+- arithmetic measured average
+- observed numeric delta from the declared baseline
+- observed percentage delta when the baseline is non-zero
+
+These values are measurements and arithmetic comparisons only. TerraSatch does **not** label the delta as savings, ROI, success, or causal impact.
+
+Approval requires the declared sample target to be met. Rejection may happen earlier so a reviewer can stop a poor, unsafe, or irrelevant test without collecting unnecessary samples.
+
+Workflow state is constrained to:
+
+```text
+identified
+    ↓ human starts test
+testing
+    ↓ human review
+approved OR rejected
+```
+
+Admin/owner users start and review tests. Operator-or-higher users may record measurements. Approval or rejection records evidence only; even Approved evidence carries `execution_authorized: false` and does not change runtime modes, permissions, integrations, radios, Edge behavior, or physical actions.
+
+The generic manual Discovery event endpoint cannot create `workflow_testing`, `workflow_approved`, or `workflow_rejected` events. Existing workflow identification also cannot be appended as a new state event; refinements must use the immutable revision relationship. This prevents manual API calls from bypassing the controlled state machine or rolling a workflow backward.
+
 ## Workspace API
 
 Authenticated members may read:
@@ -153,9 +191,15 @@ Authenticated members may read:
 - `GET /api/v1/workspace/organizations/{organization_id}/discovery`
 - `GET /api/v1/workspace/organizations/{organization_id}/discovery/events`
 
-Admin/owner users may append manually certified evidence with CSRF protection:
+Admin/owner users may append manually certified observational/identification evidence with CSRF protection:
 
 - `POST /api/v1/workspace/organizations/{organization_id}/discovery/events`
+
+Controlled workflow testing:
+
+- `POST /api/v1/workspace/organizations/{organization_id}/discovery/workflows/{workflow_key}/testing`
+- `POST /api/v1/workspace/organizations/{organization_id}/discovery/workflows/{workflow_key}/testing/measurements`
+- `POST /api/v1/workspace/organizations/{organization_id}/discovery/workflows/{workflow_key}/review`
 
 Automatic Satchy/system capture should call the internal Discovery service directly and preserve the true source type/reference. It should never masquerade system evidence as a manual human event.
 
@@ -164,7 +208,9 @@ Automatic Satchy/system capture should call the internal Discovery service direc
 This phase intentionally does not:
 
 - move an identified candidate into testing without an authorized human
-- approve, reject, or execute workflow adaptations automatically
+- approve or reject a tested workflow without an authorized human
+- execute an approved workflow automatically
+- infer savings, ROI, or causal impact from measured deltas
 - alter the existing Discovery lifecycle JSON
 - change Satchy runtime modes or permissions
 - calculate ROI without measured evidence
