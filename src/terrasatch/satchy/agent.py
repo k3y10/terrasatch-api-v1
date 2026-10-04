@@ -312,14 +312,25 @@ async def resolve_radio_intent(
 
 
 
-_SPECULATION_RE = re.compile(
-    r"\b(?:likely|probably|possibly)\b"
-    r"|\b(?:due to|caused by|attributed to|because of|results? from)\b"
+_SPECULATIVE_LANGUAGE_RE = re.compile(
+    r"\b(?:likely|probably|possibly|typically|generally|usually)\b"
     r"|\b(?:may|might|could)\s+(?!not\b)(?:be|indicate|suggest|reflect|result|mean|have)\b",
     re.I,
 )
+_CAUSAL_CLAIM_RE = re.compile(
+    r"\b(?:because|because of|due to|caused by|causing|attributed to|results? from|"
+    r"leads? to|reduces?|increases?)\b",
+    re.I,
+)
 _CAUSAL_EVIDENCE_RE = re.compile(
-    r"\b(?:because|because of|due to|caused by|attributed to|resulted? from)\b",
+    r"\b(?:because|because of|due to|caused by|causing|attributed to|resulted? from|"
+    r"leads? to)\b",
+    re.I,
+)
+_FIELD_REPORT_RE = re.compile(
+    r"\b(?:a\s+)?(?:field\s+)?(?:report|observation)\s+"
+    r"(?:says|states|reports|notes)\s*[:,-]?\s*(.+?)"
+    r"(?:\.\s*(?:what changed|summarize|what can you tell me)\??\s*$|$)",
     re.I,
 )
 
@@ -374,14 +385,14 @@ def _compact_workspace_context(context: SatchyContext) -> dict[str, object]:
 
 def _compact_history(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
     compact: list[dict[str, str]] = []
-    for item in (history or [])[-4:]:
-        role = item.get("role")
+    user_items = [item for item in (history or []) if item.get("role") == "user"]
+    for item in user_items[-4:]:
         content = item.get("content")
-        if role not in {"user", "assistant"} or not isinstance(content, str):
+        if not isinstance(content, str):
             continue
         normalized = " ".join(content.split()).strip()
         if normalized:
-            compact.append({"role": role, "content": normalized[:500]})
+            compact.append({"role": "user", "content": normalized[:500]})
     return compact
 
 
@@ -394,8 +405,43 @@ def _evidence_supports_causality(context: SatchyContext) -> bool:
 
 
 def _reject_unsupported_speculation(answer: str, context: SatchyContext) -> None:
-    if _SPECULATION_RE.search(answer) and not _evidence_supports_causality(context):
-        raise _GroundingViolation("Model introduced unsupported causal or speculative language")
+    if _SPECULATIVE_LANGUAGE_RE.search(answer):
+        raise _GroundingViolation("Model introduced speculative language")
+    if _CAUSAL_CLAIM_RE.search(answer) and not _evidence_supports_causality(context):
+        raise _GroundingViolation("Model introduced an unsupported causal claim")
+
+
+def _deterministic_grounded_answer(
+    *,
+    context: SatchyContext,
+    message: str,
+) -> tuple[str, str] | None:
+    normalized = " ".join(message.lower().split())
+
+    if (
+        "why" in normalized
+        or "what caused" in normalized
+        or "cause of" in normalized
+        or "reason for" in normalized
+    ) and not _evidence_supports_causality(context):
+        return (
+            "The cause cannot be determined from the available evidence. "
+            "I will not infer an explanation that the source material does not support.",
+            "satchy-grounded-rule",
+        )
+
+    if "what changed" in normalized or "summarize" in normalized:
+        reported = _FIELD_REPORT_RE.search(message)
+        if reported is not None:
+            statement = " ".join(reported.group(1).split()).strip(" .")
+            if statement:
+                statement = statement[0].upper() + statement[1:]
+                return (
+                    f"{statement}. No additional changes are supported by the supplied report.",
+                    "satchy-grounded-rule",
+                )
+
+    return None
 
 
 async def answer_workspace(
@@ -407,6 +453,14 @@ async def answer_workspace(
 ) -> tuple[str, str]:
     if settings.intelligence_provider != "ollama":
         raise ProviderUnavailable("Satchy model service is not configured")
+
+    deterministic = _deterministic_grounded_answer(context=context, message=message)
+    if deterministic is not None:
+        logger.info(
+            "satchy.workspace_grounded_rule",
+            model=deterministic[1],
+        )
+        return deterministic
 
     context_json = json.dumps(
         _compact_workspace_context(context),
