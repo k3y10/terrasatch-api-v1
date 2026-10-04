@@ -77,6 +77,21 @@ class CheckoutSessionResponse(BaseModel):
     recurring_amount_cents: int
 
 
+class CryptoInvoiceSubscriptionResponse(BaseModel):
+    signup_id: UUID
+    stripe_subscription_id: str
+    stripe_customer_id: str
+    status: str
+    plan_code: PlanCode
+    billing_interval: BillingInterval
+    trial_days: int
+    trial_ends_at: datetime | None
+    amount_due_today_cents: Literal[0] = 0
+    recurring_amount_cents: int
+    invoice_payment_window_days: int
+    payment_rail: Literal["crypto_invoice"] = "crypto_invoice"
+
+
 class CheckoutStatusResponse(BaseModel):
     state: Literal["processing", "ready", "expired"]
     plan_code: PlanCode

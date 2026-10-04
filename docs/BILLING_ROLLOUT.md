@@ -8,8 +8,8 @@ Do not merge, promote, enable live billing, or modify Stripe under the current p
 
 | Plan | Public monthly price | Checkout | Planned lookup key |
 | --- | --- | --- | --- |
-| Individual | $24 | 30-day card-required trial, when enabled | `terrasatch_individual_monthly_v2` |
-| Team | $399 | 30-day card-required trial, when enabled | `terrasatch_team_monthly_v2` |
+| Individual | $24 | 14-day payment-method-required trial, when enabled | `terrasatch_individual_monthly_v2` |
+| Team | $399 | 14-day payment-method-required trial, when enabled | `terrasatch_team_monthly_v2` |
 | Operations | From $1,999 | Sales/scoped only | None |
 | Enterprise | Custom | Sales/scoped only | None |
 
@@ -83,8 +83,8 @@ Do not describe the webhook as end-to-end accepted until the Oracle staging proc
 Oracle staging did not contain a TerraSatch Stripe test API key. Instead of copying or exposing an account secret, isolated staging now uses Stripe-hosted sandbox Payment Links while production retains the server-side Stripe API/HMAC design.
 
 Sandbox Payment Links:
-- Individual: `plink_1UH5n8PwzxCRGRdhckplOIz0`, $24/month, 30-day trial.
-- Team: `plink_1UH5nAPwzxCRGRdhTJE7crl5`, $399/month, 30-day trial.
+- Individual: `plink_1UJTVMPwzxCRGRdhzpdBiKN7`, $24/month, 14-day trial.
+- Team: `plink_1UJTVNPwzxCRGRdhoMTBEZRx`, $399/month, 14-day trial.
 - Both redirect to the isolated staging success URL with `{CHECKOUT_SESSION_ID}`.
 - TerraSatch appends a non-sensitive signup UUID using Stripe's supported `client_reference_id` URL parameter and locks the signup email with `locked_prefilled_email`.
 - Payment Link metadata and subscription metadata are restricted to `product=terrasatch`, `billing_version=v2`, `environment=staging`, the expected plan code, and monthly cadence.
@@ -194,3 +194,23 @@ Do not use `onboarding@resend.dev`, test-domain senders, or unverified From addr
 
 After configuration, rerun the standard staging bootstrap. Its safety summary now
 reports direct Resend and delivery-reconciliation readiness independently.
+
+
+## Stablecoin invoice subscriptions — September 25, 2026
+
+TerraSatch supports a non-custodial, non-private-preview recurring crypto path through Stripe Billing:
+
+- `POST /api/v1/billing/crypto-subscription` creates the same TerraSatch signup intent used by card Checkout.
+- The API creates a Stripe Customer and a normal recurring Subscription with `collection_method=send_invoice`.
+- The subscription uses the same server-owned v2 Price lookup key, a 14-day trial, and TerraSatch `signup_id`, plan, interval, environment, and `payment_rail=crypto_invoice` metadata.
+- Stripe generates recurring hosted invoices. Eligible customers can choose Crypto/stablecoins on the invoice and approve each payment from their wallet.
+- This path does **not** pretend to perform silent recurring wallet debits. Automatic off-session stablecoin withdrawal remains dependent on Stripe's separate recurring-stablecoin capability/private preview.
+- The existing `customer.subscription.*` and `invoice.*` webhook pipeline remains the source of truth for workspace provisioning and service access. A subscription that passes its invoice due date becomes `past_due`, so TerraSatch's existing grace/restricted entitlement behavior applies without a second billing state machine.
+- The default crypto invoice payment window is three days and is configurable through `TERRASATCH_BILLING_CRYPTO_INVOICE_DAYS_UNTIL_DUE`.
+- Staging requires a server-side restricted Stripe test key for this route. Static Payment Links remain available for ordinary sandbox Checkout, but cannot create this send-invoice subscription on behalf of the API.
+
+Do not enable Stripe Tax automatically until TerraSatch has the applicable tax registration(s). Stablecoin is a payment method; taxability follows the underlying TerraSatch product and customer jurisdiction.
+
+### Stablecoin rollout gate
+
+`TERRASATCH_BILLING_CRYPTO_INVOICE_ENABLED` defaults to false. Keep it disabled until the account supports stablecoin invoice payment and a sandbox run verifies signup, activation email, hosted invoice payment, renewal, overdue access restriction, and duplicate webhooks. The website must not advertise crypto checkout as available before this gate and the deployment are validated. The gateway does not implement automatic wallet debits. Trial emails use the subscription's actual end date so existing 30-day trials are not relabeled as 14-day trials.

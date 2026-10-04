@@ -274,6 +274,25 @@ async def mark_checkout_created(
     return signup
 
 
+async def mark_invoice_subscription_created(
+    session: AsyncSession,
+    *,
+    signup_id: UUID,
+    stripe_customer_id: str,
+) -> BillingSignup:
+    """Persist the provider customer for a send-invoice subscription before webhooks arrive."""
+
+    signup = await session.get(BillingSignup, signup_id)
+    if signup is None:
+        raise ResourceNotFound("Billing signup was not found")
+    if signup.status == "completed":
+        return signup
+    signup.stripe_customer_id = stripe_customer_id
+    signup.status = "checkout_created"
+    await session.flush()
+    return signup
+
+
 async def _find_signup(
     session: AsyncSession,
     *,
