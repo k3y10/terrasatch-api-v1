@@ -1,7 +1,7 @@
 """Member sessions, tenant-scoped field records, Satchy chat and human reviews."""
 
-from datetime import UTC, datetime, timedelta
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -176,8 +176,9 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             )
         else:
             answer = (
-                f"The Workspace is connected with {evidence_count} authorized field source(s) in the "
-                "current Satchy context. The reasoning service is temporarily unavailable, so I cannot "
+                f"The Workspace is connected with {evidence_count} authorized field source(s) "
+                "in the current Satchy context. The reasoning service is temporarily unavailable, "
+                "so I cannot "
                 "safely synthesize a change narrative right now. Open Activity to inspect the "
                 "source-linked run and workspace history."
             )
