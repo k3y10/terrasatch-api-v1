@@ -28,7 +28,7 @@ from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 from terrasatch.satchy import models as satchy_models
 from terrasatch.satchy.adaptation import observe_workspace_context
-from terrasatch.satchy.agent import plan_integration_action, resolve_radio_intent
+from terrasatch.satchy.agent import answer_workspace, plan_integration_action, resolve_radio_intent
 from terrasatch.satchy.assets import (
     create_mission_plan,
     list_authorized_assets,
@@ -37,7 +37,7 @@ from terrasatch.satchy.assets import (
 from terrasatch.satchy.context import build_satchy_context
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.models import FieldAsset
-from terrasatch.satchy.schemas import ActiveMapContext, SatchyIntent, WorkflowMode
+from terrasatch.satchy.schemas import ActiveMapContext, SatchyContext, SatchyIntent, WorkflowMode
 from terrasatch.satchy.workflows import resolve_workflow
 from terrasatch.workspace import models as workspace_models
 from terrasatch.workspace.models import WorkspacePreference
@@ -392,6 +392,74 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url: str, *, json: dict[str, object]):
+            captured["url"] = url
+            captured["payload"] = json
+            return httpx.Response(
+                200,
+                json={"message": {"content": "Wind increased and visibility decreased."}},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr("terrasatch.satchy.agent.httpx.AsyncClient", FakeAsyncClient)
+
+    settings = SimpleNamespace(
+        intelligence_provider="ollama",
+        ollama_base_url="http://ollama.test",
+        ollama_model="qwen3:1.7b",
+        intelligence_timeout_seconds=40.0,
+    )
+    context = SatchyContext(
+        organization_id=uuid4(),
+        organization_name="TerraSatch",
+        site_id=uuid4(),
+        site_name="Production test",
+        evidence=[
+            {
+                "id": "test-observation",
+                "type": "observation",
+                "summary": (
+                    "Wind increased from light to moderate over the last hour "
+                    "and visibility decreased."
+                ),
+            }
+        ],
+    )
+
+    answer, model = await answer_workspace(
+        settings=settings,
+        context=context,
+        message="What changed?",
+        history=[],
+    )
+
+    assert answer == "Wind increased and visibility decreased."
+    assert model == "qwen3:1.7b"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["think"] is False
+    assert payload["options"] == {"temperature": 0.15, "num_predict": 256}
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    system_prompt = messages[0]["content"]
+    assert "cause cannot be determined from the available evidence" in system_prompt
+    assert 'Do not use speculative language such as "likely", "may", or "could"' in system_prompt
 
 
 @pytest.mark.asyncio
