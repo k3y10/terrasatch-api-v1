@@ -99,6 +99,21 @@ CAPABILITIES: dict[str, CapabilityDefinition] = {
         "label": "Read weather forecasts",
         "access": "read",
     },
+    "weather.alerts.read": {
+        "key": "weather.alerts.read",
+        "label": "Read active weather alerts",
+        "access": "read",
+    },
+    "wildfire.detections.read": {
+        "key": "wildfire.detections.read",
+        "label": "Read active fire detections",
+        "access": "read",
+    },
+    "avalanche.forecast.read": {
+        "key": "avalanche.forecast.read",
+        "label": "Read avalanche forecasts",
+        "access": "read",
+    },
 }
 
 _SUPPORTED_PROVIDER_KEYS = {
@@ -120,6 +135,9 @@ _SUPPORTED_PROVIDER_KEYS = {
     "ogc_api_features",
     "stac_api",
     "nws_forecast",
+    "nws_alerts",
+    "nasa_firms",
+    "uac_forecast",
     "snowflake",
     "caltopo",
 }
@@ -323,6 +341,42 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "capabilities": ["weather.forecast.read"],
         "description": (
             "Read official NWS point forecasts through api.weather.gov."
+        ),
+    },
+    "nws_alerts": {
+        "key": "nws_alerts",
+        "name": "National Weather Service Alerts",
+        "category": "weather",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["weather.alerts.read"],
+        "description": (
+            "Read official active NWS watches, warnings, advisories, and alerts."
+        ),
+    },
+    "nasa_firms": {
+        "key": "nasa_firms",
+        "name": "NASA FIRMS",
+        "category": "wildfire",
+        "auth": "service_account",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["wildfire.detections.read"],
+        "description": (
+            "Read bounded near-real-time satellite active-fire detections from NASA FIRMS."
+        ),
+    },
+    "uac_forecast": {
+        "key": "uac_forecast",
+        "name": "Utah Avalanche Center",
+        "category": "avalanche",
+        "auth": "public_https",
+        "setup_status": "planned",
+        "scopes": ["team", "organization"],
+        "capabilities": ["avalanche.forecast.read"],
+        "description": (
+            "Read official Utah Avalanche Center daily forecast JSON by approved region."
         ),
     },
     "snowflake": {

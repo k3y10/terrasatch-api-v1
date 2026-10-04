@@ -22,12 +22,15 @@ from terrasatch.integrations.operations import (
     put_cloudflare_r2_object,
     query_arcgis_features,
     query_caltopo_map,
+    query_firms_detections,
     query_geojson_features,
+    query_nws_alerts,
     query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
+    query_uac_forecast,
     read_mapbox_style,
     send_resend_notification,
     send_slack_message,
@@ -35,6 +38,7 @@ from terrasatch.integrations.operations import (
     send_webhook_notification,
     validate_aws_region,
     validate_generic_webhook_url,
+    validate_firms_bounds,
     validate_geojson_url,
     validate_nws_forecast_url,
     validate_ogc_api_base_url,
@@ -47,6 +51,7 @@ from terrasatch.integrations.operations import (
     validate_r2_endpoint_url,
     validate_stac_api_base_url,
     validate_teams_workflow_url,
+    validate_uac_region,
 )
 
 
@@ -1187,3 +1192,212 @@ async def test_nws_probe_uses_fixed_service_root() -> None:
 
     result = await probe_nws_api(transport=httpx.MockTransport(responder))
     assert result.external_id == "api.weather.gov"
+
+
+@pytest.mark.asyncio
+async def test_uac_forecast_uses_fixed_region_endpoint_and_user_agent() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert str(request.url) == (
+            "https://utahavalanchecenter.org/forecast/salt-lake/json"
+        )
+        assert request.headers["User-Agent"] == (
+            "TerraSatch/0.3 (+https://terrasatch.com)"
+        )
+        assert request.headers["Accept"] == "application/json"
+        return httpx.Response(
+            200,
+            json={
+                "date_issued": "2026-09-21",
+                "overall_danger_rose": [2] * 24,
+                "bottom_line": "Test forecast",
+            },
+        )
+
+    result = await query_uac_forecast(
+        region="salt-lake",
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata == {
+        "source_host": "utahavalanchecenter.org",
+        "region": "salt-lake",
+    }
+    assert result.data["forecast"]["bottom_line"] == "Test forecast"
+
+
+def test_uac_region_allowlist_is_exact() -> None:
+    assert validate_uac_region(" Salt-Lake ") == "salt-lake"
+    assert validate_uac_region("uintas") == "uintas"
+    with pytest.raises(InvalidConfiguration, match="not supported"):
+        validate_uac_region("colorado")
+    with pytest.raises(InvalidConfiguration, match="not supported"):
+        validate_uac_region("../salt-lake")
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_use_fixed_endpoint_and_preserve_features() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/alerts/active"
+        assert request.url.params["zone"] == "UTC035"
+        assert request.headers["User-Agent"] == (
+            "TerraSatch/0.3 (+https://terrasatch.com)"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "type": "FeatureCollection",
+                "title": "Current watches, warnings, and advisories",
+                "features": [
+                    {
+                        "id": "urn:oid:alert-1",
+                        "type": "Feature",
+                        "geometry": None,
+                        "properties": {
+                            "event": "Winter Storm Warning",
+                            "severity": "Severe",
+                            "headline": "Test warning",
+                        },
+                    },
+                    {
+                        "id": "urn:oid:alert-2",
+                        "type": "Feature",
+                        "geometry": None,
+                        "properties": {
+                            "event": "Wind Advisory",
+                            "severity": "Moderate",
+                        },
+                    },
+                ],
+            },
+        )
+
+    result = await query_nws_alerts(
+        zone="utc035",
+        max_alerts=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert len(result.data["features"]) == 1
+    assert result.data["features"][0]["properties"]["event"] == (
+        "Winter Storm Warning"
+    )
+    assert result.metadata == {
+        "source_host": "api.weather.gov",
+        "selector_type": "zone",
+        "selector_value": "UTC035",
+        "alert_count": 1,
+        "source_alert_count": 2,
+        "truncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_support_point_selector() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["point"] == "40.6000,-111.7000"
+        return httpx.Response(
+            200,
+            json={"type": "FeatureCollection", "features": []},
+        )
+
+    result = await query_nws_alerts(
+        latitude=40.6,
+        longitude=-111.7,
+        max_alerts=10,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.metadata["selector_type"] == "point"
+    assert result.metadata["selector_value"] == "40.6000,-111.7000"
+
+
+@pytest.mark.asyncio
+async def test_nws_active_alerts_require_one_valid_selector() -> None:
+    with pytest.raises(InvalidConfiguration, match="exactly one"):
+        await query_nws_alerts(
+            area="UT",
+            zone="UTC035",
+            max_alerts=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="latitude and longitude"):
+        await query_nws_alerts(
+            latitude=40.6,
+            max_alerts=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="area code"):
+        await query_nws_alerts(
+            area="UTAH",
+            max_alerts=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_firms_area_query_converts_csv_to_bounded_geojson() -> None:
+    def responder(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "firms.modaps.eosdis.nasa.gov"
+        assert "/api/area/csv/test-map-key/VIIRS_NOAA21_NRT/" in request.url.path
+        assert request.url.path.endswith("/2")
+        return httpx.Response(
+            200,
+            text=(
+                "latitude,longitude,acq_date,acq_time,satellite,instrument,confidence,frp\n"
+                "40.6001,-111.7002,2026-09-21,1845,N21,VIIRS,n,12.5\n"
+                "40.7001,-111.8002,2026-09-21,1850,N21,VIIRS,h,15.2\n"
+            ),
+        )
+
+    result = await query_firms_detections(
+        {"map_key": "test-map-key"},
+        bounds=[-114, 37, -109, 42],
+        source="VIIRS_NOAA21_NRT",
+        days=2,
+        max_detections=1,
+        transport=httpx.MockTransport(responder),
+    )
+    assert result.data["type"] == "FeatureCollection"
+    assert len(result.data["features"]) == 1
+    assert result.data["features"][0]["geometry"] == {
+        "type": "Point",
+        "coordinates": [-111.7002, 40.6001],
+    }
+    assert result.data["features"][0]["properties"]["frp"] == "12.5"
+    assert result.metadata == {
+        "source_host": "firms.modaps.eosdis.nasa.gov",
+        "source": "VIIRS_NOAA21_NRT",
+        "bounds": [-114.0, 37.0, -109.0, 42.0],
+        "day_range": 2,
+        "detection_count": 1,
+        "source_detection_count": 2,
+        "truncated": True,
+    }
+
+
+def test_firms_bounds_and_source_are_strictly_validated() -> None:
+    assert validate_firms_bounds([-114, 37, -109, 42]) == (
+        -114.0,
+        37.0,
+        -109.0,
+        42.0,
+    )
+    with pytest.raises(InvalidConfiguration, match="bounds"):
+        validate_firms_bounds([-109, 37, -114, 42])
+
+
+@pytest.mark.asyncio
+async def test_firms_rejects_unsupported_source_and_bad_key() -> None:
+    with pytest.raises(InvalidConfiguration, match="source"):
+        await query_firms_detections(
+            {"map_key": "test-map-key"},
+            bounds=[-114, 37, -109, 42],
+            source="VIIRS_SNPP_NRT",
+            days=1,
+            max_detections=10,
+        )
+    with pytest.raises(InvalidConfiguration, match="MAP_KEY"):
+        await query_firms_detections(
+            {"map_key": "bad key"},
+            bounds=[-114, 37, -109, 42],
+            source="VIIRS_NOAA21_NRT",
+            days=1,
+            max_detections=10,
+        )

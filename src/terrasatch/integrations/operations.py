@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import csv
 import hashlib
 import hmac
 import ipaddress
+import io
 import json
 import re
 import secrets
@@ -29,6 +31,21 @@ _R2_ENDPOINT_SUFFIX = ".r2.cloudflarestorage.com"
 _S3_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _NWS_ROOT = "https://api.weather.gov"
 _NWS_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_UAC_ROOT = "https://utahavalanchecenter.org"
+_UAC_USER_AGENT = "TerraSatch/0.3 (+https://terrasatch.com)"
+_UAC_REGIONS = frozenset(
+    {
+        "logan",
+        "ogden",
+        "uintas",
+        "salt-lake",
+        "provo",
+        "skyline",
+        "moab",
+        "abajos",
+        "southwest",
+    }
+)
 _NWS_FORECAST_PATH = re.compile(
     r"^/gridpoints/[A-Z]{3}/[0-9]+,[0-9]+/forecast/?$"
 )
@@ -1003,6 +1020,300 @@ async def query_stac_items(
             "truncated": len(raw_items) > len(items),
             "number_matched": payload.get("numberMatched"),
             "number_returned": payload.get("numberReturned"),
+        },
+    )
+
+
+_FIRMS_ROOT = "https://firms.modaps.eosdis.nasa.gov"
+_FIRMS_SOURCES = frozenset(
+    {
+        "LANDSAT_NRT",
+        "MODIS_NRT",
+        "VIIRS_NOAA20_NRT",
+        "VIIRS_NOAA21_NRT",
+    }
+)
+
+
+def validate_firms_bounds(value: object) -> tuple[float, float, float, float]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or not all(
+            isinstance(item, (int, float)) and not isinstance(item, bool)
+            for item in value
+        )
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS bounds must be [west, south, east, north]"
+        )
+    west, south, east, north = (round(float(item), 4) for item in value)
+    if (
+        not -180 <= west < east <= 180
+        or not -90 <= south < north <= 90
+    ):
+        raise InvalidConfiguration("NASA FIRMS bounds are invalid")
+    return west, south, east, north
+
+
+async def query_firms_detections(
+    credentials: dict[str, object],
+    *,
+    bounds: object,
+    source: str,
+    days: int,
+    max_detections: int,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    map_key = credentials.get("map_key")
+    if not isinstance(map_key, str) or not map_key.strip() or len(map_key) > 512:
+        raise ProviderUnavailable("NASA FIRMS MAP_KEY is unavailable")
+    if any(character.isspace() for character in map_key):
+        raise InvalidConfiguration("NASA FIRMS MAP_KEY is invalid")
+    normalized_source = source.strip().upper()
+    if normalized_source not in _FIRMS_SOURCES:
+        raise InvalidConfiguration("NASA FIRMS source is not supported")
+    if (
+        not isinstance(days, int)
+        or isinstance(days, bool)
+        or not 1 <= days <= 5
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS days must be an integer between 1 and 5"
+        )
+    if (
+        not isinstance(max_detections, int)
+        or isinstance(max_detections, bool)
+        or not 1 <= max_detections <= 2000
+    ):
+        raise InvalidConfiguration(
+            "NASA FIRMS max_detections must be between 1 and 2000"
+        )
+    west, south, east, north = validate_firms_bounds(bounds)
+    area = f"{west:g},{south:g},{east:g},{north:g}"
+    try:
+        response = await _request_limited(
+            transport,
+            "GET",
+            (
+                f"{_FIRMS_ROOT}/api/area/csv/"
+                f"{quote(map_key.strip(), safe='')}/"
+                f"{normalized_source}/{area}/{days}"
+            ),
+            max_bytes=8_000_000,
+            headers={"User-Agent": "TerraSatch/0.3 (+https://terrasatch.com)"},
+        )
+    except ProviderUnavailable as error:
+        if error.message == "Provider response exceeds the configured size limit":
+            raise
+        raise ProviderUnavailable("NASA FIRMS request failed") from None
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NASA FIRMS area query failed with HTTP {response.status_code}"
+        )
+
+    reader = csv.DictReader(io.StringIO(response.text))
+    fieldnames = reader.fieldnames or []
+    if "latitude" not in fieldnames or "longitude" not in fieldnames:
+        raise ProviderUnavailable("NASA FIRMS returned an invalid CSV response")
+
+    raw_rows = list(reader)
+    features: list[dict[str, object]] = []
+    for row in raw_rows[:max_detections]:
+        try:
+            latitude = float(row["latitude"])
+            longitude = float(row["longitude"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ProviderUnavailable(
+                "NASA FIRMS returned an invalid detection coordinate"
+            ) from error
+        properties = {
+            key: value
+            for key, value in row.items()
+            if key not in {"latitude", "longitude"} and value not in {None, ""}
+        }
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [longitude, latitude],
+                },
+                "properties": properties,
+            }
+        )
+
+    return ProviderQueryResult(
+        data={
+            "type": "FeatureCollection",
+            "features": features,
+        },
+        metadata={
+            "source_host": "firms.modaps.eosdis.nasa.gov",
+            "source": normalized_source,
+            "bounds": [west, south, east, north],
+            "day_range": days,
+            "detection_count": len(features),
+            "source_detection_count": len(raw_rows),
+            "truncated": len(raw_rows) > len(features),
+        },
+    )
+
+
+def validate_nws_alert_area(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", normalized):
+        raise InvalidConfiguration("NWS alert area code is invalid")
+    return normalized
+
+
+def validate_nws_alert_zone(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}[0-9]{3}", normalized):
+        raise InvalidConfiguration("NWS alert zone code is invalid")
+    return normalized
+
+
+async def query_nws_alerts(
+    *,
+    area: str | None = None,
+    zone: str | None = None,
+    latitude: object | None = None,
+    longitude: object | None = None,
+    max_alerts: int = 50,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    if (
+        not isinstance(max_alerts, int)
+        or isinstance(max_alerts, bool)
+        or not 1 <= max_alerts <= 100
+    ):
+        raise InvalidConfiguration(
+            "NWS active-alert max_alerts must be an integer between 1 and 100"
+        )
+
+    has_point = latitude is not None or longitude is not None
+    if has_point and (latitude is None or longitude is None):
+        raise InvalidConfiguration(
+            "NWS active-alert point queries require latitude and longitude"
+        )
+    selector_count = int(area is not None) + int(zone is not None) + int(has_point)
+    if selector_count != 1:
+        raise InvalidConfiguration(
+            "NWS active alerts require exactly one area, zone, or point selector"
+        )
+
+    params: dict[str, str] = {}
+    selector_type: str
+    selector_value: str
+    if area is not None:
+        selector_type = "area"
+        selector_value = validate_nws_alert_area(area)
+        params["area"] = selector_value
+    elif zone is not None:
+        selector_type = "zone"
+        selector_value = validate_nws_alert_zone(zone)
+        params["zone"] = selector_value
+    else:
+        lat, lon = _validate_weather_coordinates(latitude, longitude)
+        selector_type = "point"
+        selector_value = f"{lat:.4f},{lon:.4f}"
+        params["point"] = selector_value
+
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{_NWS_ROOT}/alerts/active",
+        max_bytes=5_000_000,
+        params=params,
+        headers={
+            "Accept": "application/geo+json",
+            "User-Agent": _NWS_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"NWS active-alert query failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable("NWS active alerts returned invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise ProviderUnavailable("NWS active alerts returned an invalid response")
+    raw_features = payload.get("features")
+    if not isinstance(raw_features, list):
+        raise ProviderUnavailable("NWS active alerts response has invalid features")
+    for feature in raw_features:
+        if (
+            not isinstance(feature, dict)
+            or not isinstance(feature.get("properties"), dict)
+        ):
+            raise ProviderUnavailable("NWS active alerts returned an invalid alert")
+    features = raw_features[:max_alerts]
+    data: dict[str, object] = {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+    for key in ("title", "updated"):
+        value = payload.get(key)
+        if value is not None:
+            data[key] = value
+    return ProviderQueryResult(
+        data=data,
+        metadata={
+            "source_host": "api.weather.gov",
+            "selector_type": selector_type,
+            "selector_value": selector_value,
+            "alert_count": len(features),
+            "source_alert_count": len(raw_features),
+            "truncated": len(raw_features) > len(features),
+        },
+    )
+
+
+def validate_uac_region(value: str) -> str:
+    normalized = value.strip().casefold()
+    if normalized not in _UAC_REGIONS:
+        raise InvalidConfiguration("Utah Avalanche Center region is not supported")
+    return normalized
+
+
+async def query_uac_forecast(
+    *,
+    region: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ProviderQueryResult:
+    normalized_region = validate_uac_region(region)
+    response = await _request_limited(
+        transport,
+        "GET",
+        f"{_UAC_ROOT}/forecast/{normalized_region}/json",
+        max_bytes=2_000_000,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": _UAC_USER_AGENT,
+        },
+    )
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderUnavailable(
+            f"Utah Avalanche Center forecast failed with HTTP {response.status_code}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderUnavailable(
+            "Utah Avalanche Center forecast returned invalid JSON"
+        ) from error
+    if not isinstance(payload, (dict, list)):
+        raise ProviderUnavailable(
+            "Utah Avalanche Center forecast returned an invalid response"
+        )
+    return ProviderQueryResult(
+        data={"forecast": payload},
+        metadata={
+            "source_host": "utahavalanchecenter.org",
+            "region": normalized_region,
         },
     )
 

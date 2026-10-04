@@ -32,18 +32,22 @@ from .operations import (
     query_arcgis_features,
     query_caltopo_map,
     query_caltopo_team,
+    query_firms_detections,
     query_geojson_features,
+    query_nws_alerts,
     query_nws_forecast,
     query_ogc_features,
     query_public_arcgis_features,
     query_snowflake,
     query_stac_items,
+    query_uac_forecast,
     read_mapbox_style,
     send_resend_notification,
     send_slack_message,
     send_teams_message,
     send_webhook_notification,
     validate_arcgis_feature_layer_url,
+    validate_firms_bounds,
     validate_public_arcgis_feature_layer_url,
 )
 from .provider_config import resolve_provider_secret_fields
@@ -595,6 +599,8 @@ async def query(
             "stac_api",
             "arcgis_enterprise_public",
             "nws_forecast",
+            "nws_alerts",
+            "uac_forecast",
         }:
             credentials, _ = await active_credentials(
                 session,
@@ -822,6 +828,198 @@ async def query(
                 longitude=longitude,
                 max_periods=requested_periods,
             )
+
+        elif (
+            capability == "wildfire.detections.read"
+            and connection.provider == "nasa_firms"
+        ):
+            configuration = dict(connection.configuration or {})
+            approved_bounds = configuration.get("bounds")
+            allowed_sources = configuration.get("sources")
+            max_days = configuration.get("max_days", 1)
+            max_detections = configuration.get("max_detections", 500)
+            if (
+                not isinstance(approved_bounds, list)
+                or not isinstance(allowed_sources, list)
+                or not all(isinstance(item, str) for item in allowed_sources)
+                or not isinstance(max_days, int)
+                or not isinstance(max_detections, int)
+            ):
+                raise InvalidConfiguration("Stored NASA FIRMS configuration is invalid")
+
+            allowed_keys = {"bounds", "source", "days", "limit"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "NASA FIRMS received unsupported query parameters"
+                )
+            approved = validate_firms_bounds(approved_bounds)
+            requested_bounds = payload.get("bounds", list(approved))
+            requested = validate_firms_bounds(requested_bounds)
+            if not (
+                approved[0] <= requested[0]
+                and approved[1] <= requested[1]
+                and requested[2] <= approved[2]
+                and requested[3] <= approved[3]
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS bounds exceed the approved operating envelope"
+                )
+
+            source = payload.get("source")
+            if source is None and len(allowed_sources) == 1:
+                source = allowed_sources[0]
+            if not isinstance(source, str):
+                raise InvalidConfiguration(
+                    "NASA FIRMS requires source when multiple sources are approved"
+                )
+            source = source.strip().upper()
+            if source not in allowed_sources:
+                raise InvalidConfiguration(
+                    "NASA FIRMS source is not approved for this connection"
+                )
+
+            days = payload.get("days", max_days)
+            limit = payload.get("limit", max_detections)
+            if (
+                not isinstance(days, int)
+                or isinstance(days, bool)
+                or not 1 <= days <= max_days
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS days must be between 1 and the configured max_days"
+                )
+            if (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or not 1 <= limit <= max_detections
+            ):
+                raise InvalidConfiguration(
+                    "NASA FIRMS limit must be between 1 and the configured max_detections"
+                )
+            result = await query_firms_detections(
+                credentials,
+                bounds=list(requested),
+                source=source,
+                days=days,
+                max_detections=limit,
+            )
+
+        elif (
+            capability == "weather.alerts.read"
+            and connection.provider == "nws_alerts"
+        ):
+            configuration = dict(connection.configuration or {})
+            allowed_areas = configuration.get("areas", [])
+            allowed_zones = configuration.get("zones", [])
+            allow_point_queries = configuration.get("allow_point_queries", False)
+            max_alerts = configuration.get("max_alerts", 50)
+            if (
+                not isinstance(allowed_areas, list)
+                or not all(isinstance(item, str) for item in allowed_areas)
+                or not isinstance(allowed_zones, list)
+                or not all(isinstance(item, str) for item in allowed_zones)
+                or not isinstance(allow_point_queries, bool)
+                or not isinstance(max_alerts, int)
+            ):
+                raise InvalidConfiguration("Stored NWS alerts configuration is invalid")
+
+            allowed_keys = {"area", "zone", "latitude", "longitude", "limit"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "NWS active alerts received unsupported query parameters"
+                )
+            area = payload.get("area")
+            zone = payload.get("zone")
+            latitude = payload.get("latitude")
+            longitude = payload.get("longitude")
+            requested_limit = payload.get("limit", max_alerts)
+            if (
+                not isinstance(requested_limit, int)
+                or isinstance(requested_limit, bool)
+                or not 1 <= requested_limit <= max_alerts
+            ):
+                raise InvalidConfiguration(
+                    "NWS alert limit must be between 1 and the configured max_alerts"
+                )
+
+            explicit_selectors = int(area is not None) + int(zone is not None)
+            has_point = latitude is not None or longitude is not None
+            explicit_selectors += int(has_point)
+            if explicit_selectors == 0:
+                fixed_count = len(allowed_areas) + len(allowed_zones)
+                if fixed_count == 1 and not allow_point_queries:
+                    if allowed_areas:
+                        area = allowed_areas[0]
+                    else:
+                        zone = allowed_zones[0]
+                else:
+                    raise InvalidConfiguration(
+                        "NWS active alerts require area, zone, or point"
+                    )
+            elif explicit_selectors != 1:
+                raise InvalidConfiguration(
+                    "NWS active alerts require exactly one selector"
+                )
+
+            if area is not None:
+                if not isinstance(area, str):
+                    raise InvalidConfiguration("NWS alert area must be a string")
+                area = area.strip().upper()
+                if area not in allowed_areas:
+                    raise InvalidConfiguration(
+                        "NWS alert area is not approved for this connection"
+                    )
+            if zone is not None:
+                if not isinstance(zone, str):
+                    raise InvalidConfiguration("NWS alert zone must be a string")
+                zone = zone.strip().upper()
+                if zone not in allowed_zones:
+                    raise InvalidConfiguration(
+                        "NWS alert zone is not approved for this connection"
+                    )
+            if has_point and not allow_point_queries:
+                raise InvalidConfiguration(
+                    "NWS point alert queries are not approved for this connection"
+                )
+            result = await query_nws_alerts(
+                area=area if isinstance(area, str) else None,
+                zone=zone if isinstance(zone, str) else None,
+                latitude=latitude,
+                longitude=longitude,
+                max_alerts=requested_limit,
+            )
+
+        elif (
+            capability == "avalanche.forecast.read"
+            and connection.provider == "uac_forecast"
+        ):
+            configuration = dict(connection.configuration or {})
+            allowed_regions = configuration.get("regions")
+            if (
+                not isinstance(allowed_regions, list)
+                or not allowed_regions
+                or not all(isinstance(item, str) for item in allowed_regions)
+            ):
+                raise InvalidConfiguration("Stored UAC forecast configuration is invalid")
+            allowed_keys = {"region"}
+            if set(payload) - allowed_keys:
+                raise InvalidConfiguration(
+                    "UAC forecast received unsupported query parameters"
+                )
+            requested_region = payload.get("region")
+            if requested_region is None and len(allowed_regions) == 1:
+                region = allowed_regions[0]
+            elif isinstance(requested_region, str):
+                region = requested_region.strip().casefold()
+            else:
+                raise InvalidConfiguration(
+                    "UAC forecast requires region when multiple regions are approved"
+                )
+            if region not in allowed_regions:
+                raise InvalidConfiguration(
+                    "UAC forecast region is not approved for this connection"
+                )
+            result = await query_uac_forecast(region=region)
 
         elif capability == "map.features.query" and connection.provider == "esri_arcgis":
             configured_layers = dict(connection.configuration or {}).get(
