@@ -343,9 +343,18 @@ def _compact_workspace_context(context: SatchyContext) -> dict[str, object]:
     if context.evidence:
         evidence: list[dict[str, object]] = []
         for item in context.evidence[-8:]:
+            compact_keys = (
+                "id",
+                "type",
+                "summary",
+                "callsign",
+                "location",
+                "confidence",
+                "created_at",
+            )
             compact = {
                 key: item.get(key)
-                for key in ("id", "type", "summary", "callsign", "location", "confidence", "created_at")
+                for key in compact_keys
                 if item.get(key) is not None
             }
             if isinstance(compact.get("summary"), str):
