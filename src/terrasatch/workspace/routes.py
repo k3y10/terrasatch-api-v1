@@ -1,6 +1,7 @@
 """Member sessions, tenant-scoped field records, Satchy chat and human reviews."""
 
 from datetime import UTC, datetime, timedelta
+import re
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -126,6 +127,12 @@ from terrasatch.workspace.schemas import (
 
 router = APIRouter(prefix="/api/v1/workspace", tags=["workspace"])
 STARTER_MODULES = ["Map", "Radio Log", "Observations", "Satchy"]
+_FIELD_REPORT_STATEMENT = re.compile(
+    r"\b(?:field\s+)?(?:report|observation)\s+"
+    r"(?:says|states|reports|notes)\s*[:,-]?\s*(.+?)"
+    r"(?:\.\s*(?:what changed|summarize|what can you tell me)\??|$)",
+    re.I,
+)
 
 
 def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
@@ -160,12 +167,20 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             "keeping this to verified workspace state. Open Map to inspect the source-linked picture."
         )
     elif "what changed" in normalized or "last shift" in normalized or "activity" in normalized:
-        answer = (
-            f"The Workspace is connected with {evidence_count} authorized field source(s) in the "
-            "current Satchy context. The reasoning service is temporarily unavailable, so I cannot "
-            "safely synthesize a change narrative right now. Open Activity to inspect the source-linked "
-            "run and workspace history."
-        )
+        reported = _FIELD_REPORT_STATEMENT.search(message)
+        if reported is not None:
+            statement = " ".join(reported.group(1).split()).strip(" .")
+            answer = (
+                f"From the report you provided: {statement}. "
+                "I did not infer a cause beyond that report."
+            )
+        else:
+            answer = (
+                f"The Workspace is connected with {evidence_count} authorized field source(s) in the "
+                "current Satchy context. The reasoning service is temporarily unavailable, so I cannot "
+                "safely synthesize a change narrative right now. Open Activity to inspect the "
+                "source-linked run and workspace history."
+            )
     else:
         answer = (
             "Satchy’s reasoning service is temporarily unavailable, but the TerraSatch Workspace "
