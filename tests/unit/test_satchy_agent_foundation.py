@@ -404,6 +404,98 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
 
 
 @pytest.mark.asyncio
+async def test_workspace_report_change_question_uses_grounded_rule_without_model(
+    monkeypatch,
+) -> None:
+    class FailAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("Grounded report summary should not call Ollama")
+
+    monkeypatch.setattr("terrasatch.satchy.agent.httpx.AsyncClient", FailAsyncClient)
+
+    settings = SimpleNamespace(
+        intelligence_provider="ollama",
+        ollama_base_url="http://ollama.test",
+        ollama_model="qwen3:1.7b",
+        intelligence_timeout_seconds=40.0,
+    )
+    context = SatchyContext(
+        organization_id=uuid4(),
+        organization_name="TerraSatch",
+        site_id=uuid4(),
+        site_name="Production test",
+    )
+
+    answer, model = await answer_workspace(
+        settings=settings,
+        context=context,
+        message=(
+            "A field report says wind increased from light to moderate over the last hour "
+            "and visibility decreased. What changed?"
+        ),
+        history=[],
+    )
+
+    assert model == "satchy-grounded-rule"
+    assert "Wind increased from light to moderate" in answer
+    assert "visibility decreased" in answer
+    assert "No additional changes are supported" in answer
+
+
+@pytest.mark.asyncio
+async def test_workspace_cause_question_without_causal_evidence_uses_grounded_rule(
+    monkeypatch,
+) -> None:
+    class FailAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("Unsupported causal question should not call Ollama")
+
+    monkeypatch.setattr("terrasatch.satchy.agent.httpx.AsyncClient", FailAsyncClient)
+
+    settings = SimpleNamespace(
+        intelligence_provider="ollama",
+        ollama_base_url="http://ollama.test",
+        ollama_model="qwen3:1.7b",
+        intelligence_timeout_seconds=40.0,
+    )
+    context = SatchyContext(
+        organization_id=uuid4(),
+        organization_name="TerraSatch",
+        site_id=uuid4(),
+        site_name="Production test",
+        evidence=[
+            {
+                "id": "test-observation",
+                "type": "observation",
+                "summary": "Visibility decreased.",
+            }
+        ],
+    )
+
+    answer, model = await answer_workspace(
+        settings=settings,
+        context=context,
+        message="Based only on that field report, why did visibility decrease?",
+        history=[
+            {
+                "role": "user",
+                "content": (
+                    "A field report says wind increased from light to moderate "
+                    "and visibility decreased."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": "Wind typically reduces visibility by causing turbulence.",
+            },
+        ],
+    )
+
+    assert model == "satchy-grounded-rule"
+    assert answer.startswith("The cause cannot be determined from the available evidence.")
+
+
+@pytest.mark.asyncio
 async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(
     monkeypatch,
 ) -> None:
@@ -457,7 +549,13 @@ async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(
         settings=settings,
         context=context,
         message="What changed?",
-        history=[],
+        history=[
+            {"role": "user", "content": "Prior user observation."},
+            {
+                "role": "assistant",
+                "content": "Unsupported assistant speculation that must not be re-fed.",
+            },
+        ],
     )
 
     assert answer == "Wind increased and visibility decreased."
@@ -472,6 +570,8 @@ async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(
     assert "State only supported facts." in system_prompt
     assert "Do not add possible causes, hazards, impacts, trends, or explanations." in system_prompt
     assert "AUTHORIZED CONTEXT:" in system_prompt
+    assert all(message["role"] != "assistant" for message in messages)
+    assert any(message["content"] == "Prior user observation." for message in messages)
 
 
 @pytest.mark.asyncio
@@ -492,7 +592,7 @@ async def test_workspace_model_rejects_unsupported_causal_speculation(monkeypatc
                 json={
                     "message": {
                         "content": (
-                            "Visibility decreased, likely due to atmospheric pressure changes."
+                            "Wind typically reduces visibility by causing more turbulence."
                         )
                     }
                 },
