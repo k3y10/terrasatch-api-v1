@@ -1,0 +1,36 @@
+{
+  "organization_id": "11111111-1111-4111-8111-111111111111",
+  "site_id": "22222222-2222-4222-8222-222222222222",
+  "domain": "avy",
+  "connectivity": "online",
+  "objective": "Sandbox validation only",
+  "evidence": [
+    {
+      "id": "sandbox-radio-1",
+      "evidence_class": "observed",
+      "source_type": "radio",
+      "summary": "Patrol reports no avalanche activity observed on a northeast aspect.",
+      "facts": {
+        "negative_avalanche_observation": true,
+        "aspect": "NE",
+        "elevation_ft": 9800
+      },
+      "confidence": 0.95,
+      "sensitivity": "organization",
+      "location": {
+        "text": "Sandbox terrain"
+      }
+    }
+  ],
+  "spatial_context": {},
+  "environmental_context": {},
+  "operational_context": {
+    "sandbox": true
+  },
+  "user_preferences": {},
+  "policy_context": {
+    "tool_allowlist": [],
+    "scopes": [],
+    "sandbox_only": true
+  }
+}
