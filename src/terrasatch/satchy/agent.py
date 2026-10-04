@@ -13,8 +13,6 @@ from pydantic import BaseModel, Field, ValidationError
 from terrasatch.errors import ProviderUnavailable
 
 from .intents import resolve_intent
-logger = structlog.get_logger(__name__)
-
 from .schemas import (
     IntentResolution,
     SatchyContext,
