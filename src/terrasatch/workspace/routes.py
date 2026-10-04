@@ -93,6 +93,7 @@ from terrasatch.satchy.schemas import (
     SatchyIntent,
     SatchyRunResponse,
 )
+from terrasatch.satchy.updates import verified_update_answer
 from terrasatch.workspace.convergence import (
     build_capability_manifest,
     get_or_create_workspace_profile,
@@ -138,6 +139,10 @@ _FIELD_REPORT_STATEMENT = re.compile(
 def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
     """Keep Workspace chat useful when the optional reasoning provider is unavailable."""
 
+    updates = verified_update_answer(context, message)
+    if updates is not None:
+        return updates
+
     normalized = " ".join(message.lower().split())
     evidence_count = len(context.evidence)
     provider_count = len(context.connected_providers)
@@ -150,12 +155,14 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
                 "Satchy’s reasoning service is temporarily unavailable, but your Workspace "
                 f"is still connected and {site_name} has an authorized weather capability. "
                 "Open Map to inspect spatial context or Integrations to verify the weather source. "
-                "I have not generated a weather interpretation while the reasoning service is degraded."
+                "I have not generated a weather interpretation while the reasoning "
+                "service is degraded."
             )
         else:
             answer = (
                 "Satchy’s reasoning service is temporarily unavailable, and I do not have an "
-                "authorized weather forecast capability in this Workspace to verify today’s conditions. "
+                "authorized weather forecast capability in this Workspace "
+                "to verify today’s conditions. "
                 "Your Workspace is still connected; open Integrations to connect a weather source, "
                 "or Map to inspect the operational context already available."
             )
@@ -164,7 +171,8 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             f"Workspace context is available for {site_name}: {evidence_count} authorized field "
             f"source(s), {provider_count} connected provider(s), and {capability_count} callable "
             "capability/capabilities. The reasoning service is temporarily unavailable, so I’m "
-            "keeping this to verified workspace state. Open Map to inspect the source-linked picture."
+            "keeping this to verified workspace state. "
+            "Open Map to inspect the source-linked picture."
         )
     elif (
         "why" in normalized
@@ -188,14 +196,16 @@ def _deterministic_workspace_fallback(context, message: str) -> tuple[str, str]:
             answer = (
                 f"The Workspace is connected with {evidence_count} authorized field source(s) "
                 "in the current Satchy context. The reasoning service is temporarily unavailable, "
-                "so I cannot safely synthesize a change narrative right now. Open Activity to inspect "
+                "so I cannot safely synthesize a change narrative right now. "
+                "Open Activity to inspect "
                 "the source-linked run and workspace history."
             )
     else:
         answer = (
             "Satchy’s reasoning service is temporarily unavailable, but the TerraSatch Workspace "
             f"is still connected. I loaded {evidence_count} authorized field source(s), "
-            f"{provider_count} connected provider(s), and {capability_count} available capability/capabilities. "
+            f"{provider_count} connected provider(s), and "
+            f"{capability_count} available capability/capabilities. "
             "You can continue using Map, Activity, Integrations, Review, and Discovery while the "
             "reasoning service recovers."
         )
@@ -500,10 +510,7 @@ async def create_discovery_event(
             if site is None:
                 raise HTTPException(404, "Site not found")
 
-        if (
-            payload.event_type.startswith("workflow_")
-            and payload.workflow_key is None
-        ):
+        if payload.event_type.startswith("workflow_") and payload.workflow_key is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "workflow_key is required for workflow Discovery events",
@@ -812,10 +819,7 @@ async def records(session, organization_id):
 def _connection_scopes(connections) -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
     for connection in connections:
-        if (
-            connection.enabled
-            and connection.status == IntegrationStatus.CONNECTED.value
-        ):
+        if connection.enabled and connection.status == IntegrationStatus.CONNECTED.value:
             result.setdefault(connection.provider, set()).add(connection.scope_type)
     return result
 
@@ -876,9 +880,7 @@ _INTEGRATION_CONFIGURATION_FIELDS: dict[str, list[dict[str, object]]] = {
         {"key": "role", "type": "string", "required": False},
     ],
     "esri_arcgis": [{"key": "feature_layer_urls", "type": "list", "required": True}],
-    "arcgis_enterprise_public": [
-        {"key": "feature_layer_urls", "type": "list", "required": True}
-    ],
+    "arcgis_enterprise_public": [{"key": "feature_layer_urls", "type": "list", "required": True}],
     "caltopo": [
         {"key": "caltopo_team_id", "type": "string", "required": True},
         {"key": "map_ids", "type": "list", "required": False},
@@ -914,9 +916,14 @@ def _integration_setup(provider: dict[str, object]) -> dict[str, object]:
     if auth == "oauth2":
         detail = "Create the scoped connection, then authorize it with the provider."
     elif auth in {"service_account", "webhook_url"}:
-        detail = "Create the scoped connection, then save encrypted provider credentials and test it."
+        detail = (
+            "Create the scoped connection, then save encrypted provider credentials and test it."
+        )
     elif auth in {"public_https", "platform"}:
-        detail = "Provide the approved connection settings. TerraSatch validates the destination before use."
+        detail = (
+            "Provide the approved connection settings. "
+            "TerraSatch validates the destination before use."
+        )
     elif auth == "managed":
         detail = "Managed by TerraSatch. No customer credential setup is required."
     else:
@@ -1001,12 +1008,8 @@ async def workspace(organization_id: UUID, request: Request, response: Response)
             integration_scope = action_payload.get("integration_scope", "user")
             if requester == str(user.id):
                 visible_actions.append(action)
-            elif (
-                integration_scope == "organization"
-                or (
-                    integration_scope == "team"
-                    and role_allows(membership.role, MembershipRole.ADMIN)
-                )
+            elif integration_scope == "organization" or (
+                integration_scope == "team" and role_allows(membership.role, MembershipRole.ADMIN)
             ):
                 visible_actions.append(action)
         messages = list(
@@ -1129,8 +1132,7 @@ async def integration_catalog(organization_id: UUID, request: Request, response:
                 {
                     **connection_payload(connection),
                     "can_manage": (
-                        connection.scope_type == IntegrationScope.USER.value
-                        or admin_access
+                        connection.scope_type == IntegrationScope.USER.value or admin_access
                     ),
                 }
                 for connection in connections
@@ -1231,9 +1233,7 @@ async def query_integration(
         return jsonable_encoder(result)
 
 
-@router.post(
-    "/organizations/{organization_id}/integrations/{connection_id}/credentials"
-)
+@router.post("/organizations/{organization_id}/integrations/{connection_id}/credentials")
 async def configure_integration_credentials(
     organization_id: UUID,
     connection_id: UUID,
@@ -1253,10 +1253,7 @@ async def configure_integration_credentials(
             user_id=user.id,
             role=membership.role,
             connection_id=connection_id,
-            values={
-                key: value.get_secret_value()
-                for key, value in payload.values.items()
-            },
+            values={key: value.get_secret_value() for key, value in payload.values.items()},
         )
         await session.commit()
         return jsonable_encoder(connection_payload(connection))
@@ -1736,10 +1733,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
         )
         request_id = payload.request_id or uuid4()
         existing_by_id = await session.get(SatchyAction, request_id)
-        if (
-            existing_by_id is not None
-            and existing_by_id.organization_id != organization_id
-        ):
+        if existing_by_id is not None and existing_by_id.organization_id != organization_id:
             raise HTTPException(409, "Satchy request ID is already in use")
 
         subscription_context = dict(context.subscription or {})
@@ -1767,9 +1761,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                 or "That Satchy request already exists and is still being processed.",
                 "action_id": str(action.id) if action is not None else None,
                 "action_status": action.status if action is not None else None,
-                "approval_required": bool(
-                    action is not None and action.approval_required
-                ),
+                "approval_required": bool(action is not None and action.approval_required),
                 "run_id": str(run.id),
                 "run_status": run.status,
             }
@@ -1841,9 +1833,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
             ):
                 if planned_action.missing_context:
                     missing = ", ".join(planned_action.missing_context)
-                    answer = (
-                        f"I need {missing} before I can prepare that integration action."
-                    )
+                    answer = f"I need {missing} before I can prepare that integration action."
                     model = "satchy-integration-planner"
                     needs_input = True
                     await append_run_step(
@@ -1956,8 +1946,7 @@ async def chat(organization_id: UUID, payload: Chat, request: Request):
                     context=context,
                     message=payload.message,
                     history=[
-                        {"role": item.role, "content": item.content}
-                        for item in reversed(history)
+                        {"role": item.role, "content": item.content} for item in reversed(history)
                     ],
                 )
         except ProviderUnavailable:

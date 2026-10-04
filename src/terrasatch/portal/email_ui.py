@@ -88,6 +88,8 @@ def render_email_inbox(
             for item in mailbox_delegates
         ) or '<div class="preview">No explicit delegates.</div>'
         send_toggle = '<label style="display:flex;align-items:center;gap:7px"><input style="width:auto" type="checkbox" name="can_send">Allow send and reply</label>'
+        if mailbox.casefold() == "billing@terrasatch.com":
+            send_toggle = '<p class="preview">Billing access is view-only.</p>'
         access_sections.append(
             '<div style="padding:14px;border-bottom:1px solid var(--line)">'
             f'<strong>{escape(mailbox)}</strong>{delegate_rows}'

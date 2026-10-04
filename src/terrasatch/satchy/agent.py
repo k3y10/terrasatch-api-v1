@@ -451,6 +451,13 @@ async def answer_workspace(
     message: str,
     history: list[dict[str, str]] | None = None,
 ) -> tuple[str, str]:
+    from .updates import verified_update_answer
+
+    updates = verified_update_answer(context, message)
+    if updates is not None:
+        logger.info("satchy.workspace_grounded_rule", model=updates[1])
+        return updates
+
     if settings.intelligence_provider != "ollama":
         raise ProviderUnavailable("Satchy model service is not configured")
 

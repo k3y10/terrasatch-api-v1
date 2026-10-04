@@ -257,73 +257,11 @@ export type WorkspaceIntegrationCatalogItem = {
   support_status: "managed" | "supported" | "partner_required" | "coming_soon";
 };
 
-export type WorkspaceIntegrationSetupField = {
-  key: string;
-  required: boolean;
-  type?: "string" | "number" | "list";
-};
-
-export type WorkspaceIntegrationSetupGuidance = {
-  detail: string;
-  configuration_fields: WorkspaceIntegrationSetupField[];
-  credential_fields: WorkspaceIntegrationSetupField[];
-};
-
-export type WorkspaceIntegrationConnection = {
-  can_manage?: boolean;
-  configuration: Record<string, unknown>;
-  created_at: string;
-  display_name: string;
-  enabled: boolean;
-  id: string;
-  last_error: string | null;
-  last_synced_at: string | null;
-  owner_user_id: string | null;
-  provider: string;
-  provider_account_id: string | null;
-  provider_account_label: string | null;
-  provider_name: string;
-  scope: string;
-  status: string;
-  team_id: string | null;
-};
-
-export type WorkspaceIntegrationSetupCatalogItem =
-  WorkspaceIntegrationCatalogItem & {
-    connections: WorkspaceIntegrationConnection[];
-    setup: WorkspaceIntegrationSetupGuidance;
-  };
-
 export type WorkspaceIntegrationsResponse = {
   catalog: WorkspaceIntegrationCatalogItem[];
   connections: Record<string, unknown>[];
   devices: WorkspaceDeviceSummary[];
   engine: WorkspaceEngineSummary;
-};
-
-export type WorkspaceIntegrationCreateRequest = {
-  provider: string;
-  scope: "user" | "team" | "organization";
-  team_id?: string | null;
-  display_name?: string | null;
-  configuration?: Record<string, unknown>;
-};
-
-export type WorkspaceIntegrationAuthorizeResponse = {
-  connection: WorkspaceIntegrationConnection;
-  expires_at: string;
-  url: string;
-};
-
-export type WorkspaceIntegrationQueryRequest = {
-  capability:
-    | "map.features.query"
-    | "map.style.read"
-    | "data.query"
-    | "weather.forecast.read";
-  connection_id?: string | null;
-  workflow_key?: string | null;
-  payload?: Record<string, unknown>;
 };
 
 export type WorkspaceLoginResponse = {
@@ -417,6 +355,68 @@ export type WorkspaceUserSummary = {
   email: string;
   id: string;
   name: string;
+};
+
+export type WorkspaceIntegrationSetupField = {
+  key: string;
+  required: boolean;
+  type?: "string" | "number" | "list";
+};
+
+export type WorkspaceIntegrationSetupGuidance = {
+  detail: string;
+  configuration_fields: WorkspaceIntegrationSetupField[];
+  credential_fields: WorkspaceIntegrationSetupField[];
+};
+
+export type WorkspaceIntegrationConnection = {
+  can_manage?: boolean;
+  configuration: Record<string, unknown>;
+  created_at: string;
+  display_name: string;
+  enabled: boolean;
+  id: string;
+  last_error: string | null;
+  last_synced_at: string | null;
+  owner_user_id: string | null;
+  provider: string;
+  provider_account_id: string | null;
+  provider_account_label: string | null;
+  provider_name: string;
+  scope: string;
+  status: string;
+  team_id: string | null;
+};
+
+export type WorkspaceIntegrationSetupCatalogItem =
+  WorkspaceIntegrationCatalogItem & {
+    connections: WorkspaceIntegrationConnection[];
+    setup: WorkspaceIntegrationSetupGuidance;
+  };
+
+export type WorkspaceIntegrationCreateRequest = {
+  provider: string;
+  scope: "user" | "team" | "organization";
+  team_id?: string | null;
+  display_name?: string | null;
+  configuration?: Record<string, unknown>;
+};
+
+export type WorkspaceIntegrationAuthorizeResponse = {
+  connection: WorkspaceIntegrationConnection;
+  expires_at: string;
+  url: string;
+};
+
+export type WorkspaceIntegrationQueryRequest = {
+  capability:
+    | "map.features.query"
+    | "map.style.read"
+    | "data.query"
+    | "weather.forecast.read";
+  connection_id?: string | null;
+  workflow_key?: string | null;
+  payload?: Record<string, unknown>;
 };
 
 export type RealtimeTopic = "events" | "transmissions" | "transcripts";

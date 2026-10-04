@@ -192,6 +192,109 @@ def selected_schema_sha256(openapi: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_openapi_json(selected).encode()).hexdigest()
 
 
+# Preserve the integration lifecycle contract introduced by c6bd2af.
+# These endpoints currently use dictionary response schemas in OpenAPI.
+_INTEGRATION_TYPES = '''export type WorkspaceIntegrationSetupField = {
+  key: string;
+  required: boolean;
+  type?: "string" | "number" | "list";
+};
+
+export type WorkspaceIntegrationSetupGuidance = {
+  detail: string;
+  configuration_fields: WorkspaceIntegrationSetupField[];
+  credential_fields: WorkspaceIntegrationSetupField[];
+};
+
+export type WorkspaceIntegrationConnection = {
+  can_manage?: boolean;
+  configuration: Record<string, unknown>;
+  created_at: string;
+  display_name: string;
+  enabled: boolean;
+  id: string;
+  last_error: string | null;
+  last_synced_at: string | null;
+  owner_user_id: string | null;
+  provider: string;
+  provider_account_id: string | null;
+  provider_account_label: string | null;
+  provider_name: string;
+  scope: string;
+  status: string;
+  team_id: string | null;
+};
+
+export type WorkspaceIntegrationSetupCatalogItem =
+  WorkspaceIntegrationCatalogItem & {
+    connections: WorkspaceIntegrationConnection[];
+    setup: WorkspaceIntegrationSetupGuidance;
+  };
+
+export type WorkspaceIntegrationCreateRequest = {
+  provider: string;
+  scope: "user" | "team" | "organization";
+  team_id?: string | null;
+  display_name?: string | null;
+  configuration?: Record<string, unknown>;
+};
+
+export type WorkspaceIntegrationAuthorizeResponse = {
+  connection: WorkspaceIntegrationConnection;
+  expires_at: string;
+  url: string;
+};
+
+export type WorkspaceIntegrationQueryRequest = {
+  capability:
+    | "map.features.query"
+    | "map.style.read"
+    | "data.query"
+    | "weather.forecast.read";
+  connection_id?: string | null;
+  workflow_key?: string | null;
+  payload?: Record<string, unknown>;
+};
+
+'''
+
+_INTEGRATION_METHODS = '''  getWorkspaceIntegrationCatalog(
+    organizationId: string,
+  ): Promise<WorkspaceIntegrationSetupCatalogItem[]>;
+  createWorkspaceIntegration(
+    organizationId: string,
+    payload: WorkspaceIntegrationCreateRequest,
+    csrfToken: string,
+  ): Promise<WorkspaceIntegrationConnection>;
+  configureWorkspaceIntegrationCredentials(
+    organizationId: string,
+    connectionId: string,
+    values: Record<string, string>,
+    csrfToken: string,
+  ): Promise<WorkspaceIntegrationConnection>;
+  authorizeWorkspaceIntegration(
+    organizationId: string,
+    connectionId: string,
+    csrfToken: string,
+  ): Promise<WorkspaceIntegrationAuthorizeResponse>;
+  testWorkspaceIntegration(
+    organizationId: string,
+    connectionId: string,
+    csrfToken: string,
+  ): Promise<WorkspaceIntegrationConnection>;
+  revokeWorkspaceIntegration(
+    organizationId: string,
+    connectionId: string,
+    csrfToken: string,
+  ): Promise<WorkspaceIntegrationConnection>;
+  queryWorkspaceIntegration(
+    organizationId: string,
+    payload: WorkspaceIntegrationQueryRequest,
+    csrfToken: string,
+  ): Promise<Record<string, unknown>>;
+'''
+
+
 def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
     schemas = _selected_schemas(openapi)
     digest = selected_schema_sha256(openapi)
@@ -205,6 +308,8 @@ def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
         lines.append(f"export type {name} = {_typescript_type(schemas[name])};")
         lines.append("")
 
+    lines.extend(_INTEGRATION_TYPES.rstrip().splitlines())
+    lines.append("")
     lines.extend(
         [
             'export type RealtimeTopic = "events" | "transmissions" | "transcripts";',
@@ -267,6 +372,7 @@ def render_typescript_declarations(openapi: Mapping[str, Any]) -> str:
             "    payload: Observation,",
             "    csrfToken: string,",
             "  ): Promise<WorkspaceObservationResponse>;",
+            *_INTEGRATION_METHODS.rstrip().splitlines(),
             "  connectEvents(options?: {",
             "    token?: string;",
             "    topics?: RealtimeTopic[];",

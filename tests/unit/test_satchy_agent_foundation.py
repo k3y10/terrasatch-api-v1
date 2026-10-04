@@ -625,7 +625,7 @@ async def test_workspace_model_rejects_unsupported_causal_speculation(monkeypatc
         await answer_workspace(
             settings=settings,
             context=context,
-            message="Why did visibility decrease?",
+            message="Describe the reported conditions.",
             history=[],
         )
 
