@@ -28,7 +28,7 @@ from terrasatch.outbound import models as outbound_models
 from terrasatch.radio import models as radio_models
 from terrasatch.satchy import models as satchy_models
 from terrasatch.satchy.adaptation import observe_workspace_context
-from terrasatch.satchy.agent import answer_workspace, plan_integration_action, resolve_radio_intent
+from terrasatch.satchy.agent import (\n    answer_workspace,\n    plan_integration_action,\n    resolve_radio_intent,\n)
 from terrasatch.satchy.assets import (
     create_mission_plan,
     list_authorized_assets,
@@ -37,7 +37,7 @@ from terrasatch.satchy.assets import (
 from terrasatch.satchy.context import build_satchy_context
 from terrasatch.satchy.intents import resolve_intent
 from terrasatch.satchy.models import FieldAsset
-from terrasatch.satchy.schemas import ActiveMapContext, SatchyContext, SatchyIntent, WorkflowMode
+from terrasatch.satchy.schemas import (\n    ActiveMapContext,\n    SatchyContext,\n    SatchyIntent,\n    WorkflowMode,\n)
 from terrasatch.satchy.workflows import resolve_workflow
 from terrasatch.workspace import models as workspace_models
 from terrasatch.workspace.models import WorkspacePreference
@@ -395,7 +395,7 @@ async def test_context_requires_current_membership_and_preserves_explicit_map_co
 
 
 @pytest.mark.asyncio
-async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(monkeypatch) -> None:
+async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(\n    monkeypatch,\n) -> None:
     captured: dict[str, object] = {}
 
     class FakeAsyncClient:
@@ -459,7 +459,7 @@ async def test_workspace_model_is_bounded_and_explicitly_forbids_speculation(mon
     assert isinstance(messages, list)
     system_prompt = messages[0]["content"]
     assert "cause cannot be determined from the available evidence" in system_prompt
-    assert 'Do not use speculative language such as "likely", "may", or "could"' in system_prompt
+    assert (\n        'Do not use speculative language such as "likely", "may", or "could"'\n        in system_prompt\n    )
 
 
 @pytest.mark.asyncio
